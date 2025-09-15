@@ -1,0 +1,6 @@
+# Development environment configuration
+api:
+  base_url: "http://localhost:8000"
+  
+logging:
+  level: DEBUG

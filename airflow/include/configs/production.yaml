@@ -1,0 +1,7 @@
+# Production environment configuration
+api:
+  base_url: "${BACKEND_API_URL}"
+  timeout: 600
+  
+logging:
+  level: INFO

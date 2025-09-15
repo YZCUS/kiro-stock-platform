@@ -1,0 +1,16 @@
+# Base configuration for all environments
+api:
+  timeout: 300
+  retry_attempts: 3
+  
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+dag_defaults:
+  owner: "stock-analysis-platform"
+  depends_on_past: false
+  email_on_failure: false
+  email_on_retry: false
+  retries: 2
+  catchup: false
