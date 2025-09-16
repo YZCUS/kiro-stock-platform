@@ -2,9 +2,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
+import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
+import Button from '../ui/Button';
+import Input from '../ui/Input';
 import { 
   Search, 
   Filter, 
@@ -50,8 +50,10 @@ const StockList: React.FC<StockListProps> = ({
 
   useEffect(() => {
     dispatch(fetchStocks({
-      market: marketFilter === 'ALL' ? undefined : marketFilter,
-      active_only: true
+      filters: {
+        market: marketFilter === 'ALL' ? undefined : marketFilter,
+        active_only: true
+      }
     }));
   }, [dispatch, marketFilter]);
 

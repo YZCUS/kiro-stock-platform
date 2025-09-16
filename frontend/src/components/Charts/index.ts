@@ -1,3 +1,5 @@
+export { default as SimpleCandlestickChart } from './SimpleCandlestickChart';
+export { default as SimpleMultiChart } from './SimpleMultiChart';
 export { default as CandlestickChart } from './CandlestickChart';
 export { default as LineChart } from './LineChart';
 export { default as TechnicalIndicatorChart } from './TechnicalIndicatorChart';

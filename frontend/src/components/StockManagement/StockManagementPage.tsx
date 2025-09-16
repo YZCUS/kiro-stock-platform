@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { Button } from '../ui/Button';
+import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
+import Button from '../ui/Button';
 import { Plus, Upload, Download, Trash2, RefreshCw } from 'lucide-react';
 import { Layout } from '../Layout';
 import StockSearchForm from './StockSearchForm';

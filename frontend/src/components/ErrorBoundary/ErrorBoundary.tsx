@@ -5,8 +5,8 @@
 
 import React, { Component, ReactNode } from 'react';
 import { AlertCircle, RefreshCw, Bug, Home } from 'lucide-react';
-import { Button } from '../ui/Button';
-import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
+import Button from '../ui/Button';
+import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
 
 interface ErrorInfo {
   componentStack: string;

@@ -31,7 +31,7 @@ const navigationItems = [
   },
   {
     name: '技術分析',
-    href: '/analysis',
+    href: '/charts',
     icon: BarChart3,
   },
   {

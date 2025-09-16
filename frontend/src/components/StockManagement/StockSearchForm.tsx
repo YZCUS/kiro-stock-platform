@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
-import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
+import Button from '../ui/Button';
+import Input from '../ui/Input';
+import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { Search, Plus, AlertCircle } from 'lucide-react';
 import { useDispatch } from 'react-redux';
 import { AppDispatch } from '../../store';
@@ -98,7 +98,7 @@ const StockSearchForm: React.FC<StockSearchFormProps> = ({
           {/* 市場選擇 */}
           <div className="flex gap-2">
             <Button
-              variant={selectedMarket === 'TW' ? 'default' : 'outline'}
+              variant={selectedMarket === 'TW' ? 'primary' : 'outline'}
               size="sm"
               onClick={() => setSelectedMarket('TW')}
               className="flex-1"
@@ -106,7 +106,7 @@ const StockSearchForm: React.FC<StockSearchFormProps> = ({
               台股
             </Button>
             <Button
-              variant={selectedMarket === 'US' ? 'default' : 'outline'}
+              variant={selectedMarket === 'US' ? 'primary' : 'outline'}
               size="sm"
               onClick={() => setSelectedMarket('US')}
               className="flex-1"

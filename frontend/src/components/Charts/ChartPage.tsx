@@ -3,8 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Layout } from '../Layout';
-import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { Button } from '../ui/Button';
+import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
+import Button from '../ui/Button';
 import { 
   ArrowLeft,
   BarChart3,
@@ -17,10 +17,9 @@ import {
 } from 'lucide-react';
 import { AppDispatch, RootState } from '../../store';
 import { fetchStock } from '../../store/slices/stocksSlice';
-import MultiChart from './MultiChart';
+import SimpleMultiChart from './SimpleMultiChart';
 import type { Stock } from '../../types';
-import type { CandleData } from './CandlestickChart';
-import type { LineDataPoint } from './LineChart';
+import type { ChartData as CandleData, LineDataPoint } from './SimpleMultiChart';
 
 export interface ChartPageProps {
   stockId: number;
@@ -270,7 +269,7 @@ const ChartPage: React.FC<ChartPageProps> = ({
                   {(['1D', '1W', '1M', '3M', '6M', '1Y'] as const).map((range) => (
                     <Button
                       key={range}
-                      variant={timeRange === range ? 'default' : 'outline'}
+                      variant={timeRange === range ? 'primary' : 'outline'}
                       size="sm"
                       onClick={() => setTimeRange(range)}
                     >
@@ -299,7 +298,7 @@ const ChartPage: React.FC<ChartPageProps> = ({
         </Card>
 
         {/* 多重圖表 */}
-        <MultiChart
+        <SimpleMultiChart
           symbol={selectedStock.symbol}
           candleData={chartData.candleData}
           indicators={chartData.indicators}

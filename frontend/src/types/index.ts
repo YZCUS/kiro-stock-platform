@@ -33,6 +33,7 @@ export interface TradingSignal {
   id: number;
   stock_id: number;
   symbol: string;
+  market: string;
   signal_type: 'BUY' | 'SELL' | 'HOLD' | 'GOLDEN_CROSS' | 'DEATH_CROSS';
   strength: 'WEAK' | 'MODERATE' | 'STRONG';
   price: number;
@@ -77,7 +78,7 @@ export interface SignalHistoryResponse {
 
 // WebSocket 消息類型
 export interface WebSocketMessage {
-  type: 'welcome' | 'initial_data' | 'price_update' | 'indicator_update' | 'signal_update' | 'market_status' | 'error' | 'pong';
+  type: 'welcome' | 'initial_data' | 'price_update' | 'indicator_update' | 'signal_update' | 'market_status' | 'stock_update' | 'market_update' | 'system_notification' | 'error' | 'pong';
   data?: any;
   message?: string;
   timestamp?: string;
@@ -204,30 +205,4 @@ export interface UserPreferences {
   };
 }
 
-// 導出所有類型
-export type {
-  Stock,
-  PriceData,
-  TechnicalIndicator,
-  TradingSignal,
-  ApiResponse,
-  PaginatedResponse,
-  StockDataResponse,
-  SignalHistoryResponse,
-  WebSocketMessage,
-  WebSocketSubscription,
-  ChartData,
-  IndicatorSeries,
-  ChartConfig,
-  StockCreateForm,
-  StockBatchCreateForm,
-  LoadingState,
-  NotificationState,
-  StockFilter,
-  SignalFilter,
-  DateRange,
-  MarketStatus,
-  MarketStats,
-  ApiError,
-  UserPreferences,
-};
+// Types are already exported via interface declarations above

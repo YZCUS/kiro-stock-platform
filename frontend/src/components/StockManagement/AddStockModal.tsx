@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Modal } from '../ui/Modal';
-import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
+import Modal from '../ui/Modal';
+import Button from '../ui/Button';
+import Input from '../ui/Input';
 import { AlertCircle, Plus, Loader2 } from 'lucide-react';
 import { useDispatch } from 'react-redux';
 import { AppDispatch } from '../../store';
@@ -124,7 +124,6 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
       isOpen={isOpen}
       onClose={handleClose}
       title="新增股票"
-      description="請輸入股票資訊來新增到追蹤清單"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* 市場選擇 */}
@@ -135,7 +134,7 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
           <div className="flex gap-2">
             <Button
               type="button"
-              variant={formData.market === 'TW' ? 'default' : 'outline'}
+              variant={formData.market === 'TW' ? 'primary' : 'outline'}
               size="sm"
               onClick={() => setFormData(prev => ({ ...prev, market: 'TW' }))}
               disabled={isSubmitting}
@@ -145,7 +144,7 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
             </Button>
             <Button
               type="button"
-              variant={formData.market === 'US' ? 'default' : 'outline'}
+              variant={formData.market === 'US' ? 'primary' : 'outline'}
               size="sm"
               onClick={() => setFormData(prev => ({ ...prev, market: 'US' }))}
               disabled={isSubmitting}

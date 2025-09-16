@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
+import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
+import Button from '../ui/Button';
+import Input from '../ui/Input';
 import { 
   Bell,
   TrendingUp,

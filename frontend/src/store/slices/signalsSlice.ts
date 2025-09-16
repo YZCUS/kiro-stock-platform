@@ -120,7 +120,10 @@ export const detectStockSignals = createAsyncThunk(
     saveResults?: boolean;
   }) => {
     const { stockId, ...otherParams } = params;
-    const response = await signalsApi.detectStockSignals(stockId, otherParams);
+    const response = await signalsApi.detectStockSignals(stockId, {
+      signal_types: otherParams.signalTypes,
+      save_results: otherParams.saveResults,
+    });
     return { stockId, signals: response };
   }
 );
@@ -200,10 +203,24 @@ const signalsSlice = createSlice({
         state.loading = false;
         state.signals = action.payload.signals || action.payload;
         if (action.payload.pagination) {
-          state.pagination = action.payload.pagination;
+          const pagination = action.payload.pagination;
+          state.pagination = {
+            page: pagination.page,
+            pageSize: pagination.page_size,
+            total: pagination.total,
+            totalPages: pagination.total_pages,
+          };
         }
         if (action.payload.stats) {
-          state.stats = action.payload.stats;
+          const stats = action.payload.stats;
+          state.stats = {
+            total_signals: stats.total_signals || 0,
+            buy_signals: stats.buy_signals || 0,
+            sell_signals: stats.sell_signals || 0,
+            hold_signals: stats.hold_signals || 0,
+            cross_signals: stats.cross_signals || 0,
+            avg_confidence: stats.avg_confidence || 0,
+          };
         }
       })
       .addCase(fetchSignals.rejected, (state, action) => {

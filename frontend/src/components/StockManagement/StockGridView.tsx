@@ -2,9 +2,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Card, CardContent } from '../ui/Card';
-import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
+import Card, { CardContent } from '../ui/Card';
+import Button from '../ui/Button';
+import Input from '../ui/Input';
 import { 
   Search, 
   Filter, 
@@ -180,14 +180,14 @@ const StockGridView: React.FC<StockGridViewProps> = ({
             {onViewModeChange && (
               <div className="flex gap-1 border rounded-lg p-1">
                 <Button
-                  variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                  variant={viewMode === 'grid' ? 'primary' : 'ghost'}
                   size="sm"
                   onClick={() => onViewModeChange('grid')}
                 >
                   <Grid3X3 className="w-4 h-4" />
                 </Button>
                 <Button
-                  variant={viewMode === 'list' ? 'default' : 'ghost'}
+                  variant={viewMode === 'list' ? 'primary' : 'ghost'}
                   size="sm"
                   onClick={() => onViewModeChange('list')}
                 >

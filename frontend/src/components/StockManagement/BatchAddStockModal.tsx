@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Modal } from '../ui/Modal';
-import { Button } from '../ui/Button';
+import Modal from '../ui/Modal';
+import Button from '../ui/Button';
 import { AlertCircle, Upload, Loader2, X, Plus } from 'lucide-react';
 import { useDispatch } from 'react-redux';
 import { AppDispatch } from '../../store';
@@ -19,7 +19,7 @@ interface StockInput {
   symbol: string;
   market: 'TW' | 'US';
   name: string;
-  error?: string;
+  error?: string | null;
 }
 
 const BatchAddStockModal: React.FC<BatchAddStockModalProps> = ({
@@ -185,7 +185,6 @@ const BatchAddStockModal: React.FC<BatchAddStockModalProps> = ({
       isOpen={isOpen}
       onClose={handleClose}
       title="批次新增股票"
-      description="一次新增多支股票到追蹤清單"
       size="lg"
     >
       <div className="space-y-4">
@@ -193,7 +192,7 @@ const BatchAddStockModal: React.FC<BatchAddStockModalProps> = ({
         <div className="flex gap-2">
           <Button
             type="button"
-            variant={inputMode === 'form' ? 'default' : 'outline'}
+            variant={inputMode === 'form' ? 'primary' : 'outline'}
             size="sm"
             onClick={() => setInputMode('form')}
             disabled={isSubmitting}
@@ -202,7 +201,7 @@ const BatchAddStockModal: React.FC<BatchAddStockModalProps> = ({
           </Button>
           <Button
             type="button"
-            variant={inputMode === 'text' ? 'default' : 'outline'}
+            variant={inputMode === 'text' ? 'primary' : 'outline'}
             size="sm"
             onClick={() => setInputMode('text')}
             disabled={isSubmitting}

@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { Button } from '../ui/Button';
+import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
+import Button from '../ui/Button';
 import { 
   BarChart3, 
   TrendingUp, 

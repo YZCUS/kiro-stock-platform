@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import { 
-  createChart, 
-  IChartApi, 
-  ICandlestickSeries,
+import {
+  createChart,
+  IChartApi,
   ISeriesApi,
   CandlestickData,
   Time,
@@ -12,8 +11,8 @@ import {
   CrosshairMode,
   LineStyle
 } from 'lightweight-charts';
-import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { Button } from '../ui/Button';
+import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
+import Button from '../ui/Button';
 import { 
   Bell,
   TrendingUp,
@@ -61,7 +60,7 @@ const SignalChart: React.FC<SignalChartProps> = ({
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const candlestickSeriesRef = useRef<ICandlestickSeries | null>(null);
+  const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const buySeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const sellSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
 

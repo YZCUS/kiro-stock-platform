@@ -54,6 +54,11 @@ export interface ApiClientConfig extends CreateAxiosDefaults {
   cacheTimeout?: number;
 }
 
+interface ExtendedAxiosRequestConfig extends InternalAxiosRequestConfig {
+  metadata?: { startTime: number };
+  retryCount?: number;
+}
+
 class ApiClient {
   private instance: AxiosInstance;
   private retryConfig: RetryConfig;
@@ -98,7 +103,7 @@ class ApiClient {
   private setupInterceptors() {
     // 請求攔截器
     this.instance.interceptors.request.use(
-      (config: InternalAxiosRequestConfig) => {
+      (config: ExtendedAxiosRequestConfig) => {
         // 添加請求開始時間用於監控
         config.metadata = { startTime: Date.now() };
 
@@ -131,7 +136,7 @@ class ApiClient {
     // 響應攔截器
     this.instance.interceptors.response.use(
       (response: AxiosResponse) => {
-        const config = response.config as InternalAxiosRequestConfig & { metadata?: any };
+        const config = response.config as ExtendedAxiosRequestConfig;
         
         // 監控響應時間
         if (this.enableMonitoring && config.metadata?.startTime) {
@@ -156,13 +161,18 @@ class ApiClient {
           });
         }
 
-        return this.normalizeResponse(response);
+        // For interceptor, we need to modify response.data, not return a different structure
+        if (response.data && typeof response.data === 'object' && !('success' in response.data)) {
+          response.data = {
+            data: response.data,
+            success: true,
+            message: 'Request successful',
+          };
+        }
+        return response;
       },
       async (error: AxiosError) => {
-        const config = error.config as InternalAxiosRequestConfig & { 
-          metadata?: any; 
-          retryCount?: number 
-        };
+        const config = error.config as ExtendedAxiosRequestConfig;
 
         // 監控錯誤
         if (this.enableMonitoring) {
@@ -190,7 +200,7 @@ class ApiClient {
     );
   }
 
-  private shouldRetry(error: AxiosError, config?: InternalAxiosRequestConfig): boolean {
+  private shouldRetry(error: AxiosError, config?: ExtendedAxiosRequestConfig): boolean {
     if (!config) return false;
     
     const retryCount = config.retryCount || 0;
@@ -204,7 +214,7 @@ class ApiClient {
   }
 
   private async retryRequest(error: AxiosError): Promise<AxiosResponse> {
-    const config = error.config as InternalAxiosRequestConfig & { retryCount?: number };
+    const config = error.config as ExtendedAxiosRequestConfig;
     
     config.retryCount = (config.retryCount || 0) + 1;
     
@@ -285,7 +295,7 @@ class ApiClient {
     return messages[status] || '未知錯誤';
   }
 
-  private getCacheKey(config: InternalAxiosRequestConfig): string {
+  private getCacheKey(config: ExtendedAxiosRequestConfig): string {
     const { url, params } = config;
     return `${url}:${JSON.stringify(params || {})}`;
   }
@@ -301,23 +311,28 @@ class ApiClient {
 
   // 公開方法
   public async get<T = any>(url: string, config?: any): Promise<ApiResponse<T>> {
-    return this.instance.get(url, config);
+    const response = await this.instance.get(url, config);
+    return response.data;
   }
 
   public async post<T = any>(url: string, data?: any, config?: any): Promise<ApiResponse<T>> {
-    return this.instance.post(url, data, config);
+    const response = await this.instance.post(url, data, config);
+    return response.data;
   }
 
   public async put<T = any>(url: string, data?: any, config?: any): Promise<ApiResponse<T>> {
-    return this.instance.put(url, data, config);
+    const response = await this.instance.put(url, data, config);
+    return response.data;
   }
 
   public async patch<T = any>(url: string, data?: any, config?: any): Promise<ApiResponse<T>> {
-    return this.instance.patch(url, data, config);
+    const response = await this.instance.patch(url, data, config);
+    return response.data;
   }
 
   public async delete<T = any>(url: string, config?: any): Promise<ApiResponse<T>> {
-    return this.instance.delete(url, config);
+    const response = await this.instance.delete(url, config);
+    return response.data;
   }
 
   // 快取管理

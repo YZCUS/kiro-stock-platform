@@ -11,8 +11,8 @@ import {
   CrosshairMode,
   LineStyle
 } from 'lightweight-charts';
-import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { Button } from '../ui/Button';
+import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
+import Button from '../ui/Button';
 import { 
   TrendingUp, 
   Settings, 

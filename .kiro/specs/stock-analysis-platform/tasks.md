@@ -65,8 +65,8 @@
     - 建立信號通知和警報功能
     - _需求: 4.3, 4.6_
 
-- [ ] 6. 建立FastAPI後端API服務
-  - [ ] 6.1 實作股票管理API端點
+- [x] 6. 建立FastAPI後端API服務
+  - [x] 6.1 實作股票管理API端點
     - 建立API路由器和端點結構（/api/v1/stocks）
     - 實作POST /api/v1/stocks（新增股票）
     - 實作DELETE /api/v1/stocks/{stock_id}（刪除股票）
@@ -75,43 +75,43 @@
     - 建立請求/響應模型和驗證邏輯
     - _需求: 1.1, 1.2, 1.3, 1.5_
 
-  - [ ] 6.2 實作數據查詢API端點
-    - 建立GET /api/v1/stocks/{symbol}/data（獲取股票數據）
-    - 實作GET /api/v1/stocks/{symbol}/indicators（獲取技術指標）
-    - 實作POST /api/v1/stocks/{symbol}/refresh（手動更新數據）
+  - [x] 6.2 實作數據查詢API端點
+    - 建立GET /api/v1/stocks/{stock_id}/data（獲取股票數據）
+    - 實作GET /api/v1/stocks/{stock_id}/indicators（獲取技術指標）
+    - 實作POST /api/v1/stocks/{stock_id}/refresh（手動更新數據）
     - 建立分頁和時間範圍查詢功能
     - _需求: 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6_
 
-  - [ ] 6.3 實作交易信號API端點
+  - [x] 6.3 實作交易信號API端點
     - 建立GET /api/v1/stocks/{symbol}/signals（獲取交易信號）
     - 實作GET /api/v1/signals/history（獲取信號歷史）
     - 實作信號過濾、排序和分頁功能
     - 建立信號統計和摘要端點
     - _需求: 4.1, 4.2, 4.5_
 
-  - [ ] 6.4 建立WebSocket即時數據服務
+  - [x] 6.4 建立WebSocket即時數據服務
     - 實作WebSocket連接管理器
     - 建立WS /ws/stocks/{symbol}即時數據推送
     - 實作客戶端訂閱/取消訂閱機制
     - 建立數據更新的即時廣播功能
     - _需求: 5.6_
 
-- [ ] 7. 建立React前端應用
-  - [ ] 7.1 建立核心前端架構和組件
+- [x] 7. 建立React前端應用
+  - [x] 7.1 建立核心前端架構和組件
     - 建立基礎Layout和Navigation組件
     - 實作路由結構和頁面組件
     - 建立共用UI組件庫（Button、Input、Modal等）
     - 設定TypeScript類型定義
     - _需求: 5.1, 5.2_
 
-  - [ ] 7.2 實作股票管理介面
+  - [x] 7.2 實作股票管理介面
     - 建立股票搜尋和新增功能組件
     - 實作股票清單顯示和管理介面
     - 建立股票刪除和批次操作功能
     - 實作股票資訊卡片和詳細頁面
     - _需求: 1.1, 1.2, 1.4, 1.5, 1.6_
 
-  - [ ] 7.3 整合TradingView圖表庫
+  - [x] 7.3 整合TradingView圖表庫
     - 安裝和配置TradingView Lightweight Charts
     - 建立K線圖顯示組件
     - 實作技術指標的圖表疊加功能

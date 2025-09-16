@@ -12,6 +12,7 @@ from services.data.collection import data_collection_service
 from services.data.validation import data_validation_service
 from models.repositories.crud_stock import stock_crud
 from models.repositories.crud_price_history import price_history_crud
+from models.repositories.crud_trading_signal import trading_signal_crud
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -47,6 +48,21 @@ class StockCreateRequest(BaseModel):
 
 class StockBatchCreateRequest(BaseModel):
     stocks: List[StockCreateRequest]
+
+
+class TradingSignalResponse(BaseModel):
+    id: int
+    stock_id: int
+    symbol: str
+    signal_type: str
+    strength: str
+    confidence: float
+    price: float
+    generated_at: datetime
+    description: Optional[str] = None
+
+    class Config:
+        from_attributes = True
     
 
 class StockUpdateRequest(BaseModel):
@@ -636,12 +652,68 @@ async def search_stocks(
         raise HTTPException(status_code=500, detail=f"搜尋股票失敗: {str(e)}")
 
 
+@router.get("/{symbol}/signals", response_model=List[TradingSignalResponse])
+async def get_stock_signals_by_symbol(
+    symbol: str,
+    market: Optional[str] = Query(None, description="市場代碼 (TW/US)"),
+    signal_type: Optional[str] = Query(None, description="信號類型"),
+    days: int = Query(30, ge=1, le=365, description="歷史天數"),
+    limit: int = Query(50, ge=1, le=200, description="返回數量限制"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    根據股票代號取得交易信號
+    """
+    try:
+        # 先根據symbol找到股票
+        stock = await stock_crud.get_by_symbol_and_market(db, symbol.upper(), market or "TW")
+        if not stock:
+            raise HTTPException(status_code=404, detail=f"股票 {symbol} 不存在")
+
+        # 建立查詢條件
+        filters = {"stock_id": stock.id}
+        if signal_type:
+            filters["signal_type"] = signal_type
+
+        # 取得交易信號
+        signals = await trading_signal_crud.get_stock_signals(
+            db,
+            stock_id=stock.id,
+            filters=filters,
+            days=days,
+            limit=limit
+        )
+
+        # 為每個信號添加股票代號
+        response_signals = []
+        for signal in signals:
+            signal_dict = {
+                "id": signal.id,
+                "stock_id": signal.stock_id,
+                "symbol": stock.symbol,
+                "signal_type": signal.signal_type,
+                "strength": signal.strength,
+                "confidence": signal.confidence,
+                "price": float(signal.price),
+                "generated_at": signal.generated_at,
+                "description": signal.description
+            }
+            response_signals.append(TradingSignalResponse(**signal_dict))
+
+        return response_signals
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"取得交易信號失敗: {str(e)}")
+
+
 def _validate_symbol_format(symbol: str, market: str) -> bool:
     """
     驗證股票代號格式
     """
     import re
-    
+
     if market.upper() == "TW":
         # 台股格式: 4位數字 + .TW (例如: 2330.TW)
         pattern = r'^\d{4}\.TW$'
@@ -650,5 +722,5 @@ def _validate_symbol_format(symbol: str, market: str) -> bool:
         # 美股格式: 1-5位英文字母 (例如: AAPL, GOOGL)
         pattern = r'^[A-Z]{1,5}$'
         return bool(re.match(pattern, symbol.upper()))
-    
+
     return False

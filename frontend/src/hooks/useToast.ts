@@ -10,15 +10,16 @@ export const useToast = () => {
   const dispatch = useAppDispatch();
 
   const toast = useCallback((message: Omit<ToastMessage, 'id'>) => {
-    const id = dispatch(addToast(message)).meta.requestId;
-    
+    const result = dispatch(addToast(message));
+    const id = Date.now().toString(); // Fallback ID
+
     // 自動移除 toast
     if (message.duration !== 0) {
       setTimeout(() => {
         dispatch(removeToast(id));
       }, message.duration || 5000);
     }
-    
+
     return id;
   }, [dispatch]);
 

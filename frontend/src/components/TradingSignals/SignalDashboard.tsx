@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { Button } from '../ui/Button';
+import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
+import Button from '../ui/Button';
 import { 
   Bell,
   TrendingUp,
@@ -255,7 +255,7 @@ const SignalDashboard: React.FC<SignalDashboardProps> = ({
                   {(['today', 'week', 'month'] as const).map((range) => (
                     <Button
                       key={range}
-                      variant={timeRange === range ? 'default' : 'outline'}
+                      variant={timeRange === range ? 'primary' : 'outline'}
                       size="sm"
                       onClick={() => setTimeRange(range)}
                     >

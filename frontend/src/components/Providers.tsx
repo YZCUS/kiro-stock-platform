@@ -29,6 +29,9 @@ const AppInitializer: React.FC<{ children: React.ReactNode }> = ({ children }) =
   const dispatch = useAppDispatch();
 
   useEffect(() => {
+    // 確保只在客戶端執行
+    if (typeof window === 'undefined') return;
+
     // 初始化應用程式
     dispatch(initializeApp());
 
@@ -42,7 +45,7 @@ const AppInitializer: React.FC<{ children: React.ReactNode }> = ({ children }) =
     };
 
     // 延遲初始化 WebSocket，確保應用程式已經初始化
-    setTimeout(initWebSocket, 1000);
+    const timeoutId = setTimeout(initWebSocket, 1000);
 
     // 監聽網路狀態
     const handleOnline = () => {
@@ -90,13 +93,14 @@ const AppInitializer: React.FC<{ children: React.ReactNode }> = ({ children }) =
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      clearTimeout(timeoutId);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       events.forEach(event => {
         document.removeEventListener(event, handleUserActivity, true);
       });
-      
+
       // 清理 WebSocket 連接
       websocketManager.disconnect();
     };

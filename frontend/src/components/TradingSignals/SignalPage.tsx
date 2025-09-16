@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Layout } from '../Layout';
-import { Button } from '../ui/Button';
+import Button from '../ui/Button';
 import { 
   Bell,
   BarChart3,
@@ -32,7 +32,7 @@ const SignalPage: React.FC = () => {
   useEffect(() => {
     dispatch(fetchAllSignals({
       page: 1,
-      page_size: 100,
+      pageSize: 100,
       // 可以添加更多篩選條件
     }));
   }, [dispatch]);
@@ -119,7 +119,7 @@ const SignalPage: React.FC = () => {
   const handleRefresh = () => {
     dispatch(fetchAllSignals({
       page: 1,
-      page_size: 100,
+      pageSize: 100,
     }));
   };
 
@@ -186,7 +186,7 @@ const SignalPage: React.FC = () => {
         <div className="flex items-center justify-between">
           <div className="flex gap-1 border rounded-lg p-1">
             <Button
-              variant={viewMode === 'dashboard' ? 'default' : 'ghost'}
+              variant={viewMode === 'dashboard' ? 'primary' : 'ghost'}
               size="sm"
               onClick={() => setViewMode('dashboard')}
             >
@@ -194,7 +194,7 @@ const SignalPage: React.FC = () => {
               儀表板
             </Button>
             <Button
-              variant={viewMode === 'list' ? 'default' : 'ghost'}
+              variant={viewMode === 'list' ? 'primary' : 'ghost'}
               size="sm"
               onClick={() => setViewMode('list')}
             >
@@ -202,7 +202,7 @@ const SignalPage: React.FC = () => {
               信號清單
             </Button>
             <Button
-              variant={viewMode === 'chart' ? 'default' : 'ghost'}
+              variant={viewMode === 'chart' ? 'primary' : 'ghost'}
               size="sm"
               onClick={() => setViewMode('chart')}
             >

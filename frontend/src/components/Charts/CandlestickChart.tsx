@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { 
-  createChart, 
-  IChartApi, 
-  ICandlestickSeries,
+import {
+  createChart,
+  IChartApi,
   ISeriesApi,
   CandlestickData,
   Time,
@@ -13,8 +12,8 @@ import {
   LineStyle,
   PriceScaleMode
 } from 'lightweight-charts';
-import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { Button } from '../ui/Button';
+import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
+import Button from '../ui/Button';
 import { 
   TrendingUp, 
   Settings, 
@@ -56,7 +55,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const candlestickSeriesRef = useRef<ICandlestickSeries | null>(null);
+  const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -139,10 +138,6 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           type: 'volume',
         },
         priceScaleId: 'volume',
-        scaleMargins: {
-          top: 0.7,
-          bottom: 0,
-        },
       });
 
       volumeSeriesRef.current = volumeSeries;
@@ -212,9 +207,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       const timeScale = chartRef.current.timeScale();
       const visibleRange = timeScale.getVisibleRange();
       if (visibleRange) {
-        const range = visibleRange.to - visibleRange.from;
+        const range = Number(visibleRange.to) - Number(visibleRange.from);
         const newRange = range * 0.8; // 縮小 20%
-        const center = (visibleRange.from + visibleRange.to) / 2;
+        const center = (Number(visibleRange.from) + Number(visibleRange.to)) / 2;
         timeScale.setVisibleRange({
           from: (center - newRange / 2) as Time,
           to: (center + newRange / 2) as Time,
@@ -228,9 +223,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       const timeScale = chartRef.current.timeScale();
       const visibleRange = timeScale.getVisibleRange();
       if (visibleRange) {
-        const range = visibleRange.to - visibleRange.from;
+        const range = Number(visibleRange.to) - Number(visibleRange.from);
         const newRange = range * 1.2; // 放大 20%
-        const center = (visibleRange.from + visibleRange.to) / 2;
+        const center = (Number(visibleRange.from) + Number(visibleRange.to)) / 2;
         timeScale.setVisibleRange({
           from: (center - newRange / 2) as Time,
           to: (center + newRange / 2) as Time,
