@@ -1,363 +1,295 @@
 /**
- * UI 狀態管理
+ * UI 狀態管理 Redux Slice
  */
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { NotificationState, ToastMessage, LoadingState } from '../../types';
 
-export interface ToastMessage {
-  id: string;
-  type: 'success' | 'error' | 'warning' | 'info';
-  title: string;
-  message?: string;
-  duration?: number;
-  actions?: Array<{
-    label: string;
-    action: () => void;
-  }>;
-}
-
-export interface Modal {
-  id: string;
-  component: string;
-  props?: Record<string, any>;
-  options?: {
-    closeOnOverlayClick?: boolean;
-    showCloseButton?: boolean;
-    size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
-  };
-}
-
+// UI 相關狀態介面
 interface UIState {
-  // 側邊欄狀態
+  // 通知系統
+  notifications: NotificationState[];
+  toasts: ToastMessage[];
+
+  // 載入狀態
+  globalLoading: boolean;
+  loadingStates: Record<string, LoadingState>;
+
+  // 模態框和彈窗
+  modals: {
+    stockCreate: boolean;
+    stockEdit: boolean;
+    stockDelete: boolean;
+    signalDetails: boolean;
+    chartSettings: boolean;
+  };
+
+  // 側邊欄和導航
   sidebar: {
     isOpen: boolean;
-    isCollapsed: boolean;
-    activeSection: string;
+    activeTab: string;
   };
-  
-  // 主題設定
-  theme: {
-    mode: 'light' | 'dark' | 'auto';
-    primaryColor: string;
-    fontSize: 'sm' | 'md' | 'lg';
+
+  // 主題和外觀
+  theme: 'light' | 'dark' | 'auto';
+
+  // 表格和列表設置
+  tableSettings: {
+    pageSize: number;
+    sortBy: string;
+    sortOrder: 'asc' | 'desc';
   };
-  
-  // 載入狀態
-  loading: {
-    global: boolean;
-    components: Record<string, boolean>;
-  };
-  
-  // Toast 通知
-  toasts: ToastMessage[];
-  
-  // Modal 狀態
-  modals: Modal[];
-  
-  // 頁面設定
-  page: {
-    title: string;
-    breadcrumbs: Array<{ label: string; href?: string }>;
-    actions: Array<{
-      label: string;
-      icon?: string;
-      variant?: 'primary' | 'secondary' | 'outline';
-      action: () => void;
-    }>;
-  };
-  
-  // 偏好設定
-  preferences: {
-    language: 'zh-TW' | 'en-US';
-    dateFormat: string;
-    timeFormat: '12h' | '24h';
-    currency: 'TWD' | 'USD';
+
+  // 圖表設置
+  chartSettings: {
+    timeframe: string;
+    enabledIndicators: string[];
     autoRefresh: boolean;
-    refreshInterval: number; // seconds
-    notifications: {
-      enabled: boolean;
-      sound: boolean;
-      desktop: boolean;
-      email: boolean;
-    };
-    dashboard: {
-      layout: 'grid' | 'list';
-      itemsPerPage: number;
-      defaultTimeRange: '1D' | '1W' | '1M' | '3M' | '6M' | '1Y';
-    };
+    refreshInterval: number; // 秒
   };
-  
-  // 錯誤狀態
+
+  // WebSocket 連接狀態
+  websocket: {
+    connected: boolean;
+    reconnecting: boolean;
+    lastConnected: string | null;
+    connectionError: string | null;
+  };
+
+  // 錯誤處理
   errors: {
     global: string | null;
-    components: Record<string, string | null>;
+    api: Record<string, string>;
   };
 }
 
+// 初始狀態
 const initialState: UIState = {
+  notifications: [],
+  toasts: [],
+  globalLoading: false,
+  loadingStates: {},
+  modals: {
+    stockCreate: false,
+    stockEdit: false,
+    stockDelete: false,
+    signalDetails: false,
+    chartSettings: false,
+  },
   sidebar: {
     isOpen: true,
-    isCollapsed: false,
-    activeSection: 'dashboard',
+    activeTab: 'stocks',
   },
-  
-  theme: {
-    mode: 'light',
-    primaryColor: '#3b82f6',
-    fontSize: 'md',
+  theme: 'light',
+  tableSettings: {
+    pageSize: 20,
+    sortBy: 'created_at',
+    sortOrder: 'desc',
   },
-  
-  loading: {
-    global: false,
-    components: {},
-  },
-  
-  toasts: [],
-  
-  modals: [],
-  
-  page: {
-    title: '',
-    breadcrumbs: [],
-    actions: [],
-  },
-  
-  preferences: {
-    language: 'zh-TW',
-    dateFormat: 'YYYY-MM-DD',
-    timeFormat: '24h',
-    currency: 'TWD',
+  chartSettings: {
+    timeframe: '1D',
+    enabledIndicators: ['SMA', 'RSI'],
     autoRefresh: true,
     refreshInterval: 30,
-    notifications: {
-      enabled: true,
-      sound: true,
-      desktop: true,
-      email: false,
-    },
-    dashboard: {
-      layout: 'grid',
-      itemsPerPage: 20,
-      defaultTimeRange: '1M',
-    },
   },
-  
+  websocket: {
+    connected: false,
+    reconnecting: false,
+    lastConnected: null,
+    connectionError: null,
+  },
   errors: {
     global: null,
-    components: {},
+    api: {},
   },
 };
 
+// Slice 定義
 const uiSlice = createSlice({
   name: 'ui',
   initialState,
   reducers: {
-    // 側邊欄控制
-    toggleSidebar: (state) => {
-      state.sidebar.isOpen = !state.sidebar.isOpen;
+    // 通知管理
+    addNotification: (state, action: PayloadAction<Omit<NotificationState, 'id' | 'timestamp'>>) => {
+      const notification: NotificationState = {
+        ...action.payload,
+        id: Date.now().toString(),
+        timestamp: Date.now(),
+      };
+      state.notifications.push(notification);
     },
-    
-    setSidebarOpen: (state, action: PayloadAction<boolean>) => {
-      state.sidebar.isOpen = action.payload;
+    removeNotification: (state, action: PayloadAction<string>) => {
+      state.notifications = state.notifications.filter(n => n.id !== action.payload);
     },
-    
-    toggleSidebarCollapse: (state) => {
-      state.sidebar.isCollapsed = !state.sidebar.isCollapsed;
+    clearNotifications: (state) => {
+      state.notifications = [];
     },
-    
-    setSidebarCollapsed: (state, action: PayloadAction<boolean>) => {
-      state.sidebar.isCollapsed = action.payload;
-    },
-    
-    setActiveSection: (state, action: PayloadAction<string>) => {
-      state.sidebar.activeSection = action.payload;
-    },
-    
-    // 主題控制
-    setThemeMode: (state, action: PayloadAction<'light' | 'dark' | 'auto'>) => {
-      state.theme.mode = action.payload;
-    },
-    
-    setPrimaryColor: (state, action: PayloadAction<string>) => {
-      state.theme.primaryColor = action.payload;
-    },
-    
-    setFontSize: (state, action: PayloadAction<'sm' | 'md' | 'lg'>) => {
-      state.theme.fontSize = action.payload;
-    },
-    
-    // 載入狀態控制
-    setGlobalLoading: (state, action: PayloadAction<boolean>) => {
-      state.loading.global = action.payload;
-    },
-    
-    setComponentLoading: (state, action: PayloadAction<{ component: string; loading: boolean }>) => {
-      const { component, loading } = action.payload;
-      state.loading.components[component] = loading;
-    },
-    
-    clearComponentLoading: (state, action: PayloadAction<string>) => {
-      delete state.loading.components[action.payload];
-    },
-    
-    // Toast 控制
+
+    // Toast 消息管理
     addToast: (state, action: PayloadAction<Omit<ToastMessage, 'id'>>) => {
       const toast: ToastMessage = {
-        id: Date.now().toString(),
-        duration: 5000,
         ...action.payload,
+        id: Date.now().toString(),
+        duration: action.payload.duration || 5000,
       };
       state.toasts.push(toast);
     },
-    
     removeToast: (state, action: PayloadAction<string>) => {
-      state.toasts = state.toasts.filter(toast => toast.id !== action.payload);
+      state.toasts = state.toasts.filter(t => t.id !== action.payload);
     },
-    
     clearToasts: (state) => {
       state.toasts = [];
     },
-    
-    // Modal 控制
-    openModal: (state, action: PayloadAction<Omit<Modal, 'id'>>) => {
-      const modal: Modal = {
-        id: Date.now().toString(),
-        options: {
-          closeOnOverlayClick: true,
-          showCloseButton: true,
-          size: 'md',
-        },
-        ...action.payload,
-      };
-      state.modals.push(modal);
+
+    // 載入狀態管理
+    setGlobalLoading: (state, action: PayloadAction<boolean>) => {
+      state.globalLoading = action.payload;
     },
-    
-    closeModal: (state, action: PayloadAction<string>) => {
-      state.modals = state.modals.filter(modal => modal.id !== action.payload);
+    setLoadingState: (state, action: PayloadAction<{ key: string; loading: LoadingState }>) => {
+      state.loadingStates[action.payload.key] = action.payload.loading;
     },
-    
+    removeLoadingState: (state, action: PayloadAction<string>) => {
+      delete state.loadingStates[action.payload];
+    },
+
+    // 模態框管理
+    openModal: (state, action: PayloadAction<keyof UIState['modals']>) => {
+      state.modals[action.payload] = true;
+    },
+    closeModal: (state, action: PayloadAction<keyof UIState['modals']>) => {
+      state.modals[action.payload] = false;
+    },
     closeAllModals: (state) => {
-      state.modals = [];
+      Object.keys(state.modals).forEach(key => {
+        state.modals[key as keyof UIState['modals']] = false;
+      });
     },
-    
-    // 頁面設定
-    setPageTitle: (state, action: PayloadAction<string>) => {
-      state.page.title = action.payload;
+
+    // 側邊欄管理
+    toggleSidebar: (state) => {
+      state.sidebar.isOpen = !state.sidebar.isOpen;
     },
-    
-    setBreadcrumbs: (state, action: PayloadAction<Array<{ label: string; href?: string }>>) => {
-      state.page.breadcrumbs = action.payload;
+    setSidebarOpen: (state, action: PayloadAction<boolean>) => {
+      state.sidebar.isOpen = action.payload;
     },
-    
-    setPageActions: (state, action: PayloadAction<UIState['page']['actions']>) => {
-      state.page.actions = action.payload;
+    setActiveTab: (state, action: PayloadAction<string>) => {
+      state.sidebar.activeTab = action.payload;
     },
-    
-    // 偏好設定
-    setLanguage: (state, action: PayloadAction<'zh-TW' | 'en-US'>) => {
-      state.preferences.language = action.payload;
+
+    // 主題管理
+    setTheme: (state, action: PayloadAction<'light' | 'dark' | 'auto'>) => {
+      state.theme = action.payload;
     },
-    
-    setCurrency: (state, action: PayloadAction<'TWD' | 'USD'>) => {
-      state.preferences.currency = action.payload;
+
+    // 表格設置
+    setTableSettings: (state, action: PayloadAction<Partial<UIState['tableSettings']>>) => {
+      state.tableSettings = { ...state.tableSettings, ...action.payload };
     },
-    
-    setAutoRefresh: (state, action: PayloadAction<boolean>) => {
-      state.preferences.autoRefresh = action.payload;
+
+    // 圖表設置
+    setChartSettings: (state, action: PayloadAction<Partial<UIState['chartSettings']>>) => {
+      state.chartSettings = { ...state.chartSettings, ...action.payload };
     },
-    
-    setRefreshInterval: (state, action: PayloadAction<number>) => {
-      state.preferences.refreshInterval = action.payload;
+    toggleIndicator: (state, action: PayloadAction<string>) => {
+      const indicator = action.payload;
+      const index = state.chartSettings.enabledIndicators.indexOf(indicator);
+      if (index > -1) {
+        state.chartSettings.enabledIndicators.splice(index, 1);
+      } else {
+        state.chartSettings.enabledIndicators.push(indicator);
+      }
     },
-    
-    setNotificationSettings: (state, action: PayloadAction<Partial<UIState['preferences']['notifications']>>) => {
-      state.preferences.notifications = {
-        ...state.preferences.notifications,
-        ...action.payload,
-      };
+
+    // WebSocket 狀態管理
+    setWebSocketConnected: (state, action: PayloadAction<boolean>) => {
+      state.websocket.connected = action.payload;
+      if (action.payload) {
+        state.websocket.lastConnected = new Date().toISOString();
+        state.websocket.connectionError = null;
+        state.websocket.reconnecting = false;
+      }
     },
-    
-    setDashboardSettings: (state, action: PayloadAction<Partial<UIState['preferences']['dashboard']>>) => {
-      state.preferences.dashboard = {
-        ...state.preferences.dashboard,
-        ...action.payload,
-      };
+    setWebSocketReconnecting: (state, action: PayloadAction<boolean>) => {
+      state.websocket.reconnecting = action.payload;
     },
-    
-    updatePreferences: (state, action: PayloadAction<Partial<UIState['preferences']>>) => {
-      state.preferences = {
-        ...state.preferences,
-        ...action.payload,
-      };
+    setWebSocketError: (state, action: PayloadAction<string | null>) => {
+      state.websocket.connectionError = action.payload;
+      if (action.payload) {
+        state.websocket.connected = false;
+        state.websocket.reconnecting = false;
+      }
     },
-    
-    // 錯誤處理
+
+    // 錯誤管理
     setGlobalError: (state, action: PayloadAction<string | null>) => {
       state.errors.global = action.payload;
     },
-    
-    setComponentError: (state, action: PayloadAction<{ component: string; error: string | null }>) => {
-      const { component, error } = action.payload;
-      state.errors.components[component] = error;
+    setApiError: (state, action: PayloadAction<{ key: string; error: string }>) => {
+      state.errors.api[action.payload.key] = action.payload.error;
     },
-    
-    clearComponentError: (state, action: PayloadAction<string>) => {
-      delete state.errors.components[action.payload];
+    clearApiError: (state, action: PayloadAction<string>) => {
+      delete state.errors.api[action.payload];
     },
-    
     clearAllErrors: (state) => {
       state.errors.global = null;
-      state.errors.components = {};
+      state.errors.api = {};
+    },
+
+    // 重置 UI 狀態
+    resetUIState: (state) => {
+      return initialState;
     },
   },
 });
 
 export const {
-  // Sidebar
-  toggleSidebar,
-  setSidebarOpen,
-  toggleSidebarCollapse,
-  setSidebarCollapsed,
-  setActiveSection,
-  
-  // Theme
-  setThemeMode,
-  setPrimaryColor,
-  setFontSize,
-  
-  // Loading
-  setGlobalLoading,
-  setComponentLoading,
-  clearComponentLoading,
-  
+  // 通知
+  addNotification,
+  removeNotification,
+  clearNotifications,
+
   // Toast
   addToast,
   removeToast,
   clearToasts,
-  
-  // Modal
+
+  // 載入狀態
+  setGlobalLoading,
+  setLoadingState,
+  removeLoadingState,
+
+  // 模態框
   openModal,
   closeModal,
   closeAllModals,
-  
-  // Page
-  setPageTitle,
-  setBreadcrumbs,
-  setPageActions,
-  
-  // Preferences
-  setLanguage,
-  setCurrency,
-  setAutoRefresh,
-  setRefreshInterval,
-  setNotificationSettings,
-  setDashboardSettings,
-  updatePreferences,
-  
-  // Errors
+
+  // 側邊欄
+  toggleSidebar,
+  setSidebarOpen,
+  setActiveTab,
+
+  // 主題
+  setTheme,
+
+  // 表格設置
+  setTableSettings,
+
+  // 圖表設置
+  setChartSettings,
+  toggleIndicator,
+
+  // WebSocket
+  setWebSocketConnected,
+  setWebSocketReconnecting,
+  setWebSocketError,
+
+  // 錯誤
   setGlobalError,
-  setComponentError,
-  clearComponentError,
+  setApiError,
+  clearApiError,
   clearAllErrors,
+
+  // 重置
+  resetUIState,
 } = uiSlice.actions;
 
 export default uiSlice.reducer;

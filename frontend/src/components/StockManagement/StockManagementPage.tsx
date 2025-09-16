@@ -1,217 +1,221 @@
+/**
+ * 股票管理頁面組件
+ */
 'use client';
 
-import React, { useState } from 'react';
-import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
-import Button from '../ui/Button';
-import { Plus, Upload, Download, Trash2, RefreshCw } from 'lucide-react';
-import { Layout } from '../Layout';
-import StockSearchForm from './StockSearchForm';
-import AddStockModal from './AddStockModal';
-import BatchAddStockModal from './BatchAddStockModal';
-import StockList from './StockList';
-import { useDispatch } from 'react-redux';
-import { AppDispatch } from '../../store';
-import { deleteStock, batchDeleteStocks } from '../../store/slices/stocksSlice';
-import type { Stock } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { useAppDispatch, useAppSelector } from '../../store';
+import { fetchStocks, deleteStock, setFilters, clearError } from '../../store/slices/stocksSlice';
+import { addToast } from '../../store/slices/uiSlice';
 
-const StockManagementPage: React.FC = () => {
-  const dispatch = useDispatch<AppDispatch>();
-  
-  // Modal 狀態
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showBatchAddModal, setShowBatchAddModal] = useState(false);
-  const [addModalDefaults, setAddModalDefaults] = useState<{
-    symbol?: string;
-    market?: 'TW' | 'US';
-  }>({});
-  
-  // 選擇狀態
-  const [selectedStockIds, setSelectedStockIds] = useState<number[]>([]);
-  const [isDeleting, setIsDeleting] = useState(false);
+export interface StockManagementPageProps {}
 
-  // 處理股票選擇
-  const handleStockSelect = (stock: Stock) => {
-    // 可以導航到股票詳細頁面
-    console.log('選擇股票:', stock);
-  };
+const StockManagementPage: React.FC<StockManagementPageProps> = () => {
+  const dispatch = useAppDispatch();
+  const { stocks, loading, error, pagination, filters } = useAppSelector(state => state.stocks);
+  const [searchTerm, setSearchTerm] = useState('');
 
-  // 處理新增股票成功
-  const handleAddStockSuccess = (stock: Stock) => {
-    console.log('成功新增股票:', stock);
-    // 可以顯示成功訊息或導航到股票頁面
-  };
+  // 載入股票數據
+  useEffect(() => {
+    dispatch(fetchStocks({}));
+  }, [dispatch]);
 
-  // 處理批次新增成功
-  const handleBatchAddSuccess = (results: any) => {
-    console.log('批次新增結果:', results);
-    // 可以顯示成功訊息和統計
-  };
+  // 處理搜尋
+  useEffect(() => {
+    dispatch(setFilters({ ...filters, search: searchTerm }));
+  }, [searchTerm, dispatch, filters]);
 
-  // 處理從搜尋表單新增股票
-  const handleAddFromSearch = (symbol: string, market: string) => {
-    setAddModalDefaults({ symbol, market: market as 'TW' | 'US' });
-    setShowAddModal(true);
-  };
-
-  // 處理股票編輯
-  const handleStockEdit = (stock: Stock) => {
-    setAddModalDefaults({ 
-      symbol: stock.symbol, 
-      market: stock.market as 'TW' | 'US' 
-    });
-    setShowAddModal(true);
-  };
-
-  // 處理單個股票刪除
-  const handleStockDelete = async (stock: Stock) => {
-    if (!confirm(`確定要刪除股票 ${stock.symbol} (${stock.name || '無名稱'}) 嗎？`)) {
-      return;
-    }
-
-    try {
-      await dispatch(deleteStock(stock.id)).unwrap();
-      console.log('成功刪除股票:', stock.symbol);
-    } catch (error: any) {
-      console.error('刪除股票失敗:', error.message);
-      alert('刪除失敗：' + error.message);
+  // 處理刪除股票
+  const handleDeleteStock = async (stockId: number, stockName: string) => {
+    if (window.confirm(`確定要移除股票 ${stockName} 嗎？`)) {
+      try {
+        await dispatch(deleteStock(stockId)).unwrap();
+        dispatch(addToast({
+          type: 'success',
+          title: '成功',
+          message: `已成功移除股票 ${stockName}`,
+        }));
+      } catch (error) {
+        dispatch(addToast({
+          type: 'error',
+          title: '錯誤',
+          message: '移除股票失敗，請稍後再試',
+        }));
+      }
     }
   };
 
-  // 處理批次刪除
-  const handleBatchDelete = async () => {
-    if (selectedStockIds.length === 0) {
-      return;
-    }
-
-    if (!confirm(`確定要刪除選中的 ${selectedStockIds.length} 支股票嗎？此操作無法撤銷。`)) {
-      return;
-    }
-
-    setIsDeleting(true);
-    
-    try {
-      await dispatch(batchDeleteStocks(selectedStockIds)).unwrap();
-      setSelectedStockIds([]);
-      console.log('成功批次刪除股票');
-    } catch (error: any) {
-      console.error('批次刪除失敗:', error.message);
-      alert('批次刪除失敗：' + error.message);
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  // 處理匯出
-  const handleExport = () => {
-    // TODO: 實作匯出功能
-    console.log('匯出選中的股票:', selectedStockIds);
-  };
+  // 過濾股票
+  const filteredStocks = stocks.filter(stock =>
+    stock.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    stock.symbol.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
-    <Layout>
-      <div className="space-y-6">
-        {/* 頁面標題 */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">股票管理</h1>
-            <p className="text-gray-600 mt-1">管理您的股票追蹤清單</p>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-gray-900 mb-4">
+          股票管理
+        </h1>
+        <p className="text-gray-600">
+          管理監控的股票列表，新增或移除股票追蹤
+        </p>
+      </div>
+
+      {/* 搜尋和新增區域 */}
+      <div className="bg-white shadow rounded-lg p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-medium text-gray-900">股票列表</h2>
+          <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+            新增股票
+          </button>
+        </div>
+
+        <div className="mb-4">
+          <input
+            type="text"
+            placeholder="搜尋股票名稱或代號..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+        </div>
+
+        {/* 股票表格 */}
+        <div className="overflow-x-auto">
+          <table className="min-w-full table-auto">
+            <thead>
+              <tr className="bg-gray-50">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  股票代號
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  名稱
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  市場
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  價格
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  漲跌
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  操作
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {filteredStocks.map((stock) => (
+                <tr key={stock.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    {stock.symbol}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {stock.name}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                      stock.market === 'TW'
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {stock.market === 'TW' ? '台股' : '美股'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {stock.market === 'TW' ? 'NT$' : '$'} ---
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <span className="text-gray-500">
+                      未獲取
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 space-x-2">
+                    <button className="text-blue-600 hover:text-blue-800 font-medium">
+                      查看
+                    </button>
+                    <button
+                      onClick={() => handleDeleteStock(stock.id, stock.name)}
+                      className="text-red-600 hover:text-red-800 font-medium"
+                    >
+                      移除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {loading && (
+          <div className="text-center py-8">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <div className="text-gray-500 mt-4">載入中...</div>
           </div>
-          
-          <div className="flex gap-3">
-            <Button
-              variant="outline"
-              onClick={() => setShowBatchAddModal(true)}
-              className="flex items-center gap-2"
+        )}
+
+        {!loading && filteredStocks.length === 0 && (
+          <div className="text-center py-8">
+            <div className="text-gray-500">
+              {searchTerm ? '找不到符合條件的股票' : '尚未新增任何股票'}
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="text-center py-8">
+            <div className="text-red-500">
+              {error}
+            </div>
+            <button
+              onClick={() => {
+                dispatch(clearError());
+                dispatch(fetchStocks({}));
+              }}
+              className="mt-2 text-blue-600 hover:text-blue-800 font-medium"
             >
-              <Upload className="w-4 h-4" />
-              批次新增
-            </Button>
-            
-            <Button
-              onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              新增股票
-            </Button>
+              重新載入
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 統計區域 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-white shadow rounded-lg p-6">
+          <div className="flex items-center">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-gray-600">追蹤股票總數</p>
+              <p className="text-2xl font-bold text-gray-900">{pagination.total}</p>
+            </div>
           </div>
         </div>
 
-        {/* 股票搜尋 */}
-        <StockSearchForm
-          onStockSelect={handleStockSelect}
-          onAddNewStock={handleAddFromSearch}
-        />
+        <div className="bg-white shadow rounded-lg p-6">
+          <div className="flex items-center">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-gray-600">台股數量</p>
+              <p className="text-2xl font-bold text-green-600">
+                {stocks.filter(s => s.market === 'TW').length}
+              </p>
+            </div>
+          </div>
+        </div>
 
-        {/* 批次操作工具列 */}
-        {selectedStockIds.length > 0 && (
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm text-gray-600">
-                  已選擇 {selectedStockIds.length} 支股票
-                </div>
-                
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleExport}
-                    className="flex items-center gap-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    匯出
-                  </Button>
-                  
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleBatchDelete}
-                    disabled={isDeleting}
-                    className="flex items-center gap-2 text-red-600 hover:text-red-700"
-                  >
-                    {isDeleting ? (
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-4 h-4" />
-                    )}
-                    刪除選中
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* 股票清單 */}
-        <StockList
-          onStockSelect={handleStockSelect}
-          onStockEdit={handleStockEdit}
-          onStockDelete={handleStockDelete}
-          selectedStockIds={selectedStockIds}
-          onSelectionChange={setSelectedStockIds}
-          showActions={true}
-        />
-
-        {/* Modals */}
-        <AddStockModal
-          isOpen={showAddModal}
-          onClose={() => {
-            setShowAddModal(false);
-            setAddModalDefaults({});
-          }}
-          defaultSymbol={addModalDefaults.symbol}
-          defaultMarket={addModalDefaults.market}
-          onSuccess={handleAddStockSuccess}
-        />
-
-        <BatchAddStockModal
-          isOpen={showBatchAddModal}
-          onClose={() => setShowBatchAddModal(false)}
-          onSuccess={handleBatchAddSuccess}
-        />
+        <div className="bg-white shadow rounded-lg p-6">
+          <div className="flex items-center">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-gray-600">美股數量</p>
+              <p className="text-2xl font-bold text-blue-600">
+                {stocks.filter(s => s.market === 'US').length}
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
-    </Layout>
+    </div>
   );
 };
 

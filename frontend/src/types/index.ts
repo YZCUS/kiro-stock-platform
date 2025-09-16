@@ -48,32 +48,18 @@ export interface TradingSignal {
 export interface ApiResponse<T> {
   data?: T;
   message?: string;
+  success?: boolean;
   error?: string;
 }
 
 export interface PaginatedResponse<T> {
-  items: T[];
-  total: number;
-  page: number;
-  page_size: number;
-  total_pages: number;
-}
-
-export interface StockDataResponse {
-  stock: Stock;
-  price_data: PaginatedResponse<PriceData>;
-  indicators?: Record<string, TechnicalIndicator[]>;
-}
-
-export interface SignalHistoryResponse {
-  signals: TradingSignal[];
+  data: T[];
   pagination: {
-    total: number;
     page: number;
-    page_size: number;
-    total_pages: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
   };
-  stats: Record<string, any>;
 }
 
 // WebSocket 消息類型
@@ -88,35 +74,8 @@ export interface WebSocketSubscription {
   type: 'subscribe_stock' | 'unsubscribe_stock' | 'subscribe_global' | 'unsubscribe_global' | 'ping';
   data?: {
     stock_id?: number;
+    symbol?: string;
   };
-}
-
-// 圖表相關類型
-export interface ChartData {
-  time: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume?: number;
-}
-
-export interface IndicatorSeries {
-  name: string;
-  type: 'line' | 'histogram' | 'area';
-  data: Array<{
-    time: string;
-    value: number;
-  }>;
-  color?: string;
-}
-
-export interface ChartConfig {
-  symbol: string;
-  timeRange: '1D' | '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
-  indicators: string[];
-  showVolume: boolean;
-  showSignals: boolean;
 }
 
 // 表單類型
@@ -167,42 +126,76 @@ export interface DateRange {
 
 // 市場狀態類型
 export interface MarketStatus {
-  market: string;
+  market: 'TW' | 'US';
   is_open: boolean;
   next_open?: string;
   next_close?: string;
-  timezone: string;
 }
 
-// 統計數據類型
-export interface MarketStats {
-  total_stocks: number;
-  active_stocks: number;
-  total_signals: number;
-  buy_signals: number;
-  sell_signals: number;
-  avg_confidence: number;
+// Toast 消息類型
+export interface ToastMessage {
+  id: string;
+  type: 'success' | 'error' | 'warning' | 'info';
+  title: string;
+  message?: string;
+  duration?: number;
 }
 
-// 錯誤類型
-export interface ApiError {
-  status: number;
-  message: string;
-  details?: string;
-}
-
-// 用戶設定類型
-export interface UserPreferences {
-  theme: 'light' | 'dark';
-  language: 'zh-TW' | 'en-US';
-  defaultMarket: 'TW' | 'US';
-  autoRefresh: boolean;
-  refreshInterval: number;
-  notifications: {
-    signals: boolean;
-    dataUpdates: boolean;
-    errors: boolean;
+// 即時價格數據類型
+export interface RealtimePriceData {
+  price: number;
+  change: number;
+  change_percent: number;
+  volume: number;
+  timestamp: string;
+  ohlc?: {
+    open: number;
+    high: number;
+    low: number;
+    close: number;
   };
 }
 
-// Types are already exported via interface declarations above
+// 技術指標數據類型
+export interface IndicatorValue {
+  date: string;
+  value: number;
+}
+
+export interface IndicatorData {
+  type: string;
+  data: IndicatorValue[];
+  last_update?: string;
+}
+
+export interface IndicatorsResponse {
+  SMA?: IndicatorData;
+  EMA?: IndicatorData;
+  RSI?: IndicatorData;
+  MACD?: {
+    type: string;
+    data: {
+      macd: IndicatorValue[];
+      signal: IndicatorValue[];
+      histogram: IndicatorValue[];
+    };
+    last_update?: string;
+  };
+  bollinger?: {
+    type: string;
+    data: {
+      upper: IndicatorValue[];
+      middle: IndicatorValue[];
+      lower: IndicatorValue[];
+    };
+    last_update?: string;
+  };
+  kd?: {
+    type: string;
+    data: {
+      k: IndicatorValue[];
+      d: IndicatorValue[];
+    };
+    last_update?: string;
+  };
+}

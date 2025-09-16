@@ -1,61 +1,10 @@
 /**
- * 交易信號狀態管理
+ * 交易信號管理 Redux Slice - 更新版本
  */
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import type { TradingSignal, SignalFilter, LoadingState } from '../../types';
-import { signalsApi } from '../../utils/api';
+import { TradingSignal, SignalFilter, PaginatedResponse } from '../../types';
 
-interface SignalsState {
-  signals: TradingSignal[];
-  stockSignals: Record<number, TradingSignal[]>; // stockId -> signals
-  filters: SignalFilter;
-  loading: boolean;
-  error: string | null;
-  stats: {
-    total_signals: number;
-    buy_signals: number;
-    sell_signals: number;
-    hold_signals: number;
-    cross_signals: number;
-    avg_confidence: number;
-  };
-  pagination: {
-    page: number;
-    pageSize: number;
-    total: number;
-    totalPages: number;
-  };
-}
-
-const initialState: SignalsState = {
-  signals: [],
-  stockSignals: {},
-  filters: {
-    signal_type: '',
-    market: '',
-    min_confidence: 0,
-    start_date: '',
-    end_date: '',
-  },
-  loading: false,
-  error: null,
-  stats: {
-    total_signals: 0,
-    buy_signals: 0,
-    sell_signals: 0,
-    hold_signals: 0,
-    cross_signals: 0,
-    avg_confidence: 0,
-  },
-  pagination: {
-    page: 1,
-    pageSize: 50,
-    total: 0,
-    totalPages: 0,
-  },
-};
-
-// Async thunks
+// 異步操作
 export const fetchSignals = createAsyncThunk(
   'signals/fetchSignals',
   async (params: {
@@ -63,137 +12,135 @@ export const fetchSignals = createAsyncThunk(
     pageSize?: number;
     filters?: SignalFilter;
   } = {}) => {
-    const { page = 1, pageSize = 50, filters = {} } = params;
-    const response = await signalsApi.getAllSignals({
-      signal_type: filters.signal_type,
-      market: filters.market,
-      min_confidence: filters.min_confidence,
-      start_date: filters.start_date,
-      end_date: filters.end_date,
-      page,
-      page_size: pageSize,
-    });
-    return response;
+    // 使用 API 集成層，支援真實 API 和 mock 數據回退
+    const { fetchSignalsWithFallback } = await import('../../lib/apiIntegration');
+    return fetchSignalsWithFallback(params);
   }
 );
 
-export const fetchStockSignals = createAsyncThunk(
-  'signals/fetchStockSignals',
-  async (params: {
-    stockId: number;
-    signalType?: string;
-    days?: number;
-    limit?: number;
-  }) => {
-    const { stockId, ...otherParams } = params;
-    const response = await signalsApi.getStockSignals(stockId, otherParams);
-    return { stockId, signals: response };
+export const subscribeToSignals = createAsyncThunk(
+  'signals/subscribeToSignals',
+  async (stockId?: number) => {
+    // 使用 WebSocket 訂閱信號
+    const { getWebSocketManager } = await import('../../lib/websocket');
+    const wsManager = getWebSocketManager();
+
+    if (stockId) {
+      await wsManager.subscribe('subscribe_stock', { stock_id: stockId });
+    } else {
+      await wsManager.subscribe('subscribe_global');
+    }
+
+    return { stockId, subscribed: true };
   }
 );
 
-export const fetchSignalStats = createAsyncThunk(
-  'signals/fetchSignalStats',
-  async (params: { days?: number; market?: string } = {}) => {
-    const response = await signalsApi.getSignalStats(params);
-    return response;
+export const unsubscribeFromSignals = createAsyncThunk(
+  'signals/unsubscribeFromSignals',
+  async (stockId?: number) => {
+    // 使用 WebSocket 取消訂閱信號
+    const { getWebSocketManager } = await import('../../lib/websocket');
+    const wsManager = getWebSocketManager();
+
+    if (stockId) {
+      await wsManager.unsubscribe('unsubscribe_stock', { stock_id: stockId });
+    } else {
+      await wsManager.unsubscribe('unsubscribe_global');
+    }
+
+    return { stockId, subscribed: false };
   }
 );
 
-export const fetchSignalHistory = createAsyncThunk(
-  'signals/fetchSignalHistory',
-  async (params: {
-    days?: number;
-    signalType?: string;
-    market?: string;
-    limit?: number;
-  } = {}) => {
-    const response = await signalsApi.getSignalHistory(params);
-    return response;
-  }
-);
+// 初始狀態
+interface SignalsState {
+  signals: TradingSignal[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+  loading: boolean;
+  error: string | null;
+  filters: SignalFilter;
+  subscribedStocks: number[];
+  realtimeSignals: TradingSignal[];
+}
 
-export const detectStockSignals = createAsyncThunk(
-  'signals/detectStockSignals',
-  async (params: {
-    stockId: number;
-    signalTypes?: string[];
-    saveResults?: boolean;
-  }) => {
-    const { stockId, ...otherParams } = params;
-    const response = await signalsApi.detectStockSignals(stockId, {
-      signal_types: otherParams.signalTypes,
-      save_results: otherParams.saveResults,
-    });
-    return { stockId, signals: response };
-  }
-);
-
-export const deleteSignal = createAsyncThunk(
-  'signals/deleteSignal',
-  async (signalId: number) => {
-    await signalsApi.deleteSignal(signalId);
-    return signalId;
-  }
-);
-
-// 新增 fetchAllSignals，作為 fetchSignals 的別名
-export const fetchAllSignals = fetchSignals;
+const initialState: SignalsState = {
+  signals: [],
+  pagination: {
+    page: 1,
+    pageSize: 10,
+    total: 0,
+    totalPages: 0,
+  },
+  loading: false,
+  error: null,
+  filters: {},
+  subscribedStocks: [],
+  realtimeSignals: [],
+};
 
 // Slice
 const signalsSlice = createSlice({
   name: 'signals',
   initialState,
   reducers: {
-    setFilters: (state, action: PayloadAction<Partial<SignalFilter>>) => {
-      state.filters = { ...state.filters, ...action.payload };
+    setFilters: (state, action: PayloadAction<SignalFilter>) => {
+      state.filters = action.payload;
     },
     clearFilters: (state) => {
-      state.filters = initialState.filters;
+      state.filters = {};
     },
-    clearError: (state) => {
-      state.error = null;
-    },
-    setPage: (state, action: PayloadAction<number>) => {
-      state.pagination.page = action.payload;
-    },
-    setPageSize: (state, action: PayloadAction<number>) => {
-      state.pagination.pageSize = action.payload;
-      state.pagination.page = 1;
-    },
-    addRealTimeSignal: (state, action: PayloadAction<TradingSignal>) => {
-      // Add real-time signal from WebSocket
-      state.signals.unshift(action.payload);
-      
-      // Also add to stock-specific signals if exists
-      const stockId = action.payload.stock_id;
-      if (state.stockSignals[stockId]) {
-        state.stockSignals[stockId].unshift(action.payload);
+    addRealtimeSignal: (state, action: PayloadAction<TradingSignal>) => {
+      // 添加即時信號到列表頂部
+      state.realtimeSignals.unshift(action.payload);
+
+      // 限制即時信號數量
+      if (state.realtimeSignals.length > 50) {
+        state.realtimeSignals = state.realtimeSignals.slice(0, 50);
       }
-      
-      // Update stats
-      switch (action.payload.signal_type) {
-        case 'BUY':
-          state.stats.buy_signals++;
-          break;
-        case 'SELL':
-          state.stats.sell_signals++;
-          break;
-        case 'HOLD':
-          state.stats.hold_signals++;
-          break;
-        case 'GOLDEN_CROSS':
-        case 'DEATH_CROSS':
-          state.stats.cross_signals++;
-          break;
+
+      // 如果是當前頁面的信號，也添加到主列表
+      const matchesFilters = (
+        !state.filters.signal_type || action.payload.signal_type === state.filters.signal_type
+      ) && (
+        !state.filters.market || action.payload.market === state.filters.market
+      );
+
+      if (matchesFilters) {
+        state.signals.unshift(action.payload);
+        state.pagination.total += 1;
       }
-      state.stats.total_signals++;
     },
-    clearStockSignals: (state, action: PayloadAction<number>) => {
-      delete state.stockSignals[action.payload];
+    removeSignal: (state, action: PayloadAction<number>) => {
+      const signalId = action.payload;
+      state.signals = state.signals.filter(signal => signal.id !== signalId);
+      state.realtimeSignals = state.realtimeSignals.filter(signal => signal.id !== signalId);
+
+      if (state.pagination.total > 0) {
+        state.pagination.total -= 1;
+      }
+    },
+    clearRealtimeSignals: (state) => {
+      state.realtimeSignals = [];
+    },
+    updateSignalSubscription: (state, action: PayloadAction<{ stockId: number; subscribed: boolean }>) => {
+      const { stockId, subscribed } = action.payload;
+
+      if (subscribed) {
+        if (!state.subscribedStocks.includes(stockId)) {
+          state.subscribedStocks.push(stockId);
+        }
+      } else {
+        state.subscribedStocks = state.subscribedStocks.filter(id => id !== stockId);
+      }
     },
   },
   extraReducers: (builder) => {
-    // Fetch all signals
+    // fetchSignals
     builder
       .addCase(fetchSignals.pending, (state) => {
         state.loading = true;
@@ -201,95 +148,51 @@ const signalsSlice = createSlice({
       })
       .addCase(fetchSignals.fulfilled, (state, action) => {
         state.loading = false;
-        state.signals = action.payload.signals || action.payload;
-        if (action.payload.pagination) {
-          const pagination = action.payload.pagination;
-          state.pagination = {
-            page: pagination.page,
-            pageSize: pagination.page_size,
-            total: pagination.total,
-            totalPages: pagination.total_pages,
-          };
-        }
-        if (action.payload.stats) {
-          const stats = action.payload.stats;
-          state.stats = {
-            total_signals: stats.total_signals || 0,
-            buy_signals: stats.buy_signals || 0,
-            sell_signals: stats.sell_signals || 0,
-            hold_signals: stats.hold_signals || 0,
-            cross_signals: stats.cross_signals || 0,
-            avg_confidence: stats.avg_confidence || 0,
-          };
-        }
+        state.signals = action.payload.data;
+        state.pagination = action.payload.pagination;
       })
       .addCase(fetchSignals.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.error.message || '取得交易信號失敗';
+        state.error = action.error.message || '獲取交易信號失敗';
       });
 
-    // Fetch stock signals
+    // subscribeToSignals
     builder
-      .addCase(fetchStockSignals.fulfilled, (state, action) => {
-        const { stockId, signals } = action.payload;
-        state.stockSignals[stockId] = signals;
-      });
-
-    // Fetch signal stats
-    builder
-      .addCase(fetchSignalStats.fulfilled, (state, action) => {
-        state.stats = action.payload;
-      });
-
-    // Fetch signal history
-    builder
-      .addCase(fetchSignalHistory.fulfilled, (state, action) => {
-        state.signals = action.payload;
-      });
-
-    // Detect stock signals
-    builder
-      .addCase(detectStockSignals.fulfilled, (state, action) => {
-        const { stockId, signals } = action.payload;
-        
-        // Add detected signals to general signals list
-        state.signals.unshift(...signals);
-        
-        // Update stock-specific signals
-        if (state.stockSignals[stockId]) {
-          state.stockSignals[stockId].unshift(...signals);
-        } else {
-          state.stockSignals[stockId] = signals;
+      .addCase(subscribeToSignals.fulfilled, (state, action) => {
+        const { stockId, subscribed } = action.payload;
+        if (stockId && subscribed) {
+          if (!state.subscribedStocks.includes(stockId)) {
+            state.subscribedStocks.push(stockId);
+          }
         }
+      })
+      .addCase(subscribeToSignals.rejected, (state, action) => {
+        state.error = action.error.message || '訂閱信號失敗';
       });
 
-    // Delete signal
+    // unsubscribeFromSignals
     builder
-      .addCase(deleteSignal.fulfilled, (state, action) => {
-        const signalId = action.payload;
-        
-        // Remove from general signals
-        state.signals = state.signals.filter(signal => signal.id !== signalId);
-        
-        // Remove from stock-specific signals
-        Object.keys(state.stockSignals).forEach(stockIdStr => {
-          const stockId = parseInt(stockIdStr);
-          state.stockSignals[stockId] = state.stockSignals[stockId].filter(
-            signal => signal.id !== signalId
-          );
-        });
+      .addCase(unsubscribeFromSignals.fulfilled, (state, action) => {
+        const { stockId } = action.payload;
+        if (stockId) {
+          state.subscribedStocks = state.subscribedStocks.filter(id => id !== stockId);
+        }
+      })
+      .addCase(unsubscribeFromSignals.rejected, (state, action) => {
+        state.error = action.error.message || '取消訂閱信號失敗';
       });
   },
 });
 
+// 匯出 actions
 export const {
   setFilters,
   clearFilters,
-  clearError,
-  setPage,
-  setPageSize,
-  addRealTimeSignal,
-  clearStockSignals,
+  addRealtimeSignal,
+  removeSignal,
+  clearRealtimeSignals,
+  updateSignalSubscription,
 } = signalsSlice.actions;
 
+// 匯出 reducer
 export default signalsSlice.reducer;

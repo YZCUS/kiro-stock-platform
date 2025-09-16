@@ -1,370 +1,170 @@
+/**
+ * 圖表頁面組件
+ */
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { Layout } from '../Layout';
-import Card, { CardHeader, CardTitle, CardContent } from '../ui/Card';
-import Button from '../ui/Button';
-import { 
-  ArrowLeft,
-  BarChart3,
-  TrendingUp,
-  Activity,
-  Download,
-  Settings,
-  Calendar,
-  RefreshCw
-} from 'lucide-react';
-import { AppDispatch, RootState } from '../../store';
-import { fetchStock } from '../../store/slices/stocksSlice';
-import SimpleMultiChart from './SimpleMultiChart';
-import type { Stock } from '../../types';
-import type { ChartData as CandleData, LineDataPoint } from './SimpleMultiChart';
+import React, { useState } from 'react';
 
 export interface ChartPageProps {
-  stockId: number;
-  onBack?: () => void;
+  stockId?: number;
 }
 
-const ChartPage: React.FC<ChartPageProps> = ({
-  stockId,
-  onBack
-}) => {
-  const dispatch = useDispatch<AppDispatch>();
-  const { selectedStock, loading } = useSelector((state: RootState) => state.stocks);
-  
-  const [chartData, setChartData] = useState<{
-    candleData: CandleData[];
-    indicators: {
-      rsi?: LineDataPoint[];
-      macd?: {
-        macd: LineDataPoint[];
-        signal: LineDataPoint[];
-        histogram: LineDataPoint[];
-      };
-      ma?: {
-        ma5: LineDataPoint[];
-        ma10: LineDataPoint[];
-        ma20: LineDataPoint[];
-      };
-      bollinger?: {
-        upper: LineDataPoint[];
-        middle: LineDataPoint[];
-        lower: LineDataPoint[];
-      };
-    };
-  }>({
-    candleData: [],
-    indicators: {}
-  });
-  
-  const [dataLoading, setDataLoading] = useState(false);
-  const [timeRange, setTimeRange] = useState<'1D' | '1W' | '1M' | '3M' | '6M' | '1Y'>('1M');
-
-  useEffect(() => {
-    dispatch(fetchStock(stockId));
-  }, [dispatch, stockId]);
-
-  useEffect(() => {
-    if (selectedStock) {
-      loadChartData();
-    }
-  }, [selectedStock, timeRange]);
-
-  const loadChartData = async () => {
-    if (!selectedStock) return;
-
-    setDataLoading(true);
-    try {
-      // 模擬數據 - 實際應該調用 API
-      const mockCandleData: CandleData[] = generateMockCandleData(timeRange);
-      const mockIndicators = generateMockIndicators(mockCandleData);
-
-      setChartData({
-        candleData: mockCandleData,
-        indicators: mockIndicators
-      });
-    } catch (error) {
-      console.error('載入圖表數據失敗:', error);
-    } finally {
-      setDataLoading(false);
-    }
-  };
-
-  const generateMockCandleData = (range: string): CandleData[] => {
-    const days = {
-      '1D': 1,
-      '1W': 7,
-      '1M': 30,
-      '3M': 90,
-      '6M': 180,
-      '1Y': 365
-    }[range] || 30;
-
-    const data: CandleData[] = [];
-    let basePrice = 100;
-    
-    for (let i = 0; i < days; i++) {
-      const date = new Date();
-      date.setDate(date.getDate() - (days - i - 1));
-      
-      const open = basePrice + (Math.random() - 0.5) * 2;
-      const close = open + (Math.random() - 0.5) * 4;
-      const high = Math.max(open, close) + Math.random() * 2;
-      const low = Math.min(open, close) - Math.random() * 2;
-      const volume = Math.floor(Math.random() * 1000000) + 100000;
-      
-      data.push({
-        time: date.toISOString().split('T')[0],
-        open,
-        high,
-        low,
-        close,
-        volume
-      });
-      
-      basePrice = close;
-    }
-    
-    return data;
-  };
-
-  const generateMockIndicators = (candleData: CandleData[]) => {
-    if (candleData.length === 0) return {};
-
-    // 生成 RSI 數據
-    const rsi: LineDataPoint[] = candleData.map((item, index) => ({
-      time: item.time,
-      value: 30 + Math.random() * 40 // RSI 通常在 0-100 之間
-    }));
-
-    // 生成 MACD 數據
-    const macd = {
-      macd: candleData.map(item => ({
-        time: item.time,
-        value: (Math.random() - 0.5) * 2
-      })),
-      signal: candleData.map(item => ({
-        time: item.time,
-        value: (Math.random() - 0.5) * 1.5
-      })),
-      histogram: candleData.map(item => ({
-        time: item.time,
-        value: (Math.random() - 0.5) * 1
-      }))
-    };
-
-    // 生成移動平均數據
-    const ma = {
-      ma5: candleData.map(item => ({
-        time: item.time,
-        value: item.close + (Math.random() - 0.5) * 0.5
-      })),
-      ma10: candleData.map(item => ({
-        time: item.time,
-        value: item.close + (Math.random() - 0.5) * 1
-      })),
-      ma20: candleData.map(item => ({
-        time: item.time,
-        value: item.close + (Math.random() - 0.5) * 2
-      }))
-    };
-
-    // 生成布林通道數據
-    const bollinger = {
-      upper: candleData.map(item => ({
-        time: item.time,
-        value: item.close + 2 + Math.random()
-      })),
-      middle: candleData.map(item => ({
-        time: item.time,
-        value: item.close
-      })),
-      lower: candleData.map(item => ({
-        time: item.time,
-        value: item.close - 2 - Math.random()
-      }))
-    };
-
-    return { rsi, macd, ma, bollinger };
-  };
-
-  const handleExport = () => {
-    // TODO: 實作圖表匯出功能
-    console.log('匯出圖表');
-  };
-
-  const handleRefresh = () => {
-    loadChartData();
-  };
-
-  if (!selectedStock) {
-    return (
-      <Layout>
-        <div className="flex items-center justify-center py-8">
-          <RefreshCw className="w-6 h-6 animate-spin mr-2" />
-          載入股票資訊中...
-        </div>
-      </Layout>
-    );
-  }
+const ChartPage: React.FC<ChartPageProps> = ({ stockId = 1 }) => {
+  const [timeframe, setTimeframe] = useState('1D');
+  const [indicators, setIndicators] = useState<string[]>(['SMA', 'RSI']);
 
   return (
-    <Layout>
-      <div className="space-y-6">
-        {/* 標題列 */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={onBack}
-            >
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              返回
-            </Button>
-            
-            <div className="flex items-center gap-3">
-              <BarChart3 className="w-8 h-8 text-blue-600" />
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900">
-                  {selectedStock.symbol} 圖表分析
-                </h1>
-                <p className="text-gray-600">
-                  {selectedStock.name || '無名稱'}
-                  <span className="ml-2 text-sm bg-gray-100 text-gray-600 px-2 py-1 rounded">
-                    {selectedStock.market}
-                  </span>
-                </p>
-              </div>
-            </div>
-          </div>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-gray-900 mb-4">
+          股票圖表分析
+        </h1>
+        <p className="text-gray-600">
+          提供K線圖表和技術指標分析功能
+        </p>
+      </div>
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={handleExport}
-            >
-              <Download className="w-4 h-4 mr-2" />
-              匯出圖表
-            </Button>
-            
-            <Button
-              variant="outline"
-            >
-              <Settings className="w-4 h-4 mr-2" />
-              設定
-            </Button>
-          </div>
+      {/* 控制區域 */}
+      <div className="bg-white shadow rounded-lg p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-medium text-gray-900">圖表設定</h2>
         </div>
 
-        {/* 時間範圍選擇 */}
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-gray-500" />
-                <span className="text-sm text-gray-600">時間範圍:</span>
-                <div className="flex gap-1">
-                  {(['1D', '1W', '1M', '3M', '6M', '1Y'] as const).map((range) => (
-                    <Button
-                      key={range}
-                      variant={timeRange === range ? 'primary' : 'outline'}
-                      size="sm"
-                      onClick={() => setTimeRange(range)}
-                    >
-                      {range}
-                    </Button>
-                  ))}
-                </div>
-              </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* 股票選擇 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              股票代號
+            </label>
+            <select className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option>台積電 (2330.TW)</option>
+              <option>鴻海 (2317.TW)</option>
+              <option>聯發科 (2454.TW)</option>
+              <option>Apple (AAPL)</option>
+              <option>Google (GOOGL)</option>
+            </select>
+          </div>
 
-              <div className="flex items-center gap-4 text-sm text-gray-600">
-                <div className="flex items-center gap-2">
-                  <Activity className="w-4 h-4" />
-                  <span>數據點: {chartData.candleData.length}</span>
-                </div>
-                {chartData.candleData.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4" />
-                    <span>
-                      最新價格: {chartData.candleData[chartData.candleData.length - 1]?.close.toFixed(2)}
-                    </span>
-                  </div>
-                )}
-              </div>
+          {/* 時間框架 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              時間框架
+            </label>
+            <div className="flex space-x-2">
+              {['1D', '5D', '1M', '3M', '1Y'].map((tf) => (
+                <button
+                  key={tf}
+                  onClick={() => setTimeframe(tf)}
+                  className={`px-3 py-1 text-sm rounded-md ${
+                    timeframe === tf
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  {tf}
+                </button>
+              ))}
             </div>
-          </CardContent>
-        </Card>
+          </div>
 
-        {/* 多重圖表 */}
-        <SimpleMultiChart
-          symbol={selectedStock.symbol}
-          candleData={chartData.candleData}
-          indicators={chartData.indicators}
-          loading={dataLoading}
-          onRefresh={handleRefresh}
-          theme="light"
-        />
-
-        {/* 圖表統計資訊 */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">K線數據點</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {chartData.candleData.length}
-                  </p>
-                </div>
-                <BarChart3 className="w-8 h-8 text-blue-600" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">技術指標</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {Object.keys(chartData.indicators).length}
-                  </p>
-                </div>
-                <TrendingUp className="w-8 h-8 text-green-600" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">時間範圍</p>
-                  <p className="text-2xl font-bold text-gray-900">{timeRange}</p>
-                </div>
-                <Calendar className="w-8 h-8 text-purple-600" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">數據狀態</p>
-                  <p className="text-2xl font-bold text-green-600">
-                    {dataLoading ? '載入中' : '已載入'}
-                  </p>
-                </div>
-                <Activity className="w-8 h-8 text-orange-600" />
-              </div>
-            </CardContent>
-          </Card>
+          {/* 技術指標 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              技術指標
+            </label>
+            <div className="space-y-2">
+              {['SMA', 'EMA', 'RSI', 'MACD', 'BB'].map((indicator) => (
+                <label key={indicator} className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={indicators.includes(indicator)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setIndicators([...indicators, indicator]);
+                      } else {
+                        setIndicators(indicators.filter(i => i !== indicator));
+                      }
+                    }}
+                    className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">{indicator}</span>
+                </label>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
-    </Layout>
+
+      {/* 主圖表區域 */}
+      <div className="bg-white shadow rounded-lg p-6 mb-6">
+        <h2 className="text-lg font-medium text-gray-900 mb-4">價格圖表</h2>
+        <div className="h-96 bg-gray-50 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-300">
+          <div className="text-center">
+            <div className="text-gray-500 text-lg font-medium mb-2">
+              TradingView K線圖表
+            </div>
+            <div className="text-gray-400">
+              包含價格數據和所選技術指標
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 技術指標圖表區域 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white shadow rounded-lg p-6">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">RSI 指標</h3>
+          <div className="h-48 bg-gray-50 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-300">
+            <div className="text-center">
+              <div className="text-gray-500 text-sm font-medium mb-1">
+                RSI 震盪指標
+              </div>
+              <div className="text-gray-400 text-xs">
+                相對強弱指標 (14期)
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white shadow rounded-lg p-6">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">MACD 指標</h3>
+          <div className="h-48 bg-gray-50 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-300">
+            <div className="text-center">
+              <div className="text-gray-500 text-sm font-medium mb-1">
+                MACD 指標
+              </div>
+              <div className="text-gray-400 text-xs">
+                指數平滑移動平均匯聚背馳
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 統計資訊 */}
+      <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-white shadow rounded-lg p-4">
+          <div className="text-sm text-gray-600">目前價格</div>
+          <div className="text-2xl font-bold text-gray-900">NT$ 575.00</div>
+          <div className="text-sm text-green-600">+2.50 (+0.44%)</div>
+        </div>
+
+        <div className="bg-white shadow rounded-lg p-4">
+          <div className="text-sm text-gray-600">日高</div>
+          <div className="text-lg font-semibold text-gray-900">NT$ 578.00</div>
+        </div>
+
+        <div className="bg-white shadow rounded-lg p-4">
+          <div className="text-sm text-gray-600">日低</div>
+          <div className="text-lg font-semibold text-gray-900">NT$ 572.50</div>
+        </div>
+
+        <div className="bg-white shadow rounded-lg p-4">
+          <div className="text-sm text-gray-600">成交量</div>
+          <div className="text-lg font-semibold text-gray-900">12.5M</div>
+        </div>
+      </div>
+    </div>
   );
 };
 

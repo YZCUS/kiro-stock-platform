@@ -1,37 +1,69 @@
-# Build stage
-FROM node:18-alpine AS builder
+# Multi-stage Docker build for production optimization
 
+# Stage 1: Dependencies
+FROM node:18-alpine AS dependencies
 WORKDIR /app
 
-# 複製 package 檔案
-COPY package*.json ./
+# Install dependencies based on the preferred package manager
+COPY package.json package-lock.json* ./
+RUN \
+  if [ -f package-lock.json ]; then npm ci --only=production; \
+  else echo "Lockfile not found." && exit 1; \
+  fi
 
-# 安裝所有依賴（包括開發依賴，用於構建）
-RUN npm ci
+# Stage 2: Build
+FROM node:18-alpine AS builder
+WORKDIR /app
 
-# 複製應用程式碼
+# Copy dependencies from previous stage
+COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 
-# 建置應用程式
+# Set build-time environment variables
+ENV NEXT_TELEMETRY_DISABLED 1
+ENV NODE_ENV production
+
+# Install all dependencies (including devDependencies for build)
+RUN npm ci
+
+# Build the application
 RUN npm run build
 
-# Production stage
+# Stage 3: Runtime
 FROM node:18-alpine AS runner
-
 WORKDIR /app
 
-# 複製 package 檔案
-COPY package*.json ./
+ENV NODE_ENV production
+ENV NEXT_TELEMETRY_DISABLED 1
 
-# 僅安裝生產依賴
-RUN npm ci --only=production && npm cache clean --force
+# Create non-root user for security
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
 
-# 複製構建結果
-COPY --from=builder /app/.next ./.next
+# Copy necessary files
 COPY --from=builder /app/public ./public
 
-# 暴露端口
+# Set the correct permission for prerender cache
+RUN mkdir .next
+RUN chown nextjs:nodejs .next
+
+# Automatically leverage output traces to reduce image size
+# https://nextjs.org/docs/advanced-features/output-file-tracing
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Switch to non-root user
+USER nextjs
+
+# Expose port
 EXPOSE 3000
 
-# 啟動命令
-CMD ["npm", "start"]
+ENV PORT 3000
+ENV HOSTNAME "0.0.0.0"
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/api/health || exit 1
+
+# Start the application
+CMD ["node", "server.js"]

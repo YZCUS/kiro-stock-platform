@@ -1,294 +1,131 @@
+/**
+ * 交易信號頁面組件
+ */
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { Layout } from '../Layout';
-import Button from '../ui/Button';
-import { 
-  Bell,
-  BarChart3,
-  List,
-  Grid3X3,
-  Download,
-  Settings,
-  Plus,
-  RefreshCw
-} from 'lucide-react';
-import { AppDispatch, RootState } from '../../store';
-import { fetchAllSignals } from '../../store/slices/signalsSlice';
-import SignalDashboard from './SignalDashboard';
-import SignalList from './SignalList';
-import SignalChart from './SignalChart';
-import type { TradingSignal } from '../../types';
-import type { SignalStats } from './SignalDashboard';
+import React, { useState } from 'react';
 
-const SignalPage: React.FC = () => {
-  const dispatch = useDispatch<AppDispatch>();
-  const { signals, loading, error } = useSelector((state: RootState) => state.signals);
-  
-  const [viewMode, setViewMode] = useState<'dashboard' | 'list' | 'chart'>('dashboard');
-  const [selectedStock, setSelectedStock] = useState<string | null>(null);
+export interface SignalPageProps {}
 
-  useEffect(() => {
-    dispatch(fetchAllSignals({
-      page: 1,
-      pageSize: 100,
-      // 可以添加更多篩選條件
-    }));
-  }, [dispatch]);
-
-  // 計算統計資料
-  const stats: SignalStats = React.useMemo(() => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-    const todaySignals = signals.filter(signal => 
-      new Date(signal.created_at) >= today
-    );
-
-    const thisWeekSignals = signals.filter(signal => 
-      new Date(signal.created_at) >= weekAgo
-    );
-
-    const byType = {
-      BUY: signals.filter(s => s.signal_type === 'BUY').length,
-      SELL: signals.filter(s => s.signal_type === 'SELL').length,
-      GOLDEN_CROSS: signals.filter(s => s.signal_type === 'GOLDEN_CROSS').length,
-      DEATH_CROSS: signals.filter(s => s.signal_type === 'DEATH_CROSS').length,
-      HOLD: signals.filter(s => s.signal_type === 'HOLD').length,
-    };
-
-    const byMarket = {
-      TW: signals.filter(s => s.market === 'TW').length,
-      US: signals.filter(s => s.market === 'US').length,
-    };
-
-    const averageConfidence = signals.length > 0 
-      ? signals.reduce((sum, signal) => sum + (signal.confidence || 0), 0) / signals.length
-      : 0;
-
-    return {
-      total: signals.length,
-      today: todaySignals.length,
-      thisWeek: thisWeekSignals.length,
-      byType,
-      byMarket,
-      averageConfidence,
-      accuracy: 0.75 // 模擬數據，實際應該從 API 獲取
-    };
-  }, [signals]);
-
-  // 模擬圖表數據
-  const chartData = React.useMemo(() => {
-    // 這裡應該從 API 獲取特定股票的 K 線數據
-    const mockCandleData = Array.from({ length: 30 }, (_, i) => {
-      const date = new Date();
-      date.setDate(date.getDate() - (29 - i));
-      const basePrice = 100 + Math.random() * 20;
-      const open = basePrice + (Math.random() - 0.5) * 2;
-      const close = open + (Math.random() - 0.5) * 4;
-      const high = Math.max(open, close) + Math.random() * 2;
-      const low = Math.min(open, close) - Math.random() * 2;
-      
-      return {
-        time: date.toISOString().split('T')[0],
-        open,
-        high,
-        low,
-        close,
-        volume: Math.floor(Math.random() * 1000000) + 100000
-      };
-    });
-
-    // 將信號轉換為圖表信號點
-    const signalPoints = selectedStock 
-      ? signals
-          .filter(signal => signal.symbol === selectedStock)
-          .map(signal => ({
-            time: signal.created_at.split('T')[0],
-            price: signal.price || 100,
-            type: signal.signal_type as any,
-            signal
-          }))
-      : [];
-
-    return { candleData: mockCandleData, signalPoints };
-  }, [signals, selectedStock]);
-
-  const handleRefresh = () => {
-    dispatch(fetchAllSignals({
-      page: 1,
-      pageSize: 100,
-    }));
-  };
-
-  const handleSignalView = (signal: TradingSignal) => {
-    setSelectedStock(signal.symbol);
-    setViewMode('chart');
-  };
-
-  const handleSignalDelete = (signal: TradingSignal) => {
-    if (confirm(`確定要刪除 ${signal.symbol} 的 ${signal.signal_type} 信號嗎？`)) {
-      // TODO: 實作刪除信號功能
-      console.log('刪除信號:', signal);
-    }
-  };
-
-  const handleExport = () => {
-    // TODO: 實作匯出功能
-    console.log('匯出信號數據');
-  };
-
-  const handleDetectSignals = () => {
-    // TODO: 實作手動偵測信號功能
-    console.log('手動偵測信號');
-  };
+const SignalPage: React.FC<SignalPageProps> = () => {
+  const [selectedStock, setSelectedStock] = useState<string>('');
 
   return (
-    <Layout>
-      <div className="space-y-6">
-        {/* 標題列 */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">交易信號</h1>
-            <p className="text-gray-600 mt-1">監控和分析股票交易信號</p>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              onClick={handleExport}
-            >
-              <Download className="w-4 h-4 mr-2" />
-              匯出數據
-            </Button>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-gray-900 mb-4">
+          交易信號分析
+        </h1>
+        <p className="text-gray-600">
+          即時監控股票交易信號，包括黃金交叉、死亡交叉等技術指標信號
+        </p>
+      </div>
 
-            <Button
-              variant="outline"
-              onClick={handleDetectSignals}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              手動偵測
-            </Button>
-            
-            <Button
-              onClick={handleRefresh}
-              disabled={loading}
-            >
-              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              刷新數據
-            </Button>
-          </div>
+      {/* 股票選擇器 */}
+      <div className="bg-white shadow rounded-lg p-6 mb-6">
+        <h2 className="text-lg font-medium text-gray-900 mb-4">選擇股票</h2>
+        <div className="flex items-center space-x-4">
+          <select
+            value={selectedStock}
+            onChange={(e) => setSelectedStock(e.target.value)}
+            className="border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            <option value="">請選擇股票</option>
+            <option value="2330.TW">台積電 (2330)</option>
+            <option value="2317.TW">鴻海 (2317)</option>
+            <option value="2454.TW">聯發科 (2454)</option>
+            <option value="AAPL">Apple (AAPL)</option>
+            <option value="GOOGL">Google (GOOGL)</option>
+            <option value="TSLA">Tesla (TSLA)</option>
+          </select>
         </div>
+      </div>
 
-        {/* 檢視模式切換 */}
-        <div className="flex items-center justify-between">
-          <div className="flex gap-1 border rounded-lg p-1">
-            <Button
-              variant={viewMode === 'dashboard' ? 'primary' : 'ghost'}
-              size="sm"
-              onClick={() => setViewMode('dashboard')}
-            >
-              <BarChart3 className="w-4 h-4 mr-2" />
-              儀表板
-            </Button>
-            <Button
-              variant={viewMode === 'list' ? 'primary' : 'ghost'}
-              size="sm"
-              onClick={() => setViewMode('list')}
-            >
-              <List className="w-4 h-4 mr-2" />
-              信號清單
-            </Button>
-            <Button
-              variant={viewMode === 'chart' ? 'primary' : 'ghost'}
-              size="sm"
-              onClick={() => setViewMode('chart')}
-            >
-              <Grid3X3 className="w-4 h-4 mr-2" />
-              圖表分析
-            </Button>
-          </div>
-
-          {viewMode === 'chart' && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">分析股票:</span>
-              <select
-                value={selectedStock || ''}
-                onChange={(e) => setSelectedStock(e.target.value || null)}
-                className="px-3 py-1 border border-gray-300 rounded text-sm"
-              >
-                <option value="">請選擇股票</option>
-                {Array.from(new Set(signals.map(s => s.symbol))).map(symbol => (
-                  <option key={symbol} value={symbol}>{symbol}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        {/* 錯誤提示 */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <div className="flex items-center gap-2 text-red-600">
-              <Bell className="w-4 h-4" />
-              <span>載入交易信號失敗: {error}</span>
-            </div>
-          </div>
-        )}
-
-        {/* 內容區域 */}
-        {viewMode === 'dashboard' && (
-          <SignalDashboard
-            signals={signals}
-            stats={stats}
-            loading={loading}
-            onRefresh={handleRefresh}
-            onViewAll={() => setViewMode('list')}
-          />
-        )}
-
-        {viewMode === 'list' && (
-          <SignalList
-            signals={signals}
-            loading={loading}
-            onSignalView={handleSignalView}
-            onSignalDelete={handleSignalDelete}
-            onRefresh={handleRefresh}
-          />
-        )}
-
-        {viewMode === 'chart' && (
-          <div className="space-y-6">
-            {selectedStock ? (
-              <SignalChart
-                candleData={chartData.candleData}
-                signals={chartData.signalPoints}
-                symbol={selectedStock}
-                loading={loading}
-                onRefresh={handleRefresh}
-                height={500}
-                showSignalLabels={true}
-                theme="light"
-              />
-            ) : (
-              <div className="text-center py-12">
-                <Bell className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">請選擇股票</h3>
-                <p className="text-gray-500 mb-4">選擇一支股票來查看其交易信號圖表分析</p>
-                <Button
-                  variant="outline"
-                  onClick={() => setViewMode('list')}
-                >
-                  查看信號清單
-                </Button>
+      {/* 信號圖表區域 */}
+      {selectedStock && (
+        <div className="bg-white shadow rounded-lg p-6 mb-6">
+          <h2 className="text-lg font-medium text-gray-900 mb-4">
+            {selectedStock} - 交易信號圖表
+          </h2>
+          <div className="h-96 bg-gray-50 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-300">
+            <div className="text-center">
+              <div className="text-gray-500 text-lg font-medium mb-2">
+                信號圖表將在此顯示
               </div>
-            )}
+              <div className="text-gray-400">
+                包含K線圖、技術指標和買賣信號標示
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 信號列表 */}
+      <div className="bg-white shadow rounded-lg p-6">
+        <h2 className="text-lg font-medium text-gray-900 mb-4">最新信號</h2>
+        <div className="space-y-4">
+          {/* 示例信號項目 */}
+          <div className="border-l-4 border-green-500 bg-green-50 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-medium text-green-800">
+                  黃金交叉信號 - 買入建議
+                </h3>
+                <p className="text-sm text-green-700 mt-1">
+                  台積電 (2330.TW) - MA5 向上突破 MA20
+                </p>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-medium text-green-800">NT$ 575.00</div>
+                <div className="text-xs text-green-600">2024-01-15 14:30</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-l-4 border-red-500 bg-red-50 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-medium text-red-800">
+                  死亡交叉信號 - 賣出建議
+                </h3>
+                <p className="text-sm text-red-700 mt-1">
+                  鴻海 (2317.TW) - MA5 向下跌破 MA20
+                </p>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-medium text-red-800">NT$ 105.50</div>
+                <div className="text-xs text-red-600">2024-01-15 13:45</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-l-4 border-blue-500 bg-blue-50 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-medium text-blue-800">
+                  RSI超賣信號 - 關注建議
+                </h3>
+                <p className="text-sm text-blue-700 mt-1">
+                  聯發科 (2454.TW) - RSI指標低於30，可能反彈
+                </p>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-medium text-blue-800">NT$ 890.00</div>
+                <div className="text-xs text-blue-600">2024-01-15 12:20</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {!selectedStock && (
+          <div className="text-center py-8">
+            <div className="text-gray-500">
+              請先選擇股票以查看相關交易信號
+            </div>
           </div>
         )}
       </div>
-    </Layout>
+    </div>
   );
 };
 
