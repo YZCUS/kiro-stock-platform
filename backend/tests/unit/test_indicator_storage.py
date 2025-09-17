@@ -5,9 +5,14 @@
 import asyncio
 import sys
 from datetime import date, timedelta
+from pathlib import Path
 
-# 添加項目根目錄到 Python 路徑
-sys.path.append('/app')
+# 添加測試配置路徑
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from test_config import setup_test_path
+
+# 設置測試環境路徑
+setup_test_path()
 
 from core.database import get_db
 from core.redis import redis_client

@@ -7,8 +7,12 @@ import subprocess
 import asyncio
 from pathlib import Path
 
-# 添加項目根目錄到 Python 路徑
-sys.path.append('/app')
+# 添加測試配置路徑
+sys.path.insert(0, str(Path(__file__).parent))
+from test_config import setup_test_path
+
+# 設置測試環境路徑
+setup_test_path()
 
 
 def run_test_script(script_name: str, description: str) -> bool:
@@ -16,8 +20,12 @@ def run_test_script(script_name: str, description: str) -> bool:
     print(f"\n{'='*60}")
     print(f"執行測試: {description}")
     print('='*60)
-    
-    script_path = Path(__file__).parent / script_name
+
+    # 如果已經是完整路徑，直接使用；否則在unit目錄下查找
+    if Path(script_name).is_absolute() or str(script_name).startswith('unit/'):
+        script_path = Path(script_name)
+    else:
+        script_path = Path(__file__).parent / "unit" / script_name
     
     try:
         result = subprocess.run([
@@ -56,13 +64,15 @@ async def run_async_test_script(script_name: str, description: str) -> bool:
     try:
         # 動態導入並執行
         if script_name == "test_indicator_calculator.py":
-            from test_indicator_calculator import run_tests
+            from unit.test_indicator_calculator import run_tests
             return run_tests()
         elif script_name == "test_technical_analysis_integration.py":
-            from test_technical_analysis_integration import run_all_tests
+            from unit.test_technical_analysis_integration import run_all_tests
             return await run_all_tests()
         else:
-            return run_test_script(script_name, description)
+            # 使用subprocess執行位於unit目錄下的測試
+            script_path = Path(__file__).parent / "unit" / script_name
+            return run_test_script(str(script_path), description)
             
     except Exception as e:
         print(f"💥 {description} - 執行異常: {str(e)}")

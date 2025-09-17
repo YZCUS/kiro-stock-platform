@@ -8,8 +8,9 @@ import asyncio
 from pathlib import Path
 from typing import List, Dict, Any
 
-# 添加項目根目錄到 Python 路徑
-sys.path.append('/app')
+# 使用測試配置設置路徑
+from test_config import setup_test_path
+setup_test_path()
 
 
 def run_unit_tests() -> Dict[str, bool]:
@@ -23,6 +24,22 @@ def run_unit_tests() -> Dict[str, bool]:
         ("test_technical_analysis.py", "技術分析測試"),
         ("test_data_collection.py", "數據收集測試"),
         ("test_backfill.py", "數據回補測試"),
+        ("test_infrastructure_cache.py", "快取服務測試"),
+        ("test_data_validation.py", "數據驗證服務測試"),
+        ("test_api_stocks.py", "股票API端點測試"),
+        ("test_api_signals.py", "交易信號API測試"),
+        ("test_api_analysis.py", "分析API測試"),
+        ("test_api_websocket.py", "WebSocket API測試"),
+        ("test_models_repositories.py", "模型庫CRUD測試"),
+        ("test_websocket_manager.py", "WebSocket連接管理測試"),
+        ("test_signal_notification.py", "信號通知服務測試"),
+        ("test_redis_pubsub.py", "Redis發布訂閱測試"),
+        ("test_scheduler.py", "數據收集排程器測試"),
+        ("test_storage.py", "技術指標存儲服務測試"),
+        ("test_sync.py", "技術指標同步服務測試"),
+        ("test_core_config.py", "核心配置測試"),
+        ("test_core_database.py", "資料庫連接測試"),
+        ("test_core_redis.py", "Redis連接測試"),
         ("benchmark_indicators.py", "指標效能基準測試")
     ]
     
@@ -73,7 +90,7 @@ async def run_integration_tests() -> Dict[str, bool]:
     print("\n" + "=" * 60)
     print("執行整合測試")
     print("=" * 60)
-    
+
     integration_tests = [
         ("test_technical_analysis_integration.py", "技術分析整合測試"),
         ("test_indicator_storage.py", "指標存儲整合測試"),
