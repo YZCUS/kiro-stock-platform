@@ -209,14 +209,20 @@ export function useBackfillStockData(
 
   return useMutation({
     mutationFn: ({ stockId, params }) => StocksApiService.backfillStockData(stockId, params),
-    onSuccess: (_, { stockId }) => {
-      // 使價格歷史緩存失效
+    onSuccess: (_, { stockId, params }) => {
+      // 直接使特定股票的價格歷史緩存失效
       queryClient.invalidateQueries({
-        queryKey: STOCKS_QUERY_KEYS.prices(),
-        predicate: (query) => {
-          const [, , id] = query.queryKey;
-          return id === stockId;
-        }
+        queryKey: STOCKS_QUERY_KEYS.priceHistory(stockId, params)
+      });
+
+      // 也使該股票的最新價格緩存失效
+      queryClient.invalidateQueries({
+        queryKey: STOCKS_QUERY_KEYS.latestPrice(stockId)
+      });
+
+      // 如果需要使所有該股票相關的價格查詢失效，可以使用更精確的 queryKey
+      queryClient.invalidateQueries({
+        queryKey: [...STOCKS_QUERY_KEYS.prices(), stockId]
       });
     },
     ...options,

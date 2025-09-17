@@ -4,7 +4,19 @@
 'use client';
 
 import React from 'react';
-import HealthCheck from '../../components/SystemHealth/HealthCheck';
+import dynamic from 'next/dynamic';
+
+const HealthCheck = dynamic(
+  () => import('../../components/SystemHealth/HealthCheck'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    ),
+  }
+);
 
 export default function SystemPage() {
   return (

@@ -10,7 +10,14 @@ from typing import Optional
 from core.config import settings
 from core.database import engine, Base
 from api.v1.api import api_router
-from api.v1.websocket import websocket_endpoint, initialize_websocket_manager, shutdown_websocket_manager, get_websocket_cluster_stats
+from api.v1.websocket import (
+    websocket_endpoint,
+    initialize_websocket_manager,
+    shutdown_websocket_manager,
+    get_websocket_cluster_stats,
+    health_check_websocket_service,
+    websocket_service_state
+)
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -30,12 +37,18 @@ async def lifespan(app: FastAPI):
     logger.info("資料庫初始化完成")
 
     # 初始化 WebSocket 管理器
+    websocket_init_success = False
     try:
-        await initialize_websocket_manager()
-        logger.info("WebSocket管理器初始化完成")
+        websocket_init_success = await initialize_websocket_manager()
+        if websocket_init_success:
+            logger.info("WebSocket管理器初始化完成")
+        else:
+            logger.warning("WebSocket管理器初始化失敗，應用將以降級模式運行")
     except Exception as e:
-        logger.error(f"WebSocket管理器初始化失敗: {e}")
-        # 不拋出異常，允許應用程式繼續啟動（降級模式）
+        logger.error(f"WebSocket管理器初始化發生嚴重錯誤: {e}")
+        logger.error("應用程式無法啟動，請檢查配置和依賴服務")
+        # 對於嚴重錯誤，停止應用程式啟動
+        raise RuntimeError(f"WebSocket服務初始化失敗: {e}") from e
 
     logger.info("股票分析平台啟動完成")
 
@@ -88,9 +101,23 @@ async def root():
 @app.get("/health")
 async def health_check():
     """健康檢查端點"""
+    # 檢查WebSocket服務狀態
+    websocket_health = await health_check_websocket_service()
+
+    overall_status = "healthy"
+    if websocket_health["status"] == "degraded":
+        overall_status = "degraded"
+
     return {
-        "status": "healthy",
-        "service": "stock-analysis-platform"
+        "status": overall_status,
+        "service": "stock-analysis-platform",
+        "components": {
+            "websocket": websocket_health,
+            "database": {
+                "status": "healthy"  # 可以添加更詳細的資料庫檢查
+            }
+        },
+        "timestamp": websocket_health["timestamp"]
     }
 
 
@@ -112,12 +139,18 @@ async def websocket_stats():
 @app.websocket("/ws")
 async def websocket_global(websocket: WebSocket, client_id: Optional[str] = None):
     """全局 WebSocket 端點"""
+    if websocket_service_state.degraded_mode:
+        await websocket.close(code=1013, reason="WebSocket service temporarily unavailable")
+        return
     await websocket_endpoint(websocket, None, client_id)
 
 
 @app.websocket("/ws/stocks/{stock_id}")
 async def websocket_stock(websocket: WebSocket, stock_id: int, client_id: Optional[str] = None):
     """股票專用 WebSocket 端點"""
+    if websocket_service_state.degraded_mode:
+        await websocket.close(code=1013, reason="WebSocket service temporarily unavailable")
+        return
     await websocket_endpoint(websocket, stock_id, client_id)
 
 

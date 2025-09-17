@@ -4,11 +4,29 @@
 'use client';
 
 import React, { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useStocks } from '../../hooks/useStocks';
 import { useSignals } from '../../hooks/useSignals';
 import { useWebSocket, useMarketStatus, useMultipleStockSubscriptions } from '../../hooks/useWebSocket';
-import RealtimePriceChart from './RealtimePriceChart';
-import RealtimeSignals from './RealtimeSignals';
+
+// 動態載入重型圖表組件
+const RealtimePriceChart = dynamic(() => import('./RealtimePriceChart'), {
+  ssr: false,
+  loading: () => (
+    <div className="bg-white shadow rounded-lg p-6 h-96 flex items-center justify-center">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+    </div>
+  ),
+});
+
+const RealtimeSignals = dynamic(() => import('./RealtimeSignals'), {
+  ssr: false,
+  loading: () => (
+    <div className="bg-white shadow rounded-lg p-6 h-64 flex items-center justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+    </div>
+  ),
+});
 
 export interface RealtimeDashboardProps {}
 
@@ -194,8 +212,11 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
           {activeStock ? (
             <RealtimePriceChart
               key={activeStock.id}
-              stockId={activeStock.id}
-              symbol={activeStock.symbol}
+              stock={{
+                id: activeStock.id,
+                symbol: activeStock.symbol,
+                name: activeStock.name
+              }}
               height={600}
             />
           ) : (
@@ -279,8 +300,11 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
                     <p className="text-sm text-gray-600">{stock.name}</p>
                   </div>
                   <RealtimePriceChart
-                    stockId={stockId}
-                    symbol={stock.symbol}
+                    stock={{
+                      id: stockId,
+                      symbol: stock.symbol,
+                      name: stock.name
+                    }}
                     height={200}
                   />
                 </div>

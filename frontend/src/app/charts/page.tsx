@@ -40,8 +40,11 @@ export default function ChartsPage() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
         <div className="xl:col-span-2">
           <RealtimePriceChart
-            stockId={1}
-            symbol="2330.TW"
+            stock={{
+              id: 1,
+              symbol: "2330.TW",
+              name: "台積電"
+            }}
             height={500}
           />
         </div>
@@ -55,13 +58,19 @@ export default function ChartsPage() {
       {/* 多股票監控面板 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <RealtimePriceChart
-          stockId={2}
-          symbol="2317.TW"
+          stock={{
+            id: 2,
+            symbol: "2317.TW",
+            name: "鴻海"
+          }}
           height={300}
         />
         <RealtimePriceChart
-          stockId={4}
-          symbol="AAPL"
+          stock={{
+            id: 4,
+            symbol: "AAPL",
+            name: "Apple Inc."
+          }}
           height={300}
         />
       </div>

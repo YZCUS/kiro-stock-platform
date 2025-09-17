@@ -27,6 +27,9 @@ def run_unit_tests() -> Dict[str, bool]:
         ("test_infrastructure_cache.py", "快取服務測試"),
         ("test_data_validation.py", "數據驗證服務測試"),
         ("test_api_stocks.py", "股票API端點測試"),
+        ("test_api_stocks_optimized.py", "股票API優化功能測試"),
+        ("test_crud_stock_optimized.py", "股票CRUD優化功能測試"),
+        ("test_api_performance.py", "API性能測試"),
         ("test_api_signals.py", "交易信號API測試"),
         ("test_api_analysis.py", "分析API測試"),
         ("test_api_websocket.py", "WebSocket API測試"),
@@ -95,13 +98,17 @@ async def run_integration_tests() -> Dict[str, bool]:
         ("test_technical_analysis_integration.py", "技術分析整合測試"),
         ("test_indicator_storage.py", "指標存儲整合測試"),
         ("test_trading_signal_detector.py", "交易信號偵測測試"),
-        ("test_buy_sell_signals.py", "買賣點標示測試")
+        ("test_buy_sell_signals.py", "買賣點標示測試"),
+        ("test_stocks_integration.py", "股票API整合測試")
     ]
     
     results = {}
     
     for test_file, description in integration_tests:
-        test_path = Path(__file__).parent / "unit" / test_file
+        if test_file == "test_stocks_integration.py":
+            test_path = Path(__file__).parent / "integration" / test_file
+        else:
+            test_path = Path(__file__).parent / "unit" / test_file
         
         if test_path.exists():
             print(f"\n執行: {description}")
@@ -120,6 +127,9 @@ async def run_integration_tests() -> Dict[str, bool]:
                     success = await run_all_tests()
                 elif test_file == "test_buy_sell_signals.py":
                     from unit.test_buy_sell_signals import run_all_tests
+                    success = await run_all_tests()
+                elif test_file == "test_stocks_integration.py":
+                    from integration.test_stocks_integration import run_all_tests
                     success = await run_all_tests()
                 else:
                     # 使用subprocess執行

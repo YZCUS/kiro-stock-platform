@@ -18,27 +18,26 @@ export function useWebSocket() {
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 穩定化事件處理器，避免不必要的重新訂閱
+  const handleWelcome = useCallback(() => {
+    setIsConnected(true);
+    setIsReconnecting(false);
+    setError(null);
+    dispatch(setWebSocketConnected(true));
+    dispatch(setWebSocketReconnecting(false));
+    dispatch(setWebSocketError(null));
+  }, [dispatch]);
+
+  const handleError = useCallback((message: WebSocketMessage) => {
+    const errorMsg = message.message || 'WebSocket connection error';
+    setError(errorMsg);
+    setIsConnected(false);
+    dispatch(setWebSocketConnected(false));
+    dispatch(setWebSocketError(errorMsg));
+  }, [dispatch]);
+
   useEffect(() => {
     const manager = wsManager.current;
-
-    // 連接狀態處理
-    const handleWelcome = () => {
-      setIsConnected(true);
-      setIsReconnecting(false);
-      setError(null);
-      dispatch(setWebSocketConnected(true));
-      dispatch(setWebSocketReconnecting(false));
-      dispatch(setWebSocketError(null));
-    };
-
-    // 錯誤處理
-    const handleError = (message: WebSocketMessage) => {
-      const errorMsg = message.message || 'WebSocket connection error';
-      setError(errorMsg);
-      setIsConnected(false);
-      dispatch(setWebSocketConnected(false));
-      dispatch(setWebSocketError(errorMsg));
-    };
 
     // 註冊事件監聽器
     manager.on('welcome', handleWelcome);
@@ -56,7 +55,7 @@ export function useWebSocket() {
       manager.off('welcome', handleWelcome);
       manager.off('error', handleError);
     };
-  }, [dispatch]);
+  }, [dispatch, handleWelcome, handleError]);
 
   // 手動重連
   const reconnect = useCallback(() => {
@@ -122,6 +121,15 @@ export function useStockSubscription(stockId: number | null, symbol?: string) {
   const wsManager = useRef(getWebSocketManager());
   const [isSubscribed, setIsSubscribed] = useState(false);
 
+  // 穩定化事件處理器
+  const handleWelcome = useCallback(() => {
+    if (stockId) {
+      const manager = wsManager.current;
+      const success = manager.subscribeToStock(stockId, symbol);
+      setIsSubscribed(success);
+    }
+  }, [stockId, symbol]);
+
   useEffect(() => {
     if (!stockId) {
       setIsSubscribed(false);
@@ -137,13 +145,6 @@ export function useStockSubscription(stockId: number | null, symbol?: string) {
     }
 
     // 監聽連接建立事件，連接後自動訂閱
-    const handleWelcome = () => {
-      if (stockId) {
-        const success = manager.subscribeToStock(stockId, symbol);
-        setIsSubscribed(success);
-      }
-    };
-
     manager.on('welcome', handleWelcome);
 
     // 清理函數
@@ -154,7 +155,7 @@ export function useStockSubscription(stockId: number | null, symbol?: string) {
       }
       manager.off('welcome', handleWelcome);
     };
-  }, [stockId, symbol]);
+  }, [stockId, symbol, handleWelcome]);
 
   return { isSubscribed };
 }
@@ -315,6 +316,20 @@ export function useMultipleStockSubscriptions(stockIds: number[]) {
   const wsManager = useRef(getWebSocketManager());
   const [subscribedStocks, setSubscribedStocks] = useState<Set<number>>(new Set());
 
+  // 穩定化事件處理器
+  const handleWelcome = useCallback(() => {
+    const manager = wsManager.current;
+    const newSubscribed = new Set<number>();
+
+    stockIds.forEach(stockId => {
+      const success = manager.subscribeToStock(stockId);
+      if (success) {
+        newSubscribed.add(stockId);
+      }
+    });
+    setSubscribedStocks(newSubscribed);
+  }, [stockIds]);
+
   useEffect(() => {
     const manager = wsManager.current;
     const newSubscribed = new Set<number>();
@@ -330,16 +345,6 @@ export function useMultipleStockSubscriptions(stockIds: number[]) {
     });
 
     // 處理連接建立事件
-    const handleWelcome = () => {
-      stockIds.forEach(stockId => {
-        const success = manager.subscribeToStock(stockId);
-        if (success) {
-          newSubscribed.add(stockId);
-        }
-      });
-      setSubscribedStocks(new Set(newSubscribed));
-    };
-
     manager.on('welcome', handleWelcome);
     setSubscribedStocks(newSubscribed);
 
@@ -350,7 +355,7 @@ export function useMultipleStockSubscriptions(stockIds: number[]) {
       });
       manager.off('welcome', handleWelcome);
     };
-  }, [stockIds]);
+  }, [stockIds, handleWelcome]);
 
   return {
     subscribedStocks: Array.from(subscribedStocks),

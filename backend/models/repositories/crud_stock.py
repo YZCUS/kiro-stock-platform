@@ -171,10 +171,10 @@ class CRUDStock(CRUDBase[Stock, Dict[str, Any], Dict[str, Any]]):
         return result.scalars().all()
     
     async def update_stock_name(
-        self, 
-        db: AsyncSession, 
-        *, 
-        stock_id: int, 
+        self,
+        db: AsyncSession,
+        *,
+        stock_id: int,
         name: str
     ) -> Optional[Stock]:
         """更新股票名稱"""
@@ -185,6 +185,116 @@ class CRUDStock(CRUDBase[Stock, Dict[str, Any], Dict[str, Any]]):
             await db.commit()
             await db.refresh(stock)
         return stock
+
+    async def get_stocks_with_filters(
+        self,
+        db: AsyncSession,
+        *,
+        market: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        search_term: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[Stock]:
+        """根據過濾條件取得股票清單（在資料庫層進行過濾）"""
+        query = select(Stock)
+
+        # 構建過濾條件
+        conditions = []
+
+        if market is not None:
+            conditions.append(Stock.market == market)
+
+        if is_active is not None:
+            conditions.append(Stock.is_active == is_active)
+
+        if search_term:
+            search_pattern = f"%{search_term}%"
+            conditions.append(
+                or_(
+                    Stock.symbol.ilike(search_pattern),
+                    Stock.name.ilike(search_pattern)
+                )
+            )
+
+        # 應用所有條件
+        if conditions:
+            query = query.where(and_(*conditions))
+
+        # 添加排序、分頁
+        query = query.order_by(Stock.symbol).offset(skip).limit(limit)
+
+        result = await db.execute(query)
+        return result.scalars().all()
+
+    async def count_stocks_with_filters(
+        self,
+        db: AsyncSession,
+        *,
+        market: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        search_term: Optional[str] = None
+    ) -> int:
+        """計算符合過濾條件的股票總數"""
+        from sqlalchemy import func
+
+        query = select(func.count(Stock.id))
+
+        # 構建過濾條件
+        conditions = []
+
+        if market is not None:
+            conditions.append(Stock.market == market)
+
+        if is_active is not None:
+            conditions.append(Stock.is_active == is_active)
+
+        if search_term:
+            search_pattern = f"%{search_term}%"
+            conditions.append(
+                or_(
+                    Stock.symbol.ilike(search_pattern),
+                    Stock.name.ilike(search_pattern)
+                )
+            )
+
+        # 應用所有條件
+        if conditions:
+            query = query.where(and_(*conditions))
+
+        result = await db.execute(query)
+        return result.scalar()
+
+    async def get_by_symbol_and_market(
+        self,
+        db: AsyncSession,
+        symbol: str,
+        market: str
+    ) -> Optional[Stock]:
+        """根據股票代號和市場取得股票（用於API兼容性）"""
+        return await self.get_by_symbol(db, symbol=symbol, market=market)
+
+    async def search_by_symbol(
+        self,
+        db: AsyncSession,
+        symbol: str,
+        market: Optional[str] = None,
+        limit: int = 20
+    ) -> List[Stock]:
+        """搜尋股票代號（模糊匹配）"""
+        query = select(Stock)
+
+        # 搜尋條件
+        search_pattern = f"%{symbol}%"
+        conditions = [Stock.symbol.ilike(search_pattern)]
+
+        if market:
+            conditions.append(Stock.market == market)
+
+        query = query.where(and_(*conditions)).order_by(Stock.symbol).limit(limit)
+
+        result = await db.execute(query)
+        return result.scalars().all()
 
 
 # 建立全域實例

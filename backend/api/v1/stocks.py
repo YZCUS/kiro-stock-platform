@@ -1,5 +1,13 @@
 """
 股票相關API端點
+
+性能優化說明：
+- 所有過濾條件都在資料庫層執行，避免不必要的數據傳輸
+- 實現了真正的分頁機制，支援大數據量查詢
+- 使用索引建議：在 symbol, market, is_active 欄位上創建組合索引
+  CREATE INDEX idx_stocks_market_active ON stocks(market, is_active);
+  CREATE INDEX idx_stocks_symbol_search ON stocks(symbol);
+  CREATE INDEX idx_stocks_name_search ON stocks(name);
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,30 +92,60 @@ class DataCollectionResponse(BaseModel):
     errors: List[str] = []
 
 
-@router.get("/", response_model=List[StockResponse])
+class StockListResponse(BaseModel):
+    """股票清單響應模型"""
+    items: List[StockResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+@router.get("/", response_model=StockListResponse)
 async def get_stocks(
-    market: Optional[str] = Query(None, description="市場代碼"),
-    active_only: bool = Query(True, description="只返回活躍股票"),
-    limit: int = Query(100, description="返回數量限制"),
+    market: Optional[str] = Query(None, description="市場代碼 (TW/US)"),
+    is_active: Optional[bool] = Query(True, description="股票狀態篩選"),
+    search: Optional[str] = Query(None, description="搜尋關鍵字（股票代號或名稱）"),
+    page: int = Query(1, ge=1, description="頁碼"),
+    page_size: int = Query(50, ge=1, le=200, description="每頁數量"),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    取得股票清單
+    取得股票清單（支援過濾和分頁）
     """
     try:
-        stocks = await stock_crud.get_multi(db, limit=limit)
-        
-        # 過濾條件
-        filtered_stocks = []
-        for stock in stocks:
-            if market and stock.market != market:
-                continue
-            if active_only and not stock.is_active:
-                continue
-            filtered_stocks.append(stock)
-        
-        return filtered_stocks
-    
+        # 計算分頁偏移量
+        skip = (page - 1) * page_size
+
+        # 在資料庫層進行過濾和分頁
+        stocks = await stock_crud.get_stocks_with_filters(
+            db,
+            market=market,
+            is_active=is_active,
+            search_term=search,
+            skip=skip,
+            limit=page_size
+        )
+
+        # 計算總數（用於分頁信息）
+        total_count = await stock_crud.count_stocks_with_filters(
+            db,
+            market=market,
+            is_active=is_active,
+            search_term=search
+        )
+
+        # 計算總頁數
+        total_pages = (total_count + page_size - 1) // page_size
+
+        return StockListResponse(
+            items=[StockResponse.from_orm(stock) for stock in stocks],
+            total=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
+        )
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"取得股票清單失敗: {str(e)}")
 
@@ -635,21 +673,79 @@ async def batch_create_stocks(
         raise HTTPException(status_code=500, detail=f"批次新增股票失敗: {str(e)}")
 
 
-@router.get("/search/{symbol}", response_model=List[StockResponse])
+@router.get("/search", response_model=StockListResponse)
 async def search_stocks(
-    symbol: str,
-    market: Optional[str] = Query(None, description="市場代碼"),
+    q: str = Query(..., description="搜尋關鍵字（股票代號或名稱）", min_length=1),
+    market: Optional[str] = Query(None, description="市場代碼 (TW/US)"),
+    is_active: Optional[bool] = Query(True, description="股票狀態篩選"),
+    page: int = Query(1, ge=1, description="頁碼"),
+    page_size: int = Query(20, ge=1, le=100, description="每頁數量"),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    搜尋股票
+    搜尋股票（支援分頁）
     """
     try:
-        stocks = await stock_crud.search_by_symbol(db, symbol, market)
-        return stocks
-    
+        # 計算分頁偏移量
+        skip = (page - 1) * page_size
+
+        # 在資料庫層進行搜尋和分頁
+        stocks = await stock_crud.get_stocks_with_filters(
+            db,
+            market=market,
+            is_active=is_active,
+            search_term=q,
+            skip=skip,
+            limit=page_size
+        )
+
+        # 計算總數
+        total_count = await stock_crud.count_stocks_with_filters(
+            db,
+            market=market,
+            is_active=is_active,
+            search_term=q
+        )
+
+        # 計算總頁數
+        total_pages = (total_count + page_size - 1) // page_size
+
+        return StockListResponse(
+            items=[StockResponse.from_orm(stock) for stock in stocks],
+            total=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
+        )
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"搜尋股票失敗: {str(e)}")
+
+
+@router.get("/simple", response_model=List[StockResponse])
+async def get_stocks_simple(
+    market: Optional[str] = Query(None, description="市場代碼 (TW/US)"),
+    is_active: bool = Query(True, description="只返回活躍股票"),
+    limit: int = Query(100, ge=1, le=1000, description="返回數量限制"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    取得股票清單（簡化版本，向後兼容）
+    """
+    try:
+        # 使用優化後的資料庫查詢
+        stocks = await stock_crud.get_stocks_with_filters(
+            db,
+            market=market,
+            is_active=is_active,
+            skip=0,
+            limit=limit
+        )
+
+        return [StockResponse.from_orm(stock) for stock in stocks]
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"取得股票清單失敗: {str(e)}")
 
 
 @router.get("/{symbol}/signals", response_model=List[TradingSignalResponse])

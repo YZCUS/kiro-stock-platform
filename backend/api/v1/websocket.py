@@ -184,16 +184,36 @@ class WebSocketService:
 # WebSocket 端點
 async def websocket_endpoint(websocket: WebSocket, stock_id: Optional[int] = None, client_id: Optional[str] = None):
     """
-    WebSocket 端點處理函數 - 支援多Worker環境
+    WebSocket 端點處理函數 - 支援多Worker環境和降級模式
     """
+    # 檢查服務狀態
+    if websocket_service_state.degraded_mode:
+        logger.warning(f"WebSocket服務處於降級模式，拒絕新連接: {client_id}")
+        await websocket.close(code=1013, reason="Service temporarily unavailable")
+        return
+
     # 取得資料庫連接
     db_gen = get_db_session()
     db = await db_gen.__anext__()
 
     try:
         # 確保管理器已初始化
+        if not websocket_service_state.is_initialized:
+            logger.error("WebSocket管理器未初始化，嘗試重新初始化...")
+            success = await initialize_websocket_manager()
+            if not success:
+                await websocket.close(code=1011, reason="Service initialization failed")
+                return
+
+        # 檢查Redis廣播器連接
         if not redis_broadcaster.is_connected:
-            await manager.initialize()
+            try:
+                await manager.initialize()
+            except Exception as init_error:
+                logger.error(f"初始化WebSocket管理器失敗: {init_error}")
+                websocket_service_state.set_degraded_mode("管理器初始化失敗")
+                await websocket.close(code=1011, reason="Service unavailable")
+                return
 
         # 建立連接
         await manager.connect(websocket, client_id)
@@ -224,47 +244,187 @@ async def websocket_endpoint(websocket: WebSocket, stock_id: Optional[int] = Non
                 await WebSocketService.handle_message(websocket, message, db)
 
             except WebSocketDisconnect:
+                logger.info(f"WebSocket客戶端正常斷開連接: {client_id}")
                 break
             except json.JSONDecodeError as e:
-                await manager.send_personal_message({
-                    "type": "error",
-                    "message": f"JSON格式錯誤: {str(e)}"
-                }, websocket)
+                logger.warning(f"WebSocket收到無效JSON: {str(e)}")
+                try:
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": f"JSON格式錯誤: {str(e)}"
+                    }, websocket)
+                except Exception:
+                    # 如果無法發送錯誤消息，直接斷開連接
+                    logger.error("無法發送錯誤消息，斷開連接")
+                    break
+            except ConnectionResetError:
+                logger.info(f"WebSocket連接被重置: {client_id}")
+                break
+            except asyncio.CancelledError:
+                logger.info(f"WebSocket任務被取消: {client_id}")
+                break
             except Exception as e:
-                logger.error(f"處理WebSocket消息時發生錯誤: {e}")
-                await manager.send_personal_message({
-                    "type": "error",
-                    "message": f"處理消息失敗: {str(e)}"
-                }, websocket)
+                logger.error(f"WebSocket處理消息時發生未預期錯誤: {e}")
+                try:
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": f"處理消息失敗: {str(e)}"
+                    }, websocket)
+                    # 對於嚴重錯誤，考慮斷開連接
+                    if isinstance(e, (OSError, IOError)):
+                        logger.error("網絡錯誤，斷開WebSocket連接")
+                        break
+                except Exception as send_error:
+                    logger.error(f"無法發送錯誤消息，斷開連接: {send_error}")
+                    break
 
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket連接已斷開: {client_id}")
     except Exception as e:
-        logger.error(f"WebSocket連接錯誤: {e}")
+        logger.error(f"WebSocket連接發生嚴重錯誤: {e}")
+        # 記錄詳細錯誤信息用於調試
+        import traceback
+        logger.error(f"WebSocket錯誤堆棧: {traceback.format_exc()}")
 
     finally:
-        # 清理連接
-        await manager.disconnect(websocket)
-        # 關閉資料庫連接
-        await db.close()
+        # 確保資源清理
+        try:
+            # 清理WebSocket連接
+            await manager.disconnect(websocket)
+            logger.debug(f"WebSocket連接已清理: {client_id}")
+        except Exception as cleanup_error:
+            logger.error(f"清理WebSocket連接時發生錯誤: {cleanup_error}")
+
+        try:
+            # 關閉資料庫連接
+            await db.close()
+            logger.debug("資料庫連接已關閉")
+        except Exception as db_error:
+            logger.error(f"關閉資料庫連接時發生錯誤: {db_error}")
+
+        # 最後確保資料庫生成器正確關閉
+        try:
+            await db_gen.aclose()
+        except Exception as gen_error:
+            logger.error(f"關閉資料庫生成器時發生錯誤: {gen_error}")
+
+
+# WebSocket服務狀態管理
+class WebSocketServiceState:
+    """WebSocket服務狀態管理器"""
+
+    def __init__(self):
+        self.is_initialized = False
+        self.is_healthy = False
+        self.initialization_error = None
+        self.degraded_mode = False
+
+    def set_initialized(self, success: bool = True, error: Exception = None):
+        """設置初始化狀態"""
+        self.is_initialized = success
+        self.is_healthy = success
+        self.initialization_error = error
+        self.degraded_mode = not success
+
+    def set_degraded_mode(self, reason: str):
+        """設置降級模式"""
+        self.degraded_mode = True
+        self.is_healthy = False
+        logger.warning(f"WebSocket服務進入降級模式: {reason}")
+
+# 全域服務狀態
+websocket_service_state = WebSocketServiceState()
 
 
 # 管理器生命週期管理
 async def initialize_websocket_manager():
     """初始化WebSocket管理器"""
     try:
+        logger.info("開始初始化WebSocket管理器...")
+
+        # 檢查Redis連接
+        from core.redis import redis_client
+        if not redis_client.is_connected:
+            try:
+                await redis_client.connect()
+                logger.info("Redis連接已建立")
+            except Exception as redis_error:
+                logger.error(f"Redis連接失敗: {redis_error}")
+                websocket_service_state.set_degraded_mode("Redis連接失敗")
+                return False
+
+        # 初始化WebSocket管理器
         await manager.initialize()
-        logger.info("WebSocket管理器初始化成功")
+
+        # 驗證管理器功能
+        stats = manager.get_connection_stats()
+        logger.info(f"WebSocket管理器初始化成功，狀態: {stats}")
+
+        websocket_service_state.set_initialized(True)
+        return True
+
     except Exception as e:
         logger.error(f"WebSocket管理器初始化失敗: {e}")
-        raise
+        websocket_service_state.set_initialized(False, e)
+
+        # 決定是否應該讓整個應用程式失敗
+        if isinstance(e, (ConnectionError, OSError)):
+            # 網絡相關錯誤，可以降級運行
+            websocket_service_state.set_degraded_mode(f"初始化錯誤: {str(e)}")
+            return False
+        else:
+            # 嚴重錯誤，重新拋出異常
+            raise
 
 
 async def shutdown_websocket_manager():
     """關閉WebSocket管理器"""
     try:
-        await manager.shutdown()
-        logger.info("WebSocket管理器已關閉")
+        logger.info("開始關閉WebSocket管理器...")
+
+        if websocket_service_state.is_initialized:
+            # 獲取最終統計信息
+            try:
+                final_stats = manager.get_connection_stats()
+                logger.info(f"WebSocket管理器關閉前統計: {final_stats}")
+            except Exception:
+                pass  # 忽略統計錯誤
+
+            # 關閉管理器
+            await manager.shutdown()
+            logger.info("WebSocket管理器已關閉")
+        else:
+            logger.info("WebSocket管理器未初始化，跳過關閉")
+
+        # 重置狀態
+        websocket_service_state.set_initialized(False)
+
     except Exception as e:
         logger.error(f"WebSocket管理器關閉失敗: {e}")
+        # 關閉失敗不應該阻止應用程式正常退出
+
+
+async def health_check_websocket_service() -> dict:
+    """WebSocket服務健康檢查"""
+    health_info = {
+        "service": "websocket",
+        "status": "healthy" if websocket_service_state.is_healthy else "degraded",
+        "initialized": websocket_service_state.is_initialized,
+        "degraded_mode": websocket_service_state.degraded_mode,
+        "timestamp": datetime.now().isoformat()
+    }
+
+    if websocket_service_state.initialization_error:
+        health_info["error"] = str(websocket_service_state.initialization_error)
+
+    if websocket_service_state.is_initialized:
+        try:
+            stats = manager.get_connection_stats()
+            health_info["connections"] = stats
+        except Exception as e:
+            health_info["stats_error"] = str(e)
+
+    return health_info
 
 
 # 叢集統計端點

@@ -6,19 +6,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart, IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts';
 import { usePriceUpdates, useIndicatorUpdates } from '../../hooks/useWebSocket';
-import { RealtimePriceData } from '../../types';
+import { RealtimePriceData, Stock } from '../../types';
 
 export interface RealtimePriceChartProps {
-  stockId: number;
-  symbol: string;
+  stock: Pick<Stock, 'id' | 'symbol' | 'name'>;
   height?: number;
 }
 
 const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
-  stockId,
-  symbol,
+  stock,
   height = 400
 }) => {
+  const { id: stockId, symbol, name: stockName } = stock;
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -237,7 +236,7 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-medium text-gray-900">
-              {symbol} 即時價格圖表
+              {symbol} {stockName && `(${stockName})`} 即時價格圖表
             </h3>
             {lastUpdate && (
               <p className="text-sm text-gray-500">

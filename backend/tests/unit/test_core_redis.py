@@ -31,28 +31,49 @@ class TestRedisClient(unittest.TestCase):
         """測試Redis客戶端初始化"""
         client = RedisClient()
         self.assertIsNone(client.redis_client)
+        self.assertIsNone(client.connection_pool)
+        self.assertFalse(client._is_connected)
+        self.assertFalse(client.is_connected)
 
-    @patch('core.redis.redis.from_url')
+    @patch('core.redis.redis.ConnectionPool.from_url')
+    @patch('core.redis.redis.Redis')
     @patch('core.redis.settings')
-    async def test_connect_success(self, mock_settings, mock_from_url):
+    async def test_connect_success(self, mock_settings, mock_redis_cls, mock_pool_from_url):
         """測試Redis連接 - 成功"""
         # 設置模擬
         mock_settings.REDIS_URL = "redis://localhost:6379"
+
+        mock_pool = AsyncMock()
+        mock_pool_from_url.return_value = mock_pool
+
         mock_redis = AsyncMock()
-        mock_from_url.return_value = mock_redis
+        mock_redis_cls.return_value = mock_redis
         mock_redis.ping.return_value = True
 
         # 測試連接
         await self.redis_client.connect()
 
-        # 驗證
-        mock_from_url.assert_called_once_with(
+        # 驗證連接池創建
+        mock_pool_from_url.assert_called_once_with(
             "redis://localhost:6379",
             encoding="utf-8",
-            decode_responses=True
+            decode_responses=True,
+            max_connections=20,
+            retry_on_timeout=True,
+            socket_keepalive=True,
+            socket_keepalive_options={},
+            health_check_interval=30
         )
+
+        # 驗證Redis客戶端創建
+        mock_redis_cls.assert_called_once_with(connection_pool=mock_pool)
         mock_redis.ping.assert_called_once()
+
+        # 驗證狀態更新
         self.assertEqual(self.redis_client.redis_client, mock_redis)
+        self.assertEqual(self.redis_client.connection_pool, mock_pool)
+        self.assertTrue(self.redis_client._is_connected)
+        self.assertTrue(self.redis_client.is_connected)
 
     @patch('core.redis.redis.from_url')
     @patch('core.redis.settings')
@@ -66,8 +87,10 @@ class TestRedisClient(unittest.TestCase):
         # 測試連接失敗
         await self.redis_client.connect()
 
-        # 驗證連接失敗後client為None
+        # 驗證連接失敗後狀態重置
         self.assertIsNone(self.redis_client.redis_client)
+        self.assertIsNone(self.redis_client.connection_pool)
+        self.assertFalse(self.redis_client._is_connected)
 
     async def test_disconnect_with_connection(self):
         """測試Redis斷線 - 有連接"""
@@ -254,6 +277,168 @@ class TestRedisClient(unittest.TestCase):
         self.assertFalse(result)
 
 
+class TestRedisConnectionManagement(unittest.TestCase):
+    """Redis連接管理增強功能測試"""
+
+    def setUp(self):
+        """設置測試環境"""
+        self.redis_client = RedisClient()
+        self.mock_redis = AsyncMock()
+
+    async def test_ensure_connection_valid(self):
+        """測試確保連接有效 - 連接正常"""
+        self.redis_client.redis_client = self.mock_redis
+        self.mock_redis.ping.return_value = True
+
+        result = await self.redis_client._ensure_connection()
+
+        self.assertTrue(result)
+        self.assertTrue(self.redis_client._is_connected)
+        self.mock_redis.ping.assert_called_once()
+
+    async def test_ensure_connection_invalid(self):
+        """測試確保連接有效 - 連接無效"""
+        self.redis_client.redis_client = self.mock_redis
+        self.mock_redis.ping.side_effect = Exception("Connection lost")
+
+        result = await self.redis_client._ensure_connection()
+
+        self.assertFalse(result)
+        self.assertFalse(self.redis_client._is_connected)
+
+    async def test_ensure_connection_no_client(self):
+        """測試確保連接有效 - 無客戶端"""
+        self.redis_client.redis_client = None
+
+        result = await self.redis_client._ensure_connection()
+
+        self.assertFalse(result)
+
+    @patch.object(RedisClient, 'disconnect')
+    @patch.object(RedisClient, 'connect')
+    async def test_reconnect(self, mock_connect, mock_disconnect):
+        """測試重新連接"""
+        await self.redis_client._reconnect()
+
+        mock_disconnect.assert_called_once()
+        mock_connect.assert_called_once()
+
+    async def test_is_connected_property(self):
+        """測試連接狀態屬性"""
+        # 初始狀態
+        self.assertFalse(self.redis_client.is_connected)
+
+        # 設置連接狀態
+        self.redis_client._is_connected = True
+        self.redis_client.redis_client = self.mock_redis
+
+        self.assertTrue(self.redis_client.is_connected)
+
+        # 移除客戶端
+        self.redis_client.redis_client = None
+
+        self.assertFalse(self.redis_client.is_connected)
+
+    async def test_ping_method(self):
+        """測試ping方法"""
+        self.redis_client.redis_client = self.mock_redis
+        self.redis_client._is_connected = True
+        self.mock_redis.ping.return_value = True
+
+        # Mock _ensure_connection method
+        with patch.object(self.redis_client, '_ensure_connection', return_value=True):
+            result = await self.redis_client.ping()
+
+        self.assertTrue(result)
+
+    async def test_get_connection_info_connected(self):
+        """測試獲取連接信息 - 已連接"""
+        mock_pool = Mock()
+        mock_pool.max_connections = 20
+        mock_pool.created_connections = 5
+
+        self.redis_client.redis_client = self.mock_redis
+        self.redis_client.connection_pool = mock_pool
+        self.redis_client._is_connected = True
+        self.mock_redis.ping.return_value = True
+
+        info = await self.redis_client.get_connection_info()
+
+        self.assertTrue(info["is_connected"])
+        self.assertTrue(info["redis_client_exists"])
+        self.assertTrue(info["connection_pool_exists"])
+        self.assertEqual(info["max_connections"], 20)
+        self.assertEqual(info["created_connections"], 5)
+        self.assertIn("ping_time_ms", info)
+
+    async def test_get_connection_info_disconnected(self):
+        """測試獲取連接信息 - 未連接"""
+        info = await self.redis_client.get_connection_info()
+
+        self.assertFalse(info["is_connected"])
+        self.assertFalse(info["redis_client_exists"])
+        self.assertFalse(info["connection_pool_exists"])
+
+
+class TestRedisRetryMechanism(unittest.TestCase):
+    """Redis重試機制測試"""
+
+    def setUp(self):
+        """設置測試環境"""
+        self.redis_client = RedisClient()
+        self.mock_redis = AsyncMock()
+        self.redis_client.redis_client = self.mock_redis
+        self.redis_client._is_connected = True
+
+    @patch('core.redis.asyncio.sleep')
+    @patch.object(RedisClient, '_ensure_connection')
+    @patch.object(RedisClient, '_reconnect')
+    async def test_retry_on_connection_error(self, mock_reconnect, mock_ensure, mock_sleep):
+        """測試連接錯誤時的重試機制"""
+        # 設置 _ensure_connection 在第一次調用時返回 True
+        mock_ensure.return_value = True
+
+        # 設置第一次和第二次調用失敗，第三次成功
+        import redis.asyncio as redis
+        self.mock_redis.get.side_effect = [
+            redis.ConnectionError("Connection lost"),
+            redis.ConnectionError("Connection lost"),
+            "success"
+        ]
+
+        result = await self.redis_client.get("test_key")
+
+        # 驗證重試了2次（總共3次調用）
+        self.assertEqual(self.mock_redis.get.call_count, 3)
+        self.assertEqual(mock_reconnect.call_count, 2)
+        self.assertEqual(mock_sleep.call_count, 2)
+
+    @patch.object(RedisClient, '_ensure_connection')
+    async def test_no_retry_on_non_redis_error(self, mock_ensure):
+        """測試非Redis錯誤時不重試"""
+        mock_ensure.return_value = True
+        self.mock_redis.get.side_effect = ValueError("JSON decode error")
+
+        result = await self.redis_client.get("test_key")
+
+        # 驗證只調用了一次，沒有重試
+        self.assertEqual(self.mock_redis.get.call_count, 1)
+        self.assertIsNone(result)
+
+    @patch.object(RedisClient, '_ensure_connection')
+    async def test_max_retries_exceeded(self, mock_ensure):
+        """測試超過最大重試次數"""
+        mock_ensure.return_value = True
+        import redis.asyncio as redis
+        self.mock_redis.get.side_effect = redis.ConnectionError("Persistent error")
+
+        result = await self.redis_client.get("test_key")
+
+        # 驗證達到最大重試次數
+        self.assertEqual(self.mock_redis.get.call_count, 3)  # max_retries=3
+        self.assertIsNone(result)
+
+
 class TestRedisClientIntegration(unittest.TestCase):
     """Redis客戶端整合測試"""
 
@@ -370,6 +555,8 @@ async def run_all_tests():
     # 異步測試
     async_test_classes = [
         TestRedisClient,
+        TestRedisConnectionManagement,
+        TestRedisRetryMechanism,
         TestRedisClientDataTypes
     ]
 

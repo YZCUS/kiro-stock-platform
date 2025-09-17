@@ -3,53 +3,83 @@
  */
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useAppDispatch, useAppSelector } from '../../store';
-import { fetchStocks, deleteStock, setFilters, clearError } from '../../store/slices/stocksSlice';
+import React, { useState, useMemo } from 'react';
+import { useAppDispatch } from '../../store';
 import { addToast } from '../../store/slices/uiSlice';
+import { useStocks, useDeleteStock } from '../../hooks/useStocks';
+import { StockFilter } from '../../types';
 
 export interface StockManagementPageProps {}
 
 const StockManagementPage: React.FC<StockManagementPageProps> = () => {
   const dispatch = useAppDispatch();
-  const { stocks, loading, error, pagination, filters } = useAppSelector(state => state.stocks);
   const [searchTerm, setSearchTerm] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(20);
 
-  // 載入股票數據
-  useEffect(() => {
-    dispatch(fetchStocks({}));
-  }, [dispatch]);
+  // 構建查詢參數
+  const queryParams = useMemo(() => {
+    const params: { page: number; pageSize: number; search?: string } = { page, pageSize };
+    if (searchTerm.trim()) {
+      params.search = searchTerm.trim();
+    }
+    return params;
+  }, [page, pageSize, searchTerm]);
 
-  // 處理搜尋
-  useEffect(() => {
-    dispatch(setFilters({ ...filters, search: searchTerm }));
-  }, [searchTerm, dispatch, filters]);
+  // 使用 React Query 獲取股票數據
+  const {
+    data: stocksResponse,
+    isLoading,
+    error: queryError,
+    refetch
+  } = useStocks(queryParams);
+
+  // 使用 React Query 刪除 mutation
+  const deleteStockMutation = useDeleteStock({
+    onSuccess: () => {
+      dispatch(addToast({
+        type: 'success',
+        title: '成功',
+        message: '已成功移除股票',
+      }));
+    },
+    onError: () => {
+      dispatch(addToast({
+        type: 'error',
+        title: '錯誤',
+        message: '移除股票失敗，請稍後再試',
+      }));
+    },
+  });
+
+  // 從響應中提取數據
+  const stocks = stocksResponse?.data || [];
+  const pagination = stocksResponse?.pagination || {
+    page: 1,
+    pageSize: 20,
+    total: 0,
+    totalPages: 0,
+  };
+  const loading = isLoading || deleteStockMutation.isPending;
+  const error = queryError?.message || null;
 
   // 處理刪除股票
   const handleDeleteStock = async (stockId: number, stockName: string) => {
     if (window.confirm(`確定要移除股票 ${stockName} 嗎？`)) {
-      try {
-        await dispatch(deleteStock(stockId)).unwrap();
-        dispatch(addToast({
-          type: 'success',
-          title: '成功',
-          message: `已成功移除股票 ${stockName}`,
-        }));
-      } catch (error) {
-        dispatch(addToast({
-          type: 'error',
-          title: '錯誤',
-          message: '移除股票失敗，請稍後再試',
-        }));
-      }
+      deleteStockMutation.mutate(stockId);
     }
   };
 
-  // 過濾股票
-  const filteredStocks = stocks.filter(stock =>
-    stock.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    stock.symbol.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // 處理搜尋（防抖處理在實際應用中可以使用 useDebounce）
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+    setPage(1); // 重置到第一頁
+  };
+
+  // 處理分頁
+  const handlePageChange = (newPage: number) => {
+    setPage(newPage);
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -76,7 +106,7 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
             type="text"
             placeholder="搜尋股票名稱或代號..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
         </div>
@@ -107,7 +137,7 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredStocks.map((stock) => (
+              {stocks.map((stock) => (
                 <tr key={stock.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                     {stock.symbol}
@@ -156,7 +186,7 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
           </div>
         )}
 
-        {!loading && filteredStocks.length === 0 && (
+        {!loading && stocks.length === 0 && (
           <div className="text-center py-8">
             <div className="text-gray-500">
               {searchTerm ? '找不到符合條件的股票' : '尚未新增任何股票'}
@@ -170,14 +200,91 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
               {error}
             </div>
             <button
-              onClick={() => {
-                dispatch(clearError());
-                dispatch(fetchStocks({}));
-              }}
+              onClick={() => refetch()}
               className="mt-2 text-blue-600 hover:text-blue-800 font-medium"
             >
               重新載入
             </button>
+          </div>
+        )}
+
+        {/* 分頁控制 */}
+        {pagination.totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 sm:px-6">
+            <div className="flex justify-between flex-1 sm:hidden">
+              <button
+                onClick={() => handlePageChange(page - 1)}
+                disabled={page <= 1}
+                className="relative inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                上一頁
+              </button>
+              <button
+                onClick={() => handlePageChange(page + 1)}
+                disabled={page >= pagination.totalPages}
+                className="relative ml-3 inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                下一頁
+              </button>
+            </div>
+            <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm text-gray-700">
+                  顯示第 <span className="font-medium">{(page - 1) * pageSize + 1}</span> 到{' '}
+                  <span className="font-medium">
+                    {Math.min(page * pageSize, pagination.total)}
+                  </span>{' '}
+                  頁，共 <span className="font-medium">{pagination.total}</span> 頁
+                </p>
+              </div>
+              <div>
+                <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
+                  <button
+                    onClick={() => handlePageChange(page - 1)}
+                    disabled={page <= 1}
+                    className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    上一頁
+                  </button>
+
+                  {/* 頁碼 */}
+                  {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
+                    let pageNumber;
+                    if (pagination.totalPages <= 5) {
+                      pageNumber = i + 1;
+                    } else if (page <= 3) {
+                      pageNumber = i + 1;
+                    } else if (page >= pagination.totalPages - 2) {
+                      pageNumber = pagination.totalPages - 4 + i;
+                    } else {
+                      pageNumber = page - 2 + i;
+                    }
+
+                    return (
+                      <button
+                        key={pageNumber}
+                        onClick={() => handlePageChange(pageNumber)}
+                        className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
+                          page === pageNumber
+                            ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
+                            : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+                        }`}
+                      >
+                        {pageNumber}
+                      </button>
+                    );
+                  })}
+
+                  <button
+                    onClick={() => handlePageChange(page + 1)}
+                    disabled={page >= pagination.totalPages}
+                    className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    下一頁
+                  </button>
+                </nav>
+              </div>
+            </div>
           </div>
         )}
       </div>
