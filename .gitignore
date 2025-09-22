@@ -169,3 +169,15 @@ verify_*.py
 test_*.py
 CHANGELOG_*.md
 MIGRATION_*.md
+
+# Documentation files (keep locally but exclude from repository)
+*.md
+!README.md
+!CLAUDE.md
+docs/
+.kiro/
+backend/docs/
+airflow/docs/
+frontend/docs/
+**/README.md
+!README.md
