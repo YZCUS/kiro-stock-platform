@@ -157,3 +157,15 @@ coverage/
 test-results/
 playwright-report/
 test-results/
+
+# Development artifacts and temporary documentation
+*SUMMARY*.md
+*REPORT*.md
+*FIXES*.md
+*_summary.md
+*_report.md
+*_fixes.md
+verify_*.py
+test_*.py
+CHANGELOG_*.md
+MIGRATION_*.md
