@@ -174,8 +174,8 @@ MIGRATION_*.md
 *.md
 !README.md
 !CLAUDE.md
+!.kiro/**/*.md
 docs/
-.kiro/
 backend/docs/
 airflow/docs/
 frontend/docs/
