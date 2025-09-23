@@ -1,6 +1,0 @@
-'FLASK_ENV' is deprecated and will not be used in Flask 2.3. Use 'FLASK_DEBUG' instead.
-[2025-09-23 19:09:48 +0000] [214166] [INFO] Starting gunicorn 23.0.0
-[2025-09-23 19:09:48 +0000] [214166] [INFO] Listening at: http://[::]:8793 (214166)
-[2025-09-23 19:09:48 +0000] [214166] [INFO] Using worker: sync
-[2025-09-23 19:09:48 +0000] [214167] [INFO] Booting worker with pid: 214167
-[2025-09-23 19:09:48 +0000] [214170] [INFO] Booting worker with pid: 214170
