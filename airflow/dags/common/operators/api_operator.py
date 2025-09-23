@@ -135,7 +135,7 @@ class StockDataCollectionOperator(BaseOperator):
     股票數據收集操作器 - 支援依賴股票清單
     """
 
-    template_fields = ['symbol', 'market', 'start_date', 'end_date']
+    template_fields = ['symbol', 'market']
 
     @apply_defaults
     def __init__(
@@ -370,7 +370,7 @@ class DataValidationOperator(BaseOperator):
     數據驗證操作器 - 簡化版本
     """
     
-    template_fields = ['stock_id', 'days']
+    template_fields = ['stock_id']
     
     @apply_defaults
     def __init__(

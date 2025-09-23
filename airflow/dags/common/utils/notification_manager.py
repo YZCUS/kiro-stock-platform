@@ -8,8 +8,8 @@ import os
 import smtplib
 import requests
 from datetime import datetime
-from email.mime.text import MimeText
-from email.mime.multipart import MimeMultipart
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from typing import Dict, List, Optional, Any
 from enum import Enum
 
@@ -149,14 +149,14 @@ class NotificationManager:
 
         try:
             # 构建邮件内容
-            msg = MimeMultipart()
+            msg = MIMEMultipart()
             msg['From'] = self.email_config['from_email']
             msg['To'] = ', '.join(self.email_config['to_emails'])
             msg['Subject'] = data['title']
 
             # 邮件正文
             body = self._format_email_body(data)
-            msg.attach(MimeText(body, 'html'))
+            msg.attach(MIMEText(body, 'html'))
 
             # 发送邮件
             with smtplib.SMTP(self.email_config['smtp_server'], self.email_config['smtp_port']) as server:
