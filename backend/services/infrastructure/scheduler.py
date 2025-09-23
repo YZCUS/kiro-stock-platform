@@ -10,7 +10,8 @@ import logging
 
 from core.config import settings
 from services.data.collection import data_collection_service
-from services.data.validation import data_validation_service, data_cleaning_service
+from services.data.validation import data_validation_service
+from services.data.cleaning import data_cleaning_service
 from models.repositories.crud_stock import stock_crud
 from models.domain.system_log import SystemLog
 
