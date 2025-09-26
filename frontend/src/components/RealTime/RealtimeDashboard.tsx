@@ -3,7 +3,7 @@
  */
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { useStocks } from '../../hooks/useStocks';
 import { useSignals } from '../../hooks/useSignals';
@@ -45,11 +45,32 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
 
   // 獲取股票列表數據
   const { data: stocksData, isLoading: stocksLoading } = useStocks({ pageSize: 10 });
-  const stocks = stocksData?.data || [];
+
+  // 使用 useMemo 優化股票列表，減少不必要的重新渲染
+  const stocks = useMemo(() => {
+    return stocksData?.data || [];
+  }, [stocksData?.data]);
 
   // 獲取最新信號數據
   const { data: signalsData } = useSignals({ pageSize: 5 });
-  const latestSignals = signalsData?.data || [];
+  const latestSignals = useMemo(() => {
+    return signalsData?.data || [];
+  }, [signalsData?.data]);
+
+  // 使用 useMemo 優化股票查找，避免重複查找操作
+  const activeStock = useMemo(() => {
+    return stocks.find(stock => stock.id === activeStockId);
+  }, [stocks, activeStockId]);
+
+  // 使用 useMemo 優化顯示的股票列表（前5個）
+  const displayStocks = useMemo(() => {
+    return stocks.slice(0, 5);
+  }, [stocks]);
+
+  // 使用 useMemo 優化已訂閱股票的詳細信息
+  const subscribedStocksDetails = useMemo(() => {
+    return selectedStockIds.map(stockId => stocks.find(s => s.id === stockId)).filter(Boolean);
+  }, [selectedStockIds, stocks]);
 
   // 切換股票訂閱
   const toggleStockSubscription = (stockId: number) => {
@@ -59,9 +80,6 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
       setSelectedStockIds(prev => [...prev, stockId]);
     }
   };
-
-  // 獲取活躍股票信息
-  const activeStock = stocks.find(stock => stock.id === activeStockId);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -158,7 +176,7 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            {stocks.slice(0, 5).map((stock) => {
+            {displayStocks.map((stock) => {
               const isSubscribed = selectedStockIds.includes(stock.id);
               const isActive = activeStockId === stock.id;
 
@@ -239,19 +257,16 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
             <div className="bg-white shadow rounded-lg p-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">已訂閱股票</h3>
               <div className="space-y-3">
-                {selectedStockIds.map((stockId) => {
-                  const stock = stocks.find(s => s.id === stockId);
-                  if (!stock) return null;
-
+                {subscribedStocksDetails.map((stock) => {
                   return (
                     <div
-                      key={stockId}
+                      key={stock.id}
                       className={`flex items-center justify-between p-3 rounded-lg cursor-pointer ${
-                        activeStockId === stockId
+                        activeStockId === stock.id
                           ? 'bg-blue-50 border border-blue-200'
                           : 'bg-gray-50 hover:bg-gray-100'
                       }`}
-                      onClick={() => setActiveStockId(stockId)}
+                      onClick={() => setActiveStockId(stock.id)}
                     >
                       <div>
                         <div className="font-medium text-gray-900">
@@ -263,12 +278,12 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
                       </div>
                       <div className="flex items-center space-x-2">
                         <div className={`w-2 h-2 rounded-full ${
-                          subscribedStocks.includes(stockId) ? 'bg-green-500' : 'bg-gray-400'
+                          subscribedStocks.includes(stock.id) ? 'bg-green-500' : 'bg-gray-400'
                         }`}></div>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            toggleStockSubscription(stockId);
+                            toggleStockSubscription(stock.id);
                           }}
                           className="text-red-600 hover:text-red-800 text-sm"
                         >

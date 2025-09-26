@@ -46,7 +46,9 @@ export const ChartSkeleton: React.FC<{ height?: number }> = ({ height = 400 }) =
         <Skeleton className="h-8 w-16" />
       </div>
     </div>
-    <Skeleton className={`w-full`} style={{ height: `${height}px` }} />
+    <div className="w-full" style={{ height: `${height}px` }}>
+      <Skeleton className="w-full h-full" />
+    </div>
     <div className="flex justify-center space-x-6 mt-4">
       <div className="flex items-center space-x-2">
         <Skeleton className="h-3 w-8" />

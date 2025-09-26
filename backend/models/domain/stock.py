@@ -1,7 +1,7 @@
 """
 股票模型
 """
-from sqlalchemy import Column, String, DateTime, func, CheckConstraint
+from sqlalchemy import Column, String, DateTime, Boolean, func, CheckConstraint
 from sqlalchemy.orm import relationship
 from models.base import BaseModel, TimestampMixin
 from typing import List, Optional
@@ -17,6 +17,7 @@ class Stock(BaseModel, TimestampMixin):
     symbol = Column(String(20), nullable=False, index=True, comment="股票代號")
     market = Column(String(5), nullable=False, index=True, comment="市場代碼")
     name = Column(String(100), nullable=True, comment="股票名稱")
+    is_active = Column(Boolean, nullable=False, default=True, server_default='true', index=True, comment="是否啟用")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # 約束條件

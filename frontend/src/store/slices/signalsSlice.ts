@@ -26,9 +26,7 @@ export const subscribeToSignals = createAsyncThunk(
     const wsManager = getWebSocketManager();
 
     if (stockId) {
-      await wsManager.subscribe('subscribe_stock', { stock_id: stockId });
-    } else {
-      await wsManager.subscribe('subscribe_global');
+      wsManager.subscribeToStock(stockId);
     }
 
     return { stockId, subscribed: true };
@@ -43,9 +41,7 @@ export const unsubscribeFromSignals = createAsyncThunk(
     const wsManager = getWebSocketManager();
 
     if (stockId) {
-      await wsManager.unsubscribe('unsubscribe_stock', { stock_id: stockId });
-    } else {
-      await wsManager.unsubscribe('unsubscribe_global');
+      wsManager.unsubscribeFromStock(stockId);
     }
 
     return { stockId, subscribed: false };
@@ -148,8 +144,20 @@ const signalsSlice = createSlice({
       })
       .addCase(fetchSignals.fulfilled, (state, action) => {
         state.loading = false;
-        state.signals = action.payload.data;
-        state.pagination = action.payload.pagination;
+        if (Array.isArray(action.payload)) {
+          state.signals = action.payload as any;
+        } else {
+          const payload = action.payload as any;
+          state.signals = payload.items || action.payload as any;
+          if (payload.page !== undefined) {
+            state.pagination = {
+              page: payload.page || 1,
+              pageSize: payload.per_page || 10,
+              total: payload.total || 0,
+              totalPages: payload.total_pages || 1,
+            };
+          }
+        }
       })
       .addCase(fetchSignals.rejected, (state, action) => {
         state.loading = false;

@@ -9,7 +9,7 @@ import { usePriceUpdates, useIndicatorUpdates } from '../../hooks/useWebSocket';
 import { RealtimePriceData, Stock } from '../../types';
 
 export interface RealtimePriceChartProps {
-  stock: Pick<Stock, 'id' | 'symbol' | 'name'>;
+  stock: Pick<Stock, 'id' | 'symbol'> & { name?: string };
   height?: number;
 }
 
@@ -164,8 +164,18 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
         const chartData = seriesRef.current.data();
         const lastCandle = chartData.length > 0 ? chartData[chartData.length - 1] : null;
 
-        // 檢查 lastCandle 是否為有效的 CandlestickData
-        const isValidCandle = lastCandle && 'close' in lastCandle && 'high' in lastCandle && 'low' in lastCandle;
+        // 檢查 lastCandle 是否為有效的 CandlestickData 並包含必要屬性
+        const isValidCandle = lastCandle &&
+          typeof lastCandle === 'object' &&
+          'close' in lastCandle &&
+          'high' in lastCandle &&
+          'low' in lastCandle &&
+          'open' in lastCandle &&
+          typeof (lastCandle as any).close === 'number' &&
+          typeof (lastCandle as any).high === 'number' &&
+          typeof (lastCandle as any).low === 'number' &&
+          typeof (lastCandle as any).open === 'number';
+
         const previousClose = isValidCandle ? (lastCandle as any).close : currentPrice;
         const previousHigh = isValidCandle ? (lastCandle as any).high : currentPrice;
         const previousLow = isValidCandle ? (lastCandle as any).low : currentPrice;

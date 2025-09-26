@@ -78,9 +78,10 @@ export class IndicatorsApiService {
     if (params.end_date) {
       queryParams.append('end_date', params.end_date);
     }
-    if (params.timeframe) {
-      queryParams.append('timeframe', params.timeframe);
-    }
+
+    // 確保 timeframe 參數被正確傳遞，如果沒有提供則使用預設值
+    const timeframe = params.timeframe || '1d';
+    queryParams.append('timeframe', timeframe);
 
     const url = `${API_ENDPOINTS.INDICATORS.LIST(params.stock_id)}?${queryParams.toString()}`;
     return ApiService.get(url);

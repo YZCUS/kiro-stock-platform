@@ -31,6 +31,7 @@ interface HealthCheckStatus {
     };
     websocket: {
       status: string;
+      responseTime?: number;
       error?: string;
     };
   };

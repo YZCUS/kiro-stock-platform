@@ -112,8 +112,20 @@ const stocksSlice = createSlice({
       })
       .addCase(fetchStocks.fulfilled, (state, action) => {
         state.loading = false;
-        state.stocks = action.payload.data;
-        state.pagination = action.payload.pagination;
+        if (Array.isArray(action.payload)) {
+          state.stocks = action.payload as any;
+        } else {
+          const payload = action.payload as any;
+          state.stocks = payload.items || action.payload as any;
+          if (payload.page !== undefined) {
+            state.pagination = {
+              page: payload.page || 1,
+              pageSize: payload.per_page || 10,
+              total: payload.total || 0,
+              totalPages: payload.total_pages || 1,
+            };
+          }
+        }
       })
       .addCase(fetchStocks.rejected, (state, action) => {
         state.loading = false;
@@ -127,7 +139,7 @@ const stocksSlice = createSlice({
       })
       .addCase(createStock.fulfilled, (state, action) => {
         state.loading = false;
-        state.stocks.unshift(action.payload);
+        state.stocks.unshift(action.payload as any);
         state.pagination.total += 1;
       })
       .addCase(createStock.rejected, (state, action) => {

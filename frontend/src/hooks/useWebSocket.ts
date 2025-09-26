@@ -40,8 +40,8 @@ export function useWebSocket() {
     const manager = wsManager.current;
 
     // 註冊事件監聽器
-    manager.on('welcome', handleWelcome);
-    manager.on('error', handleError);
+    manager.on(WebSocketEventType.WELCOME, handleWelcome);
+    manager.on(WebSocketEventType.ERROR, handleError);
 
     // 嘗試連接
     manager.connect().catch(error => {
@@ -52,8 +52,8 @@ export function useWebSocket() {
 
     // 清理函數
     return () => {
-      manager.off('welcome', handleWelcome);
-      manager.off('error', handleError);
+      manager.off(WebSocketEventType.WELCOME, handleWelcome);
+      manager.off(WebSocketEventType.ERROR, handleError);
     };
   }, [dispatch, handleWelcome, handleError]);
 
@@ -145,7 +145,7 @@ export function useStockSubscription(stockId: number | null, symbol?: string) {
     }
 
     // 監聽連接建立事件，連接後自動訂閱
-    manager.on('welcome', handleWelcome);
+    manager.on(WebSocketEventType.WELCOME, handleWelcome);
 
     // 清理函數
     return () => {
@@ -153,7 +153,7 @@ export function useStockSubscription(stockId: number | null, symbol?: string) {
         manager.unsubscribeFromStock(stockId);
         setIsSubscribed(false);
       }
-      manager.off('welcome', handleWelcome);
+      manager.off(WebSocketEventType.WELCOME, handleWelcome);
     };
   }, [stockId, symbol, handleWelcome]);
 
@@ -172,7 +172,7 @@ export function usePriceUpdates(stockId: number | null) {
 
   // 監聽價格更新
   useWebSocketEvent(
-    'price_update',
+    WebSocketEventType.PRICE_UPDATE,
     useCallback((message: WebSocketMessage) => {
       if (message.data && message.data.stock_id === stockId) {
         setPriceData(message.data);
@@ -198,7 +198,7 @@ export function useSignalUpdates() {
 
   // 監聽信號更新
   useWebSocketEvent(
-    'signal_update',
+    WebSocketEventType.SIGNAL_UPDATE,
     useCallback((message: WebSocketMessage) => {
       if (message.data) {
         const signal = message.data as TradingSignal;
@@ -228,7 +228,7 @@ export function useIndicatorUpdates(stockId: number | null) {
 
   // 監聽指標更新
   useWebSocketEvent(
-    'indicator_update',
+    WebSocketEventType.INDICATOR_UPDATE,
     useCallback((message: WebSocketMessage) => {
       if (message.data && message.data.stock_id === stockId) {
         setIndicators(prev => ({
@@ -256,7 +256,7 @@ export function useMarketStatus() {
 
   // 監聽市場狀態更新
   useWebSocketEvent(
-    'market_status',
+    WebSocketEventType.MARKET_STATUS,
     useCallback((message: WebSocketMessage) => {
       if (message.data) {
         setMarketStatus(message.data);
@@ -276,7 +276,7 @@ export function useSystemNotifications() {
 
   // 監聽系統通知
   useWebSocketEvent(
-    'system_notification',
+    WebSocketEventType.SYSTEM_NOTIFICATION,
     useCallback((message: WebSocketMessage) => {
       if (message.data) {
         setNotifications(prev => [
@@ -345,7 +345,7 @@ export function useMultipleStockSubscriptions(stockIds: number[]) {
     });
 
     // 處理連接建立事件
-    manager.on('welcome', handleWelcome);
+    manager.on(WebSocketEventType.WELCOME, handleWelcome);
     setSubscribedStocks(newSubscribed);
 
     // 清理函數
@@ -353,7 +353,7 @@ export function useMultipleStockSubscriptions(stockIds: number[]) {
       stockIds.forEach(stockId => {
         manager.unsubscribeFromStock(stockId);
       });
-      manager.off('welcome', handleWelcome);
+      manager.off(WebSocketEventType.WELCOME, handleWelcome);
     };
   }, [stockIds, handleWelcome]);
 

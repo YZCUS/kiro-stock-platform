@@ -42,7 +42,7 @@ jest.mock('next/dynamic', () => {
 
     MockComponent.displayName = 'MockDynamicComponent';
     return MockComponent;
-  });
+  };
 });
 
 // Mock 測試組件

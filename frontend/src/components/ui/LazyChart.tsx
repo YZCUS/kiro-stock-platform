@@ -80,7 +80,7 @@ export const LazyChart: React.FC<LazyChartProps> = ({
           // 向後兼容舊的 props 結構
           return (
             <RealtimePriceChart
-              stock={{ id: stockId, symbol, name: undefined }}
+              stock={{ id: stockId, symbol, name: symbol }}
               height={height}
             />
           );

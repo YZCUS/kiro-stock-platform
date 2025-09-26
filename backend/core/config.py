@@ -2,7 +2,8 @@
 應用程式配置設定
 """
 from pydantic_settings import BaseSettings
-from typing import List
+from pydantic import field_validator
+from typing import List, Union
 import os
 
 
@@ -22,6 +23,16 @@ class Settings(BaseSettings):
     
     # CORS 設定
     ALLOWED_HOSTS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+    @field_validator('ALLOWED_HOSTS', mode='before')
+    @classmethod
+    def validate_allowed_hosts(cls, v) -> List[str]:
+        if isinstance(v, str):
+            # 如果是逗號分隔的字符串，分割它
+            return [host.strip() for host in v.split(',') if host.strip()]
+        elif isinstance(v, list):
+            return v
+        return ["http://localhost:3000", "http://127.0.0.1:3000"]
     
     # JWT 設定
     SECRET_KEY: str = "your-secret-key-change-in-production"
@@ -41,7 +52,26 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        # 排除有問題的環境變數
+        env_ignore = {'ALLOWED_HOSTS'}
 
 
-# 建立全域設定實例
-settings = Settings()
+# 建立全域設定實例，手動處理 ALLOWED_HOSTS
+def create_settings():
+    # 暫時移除有問題的環境變數
+    original_allowed_hosts = os.environ.pop('ALLOWED_HOSTS', None)
+    try:
+        settings_instance = Settings()
+        # 如果原本有設定，手動解析並設置
+        if original_allowed_hosts:
+            if ',' in original_allowed_hosts:
+                settings_instance.ALLOWED_HOSTS = [host.strip() for host in original_allowed_hosts.split(',') if host.strip()]
+            else:
+                settings_instance.ALLOWED_HOSTS = [original_allowed_hosts.strip()]
+        return settings_instance
+    finally:
+        # 恢復環境變數
+        if original_allowed_hosts:
+            os.environ['ALLOWED_HOSTS'] = original_allowed_hosts
+
+settings = create_settings()
