@@ -15,12 +15,12 @@ from enum import Enum
 
 # 导入时区感知的时间工具
 try:
-    from common.utils.date_utils import get_taipei_now
+    from .date_utils import get_taipei_now
 except ImportError:
     # 备用方案
     import pendulum
     def get_taipei_now():
-        return pendulum.now('Asia/Taipei')
+        return pendulum.now('Asia/Taipei')  
 
 
 logger = logging.getLogger(__name__)

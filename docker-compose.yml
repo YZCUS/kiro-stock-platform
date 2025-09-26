@@ -69,7 +69,7 @@ services:
 
   # Apache Airflow Webserver
   airflow-webserver:
-    image: apache/airflow:2.7.0
+    image: apache/airflow:2.8.0
     container_name: stock_analysis_airflow_webserver
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
@@ -110,7 +110,7 @@ services:
 
   # Apache Airflow Scheduler
   airflow-scheduler:
-    image: apache/airflow:2.7.0
+    image: apache/airflow:2.8.0
     container_name: stock_analysis_airflow_scheduler
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor

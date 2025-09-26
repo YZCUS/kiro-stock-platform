@@ -8,11 +8,11 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.dummy import DummyOperator
+from airflow.operators.empty import EmptyOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 
-from common.operators.api_operator import (
+from ..plugins.operators.api_operator import (
     StockDataCollectionOperator,
     DataValidationOperator,
     APICallOperator
@@ -46,7 +46,7 @@ dag = DAG(**dag_config)
 
 def handle_task_failure(context):
     """處理任務失敗"""
-    from common.utils.date_utils import get_taipei_now
+    from ..plugins.utils.date_utils import get_taipei_now
 
     task_instance = context['task_instance']
     dag_run = context['dag_run']
@@ -85,7 +85,7 @@ DAG: {dag_run.dag_id}
 
 def handle_task_retry(context):
     """處理任務重試"""
-    from common.utils.date_utils import get_taipei_now
+    from ..plugins.utils.date_utils import get_taipei_now
 
     task_instance = context['task_instance']
     task_id = task_instance.task_id
@@ -114,7 +114,7 @@ def handle_task_retry(context):
 
 def check_trading_day(**context):
     """檢查是否為交易日 - 使用台北時區"""
-    from common.utils.date_utils import is_trading_day, get_taipei_today
+    from ..plugins.utils.date_utils import is_trading_day, get_taipei_today
     
     # 使用 context 中的執行日期，或台北時區的當前日期
     execution_date = context.get('execution_date')
@@ -132,7 +132,7 @@ def check_trading_day(**context):
 
 def check_market_status(**context):
     """檢查市場狀態 - 使用台北時區"""
-    from common.utils.date_utils import get_taipei_now, is_market_hours
+    from ..plugins.utils.date_utils import get_taipei_now, is_market_hours
     
     taipei_now = get_taipei_now()
     
@@ -150,8 +150,8 @@ def check_market_status(**context):
 
 def verify_task_dependencies(**context):
     """驗證任務依賴關係 - 確保數據流正確，支援外部存儲"""
-    from common.utils.date_utils import get_taipei_now
-    from common.storage.xcom_storage import retrieve_large_data
+    from ..plugins.utils.date_utils import get_taipei_now
+    from ..plugins.storage.xcom_storage import retrieve_large_data
 
     ti = context['ti']
     taipei_now = get_taipei_now()
@@ -217,7 +217,7 @@ def verify_task_dependencies(**context):
 
 def send_completion_notification(**context):
     """發送完成通知 - 使用台北時區"""
-    from common.utils.date_utils import get_taipei_now
+    from ..plugins.utils.date_utils import get_taipei_now
 
     ti = context['ti']
     taipei_now = get_taipei_now()
@@ -260,8 +260,8 @@ def send_completion_notification(**context):
 
 def cleanup_external_storage(**context):
     """清理外部存儲數據"""
-    from common.utils.date_utils import get_taipei_now
-    from common.storage.xcom_storage import cleanup_large_data, get_storage_manager
+    from ..plugins.utils.date_utils import get_taipei_now
+    from ..plugins.storage.xcom_storage import cleanup_large_data, get_storage_manager
 
     ti = context['ti']
     taipei_now = get_taipei_now()
@@ -354,7 +354,7 @@ collect_stocks_fallback_task = StockDataCollectionOperator(
 )
 
 # 聚合任務 - 無論主要還是備用任務成功都繼續
-collection_complete_task = DummyOperator(
+collection_complete_task = EmptyOperator(
     task_id='collection_complete',
     trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,  # 至少一個成功且沒有失敗
     dag=dag
@@ -363,7 +363,7 @@ collection_complete_task = DummyOperator(
 # 數據品質驗證（簡化版本 - 只檢查前5支股票）
 def validate_data_quality(**context):
     """數據品質驗證 - 使用台北時區"""
-    from common.utils.date_utils import get_taipei_now
+    from ..plugins.utils.date_utils import get_taipei_now
     
     taipei_now = get_taipei_now()
     return {

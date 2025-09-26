@@ -11,7 +11,7 @@ from airflow.utils.context import Context
 
 # 移除手動的 sys.path 操作，改用 Docker PYTHONPATH 設定
 
-from common.utils.date_utils import is_trading_day, get_taipei_now, get_taipei_today, is_market_hours
+from ..utils.date_utils import is_trading_day, get_taipei_now, get_taipei_today, is_market_hours
 
 
 class TradingDaySensor(BaseSensorOperator):

@@ -111,23 +111,23 @@ def validate_all_dags(dags_dir: Path) -> Dict[str, Any]:
 
             if file_result['dags']:
                 for dag_info in file_result['dags']:
-                    print(f"    ✅ DAG: {dag_info['dag_id']}")
+                    print(f"    DAG: {dag_info['dag_id']}")
             else:
-                print(f"    ⚠️  文件中沒有找到 DAG 對象")
+                print(f"    文件中沒有找到 DAG 對象")
         else:
             results['failed_files'] += 1
             results['errors'].append({
                 'file': file_result['file'],
                 'error': file_result['error']
             })
-            print(f"    ❌ 錯誤: {file_result['error']}")
+            print(f"    錯誤: {file_result['error']}")
 
     return results
 
 
 def check_dag_dependencies(results: Dict[str, Any]) -> None:
     """檢查 DAG 之間的依賴關係"""
-    print("\n🔗 檢查 DAG 依賴關係...")
+    print("\n檢查 DAG 依賴關係...")
 
     all_dag_ids = set()
     for file_result in results['file_results']:
@@ -151,39 +151,39 @@ def check_dag_dependencies(results: Dict[str, Any]) -> None:
 
     duplicates = {k: v for k, v in dag_id_count.items() if len(v) > 1}
     if duplicates:
-        print("\n⚠️  發現重複的 DAG ID:")
+        print("\n發現重複的 DAG ID:")
         for dag_id, files in duplicates.items():
             print(f"  DAG ID '{dag_id}' 出現在:")
             for file in files:
                 print(f"    - {file}")
     else:
-        print("\n✅ 所有 DAG ID 都是唯一的")
+        print("\n所有 DAG ID 都是唯一的")
 
 
 def generate_validation_report(results: Dict[str, Any]) -> None:
     """生成驗證報告"""
     print("\n" + "="*60)
-    print("📊 DAG 驗證報告")
+    print("DAG 驗證報告")
     print("="*60)
 
-    print(f"\n📁 總文件數: {results['total_files']}")
-    print(f"✅ 成功載入: {results['successful_files']}")
-    print(f"❌ 載入失敗: {results['failed_files']}")
-    print(f"📦 總 DAG 數: {results['total_dags']}")
+    print(f"\n總文件數: {results['total_files']}")
+    print(f"成功載入: {results['successful_files']}")
+    print(f"載入失敗: {results['failed_files']}")
+    print(f"總 DAG 數: {results['total_dags']}")
 
     if results['failed_files'] > 0:
-        print(f"\n❌ 失敗的文件 ({results['failed_files']} 個):")
+        print(f"\n失敗的文件 ({results['failed_files']} 個):")
         for error in results['errors']:
-            print(f"\n  📄 {error['file']}:")
+            print(f"\n  {error['file']}:")
             print(f"    錯誤: {error['error']}")
 
     success_rate = (results['successful_files'] / results['total_files']) * 100
-    print(f"\n📊 成功率: {success_rate:.1f}%")
+    print(f"\n成功率: {success_rate:.1f}%")
 
     if results['failed_files'] == 0:
-        print("\n🎉 所有 DAG 文件都通過驗證！")
+        print("\n所有 DAG 文件都通過驗證！")
     else:
-        print(f"\n⚠️  有 {results['failed_files']} 個文件需要修復")
+        print(f"\n有 {results['failed_files']} 個文件需要修復")
 
 
 def suggest_fixes(results: Dict[str, Any]) -> None:
@@ -192,7 +192,7 @@ def suggest_fixes(results: Dict[str, Any]) -> None:
         return
 
     print("\n" + "="*60)
-    print("🔧 修復建議")
+    print("修復建議")
     print("="*60)
 
     common_errors = {}
@@ -206,18 +206,18 @@ def suggest_fixes(results: Dict[str, Any]) -> None:
         print(f"\n{error_type} ({len(files)} 個文件):")
 
         if "導入錯誤" in error_type:
-            print("  💡 可能的解決方案:")
+            print("  可能的解決方案:")
             print("     - 檢查 requirements.txt 中是否聲明了所需依賴")
             print("     - 運行: python3 scripts/check_dependencies.py")
             print("     - 確保模組路徑正確")
 
         elif "語法錯誤" in error_type:
-            print("  💡 可能的解決方案:")
+            print("  可能的解決方案:")
             print("     - 檢查 Python 語法")
             print("     - 運行: python -m py_compile <文件名>")
             print("     - 使用 IDE 檢查語法錯誤")
 
-        print("  📁 相關文件:")
+        print("  相關文件:")
         for file in files:
             print(f"     - {file}")
 
@@ -230,10 +230,10 @@ def main():
     dags_dir = airflow_dir / "dags"
 
     if not dags_dir.exists():
-        print(f"❌ DAGs 目錄不存在: {dags_dir}")
+        print(f"DAGs 目錄不存在: {dags_dir}")
         sys.exit(1)
 
-    print("🏗️  Airflow DAG 驗證工具")
+    print("Airflow DAG 驗證工具")
     print(f"DAGs 目錄: {dags_dir}")
 
     try:
@@ -251,14 +251,14 @@ def main():
 
         # 根據結果設置退出碼
         if results['failed_files'] > 0:
-            print(f"\n⚠️  有 {results['failed_files']} 個文件驗證失敗")
+            print(f"\n有 {results['failed_files']} 個文件驗證失敗")
             sys.exit(1)
         else:
-            print("\n🎉 所有 DAG 驗證通過！")
+            print("\n所有 DAG 驗證通過！")
             sys.exit(0)
 
     except Exception as e:
-        print(f"❌ 驗證過程中發生錯誤: {e}")
+        print(f"驗證過程中發生錯誤: {e}")
         traceback.print_exc()
         sys.exit(1)
 

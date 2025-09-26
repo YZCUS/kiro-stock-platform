@@ -14,7 +14,7 @@ class TestAPICallOperator:
 
     def test_default_base_url_includes_api_version(self):
         """測試預設 base_url 包含 API 版本"""
-        from common.operators.api_operator import APICallOperator
+        from ...plugins.operators.api_operator import APICallOperator
 
         operator = APICallOperator(
             task_id='test_task',
@@ -26,7 +26,7 @@ class TestAPICallOperator:
 
     def test_custom_base_url_override(self):
         """測試自定義 base_url 覆蓋預設值"""
-        from common.operators.api_operator import APICallOperator
+        from ...plugins.operators.api_operator import APICallOperator
 
         custom_base_url = 'https://api.example.com/v2'
         operator = APICallOperator(
@@ -39,7 +39,7 @@ class TestAPICallOperator:
 
     def test_environment_variable_base_url(self):
         """測試環境變數 BACKEND_API_URL 覆蓋預設值"""
-        from common.operators.api_operator import APICallOperator
+        from ...plugins.operators.api_operator import APICallOperator
 
         test_url = 'https://test.api.com/api/v1'
         with patch.dict(os.environ, {'BACKEND_API_URL': test_url}):
@@ -52,7 +52,7 @@ class TestAPICallOperator:
 
     def test_url_construction_with_leading_slash(self):
         """測試端點有前導斜槓的 URL 構建"""
-        from common.operators.api_operator import APICallOperator
+        from ...plugins.operators.api_operator import APICallOperator
 
         operator = APICallOperator(
             task_id='test_task',
@@ -68,7 +68,7 @@ class TestAPICallOperator:
 
     def test_url_construction_without_leading_slash(self):
         """測試端點沒有前導斜槓的 URL 構建"""
-        from common.operators.api_operator import APICallOperator
+        from ...plugins.operators.api_operator import APICallOperator
 
         operator = APICallOperator(
             task_id='test_task',
@@ -84,7 +84,7 @@ class TestAPICallOperator:
 
     def test_url_construction_complex_endpoint(self):
         """測試複雜端點的 URL 構建"""
-        from common.operators.api_operator import APICallOperator
+        from ...plugins.operators.api_operator import APICallOperator
 
         operator = APICallOperator(
             task_id='test_task',
@@ -101,7 +101,7 @@ class TestAPICallOperator:
     @patch('requests.get')
     def test_get_request_url_construction(self, mock_get):
         """測試 GET 請求的 URL 構建"""
-        from common.operators.api_operator import APICallOperator
+        from ...plugins.operators.api_operator import APICallOperator
 
         # 模擬成功響應
         mock_response = Mock()
@@ -133,7 +133,7 @@ class TestAPICallOperator:
     @patch('requests.post')
     def test_post_request_url_construction(self, mock_post):
         """測試 POST 請求的 URL 構建"""
-        from common.operators.api_operator import APICallOperator
+        from ...plugins.operators.api_operator import APICallOperator
 
         # 模擬成功響應
         mock_response = Mock()
@@ -169,7 +169,7 @@ class TestStockDataCollectionOperator:
 
     def test_default_base_url_inheritance(self):
         """測試繼承的預設 base_url"""
-        from common.operators.api_operator import StockDataCollectionOperator
+        from ...plugins.operators.api_operator import StockDataCollectionOperator
 
         operator = StockDataCollectionOperator(
             task_id='test_task',
@@ -180,7 +180,7 @@ class TestStockDataCollectionOperator:
 
     def test_custom_base_url_inheritance(self):
         """測試自定義 base_url 繼承"""
-        from common.operators.api_operator import StockDataCollectionOperator
+        from ...plugins.operators.api_operator import StockDataCollectionOperator
 
         custom_base_url = 'https://api.example.com/v2'
         operator = StockDataCollectionOperator(
@@ -197,7 +197,7 @@ class TestTechnicalAnalysisOperator:
 
     def test_default_base_url_inheritance(self):
         """測試繼承的預設 base_url"""
-        from common.operators.api_operator import TechnicalAnalysisOperator
+        from ...plugins.operators.api_operator import TechnicalAnalysisOperator
 
         operator = TechnicalAnalysisOperator(
             task_id='test_task',
@@ -208,7 +208,7 @@ class TestTechnicalAnalysisOperator:
 
     def test_batch_analysis_endpoint_construction(self):
         """測試批次分析端點構建"""
-        from common.operators.api_operator import TechnicalAnalysisOperator
+        from ...plugins.operators.api_operator import TechnicalAnalysisOperator
 
         operator = TechnicalAnalysisOperator(
             task_id='test_task',
@@ -227,7 +227,7 @@ class TestTechnicalAnalysisOperator:
 
     def test_single_stock_analysis_endpoint_construction(self):
         """測試單股分析端點構建"""
-        from common.operators.api_operator import TechnicalAnalysisOperator
+        from ...plugins.operators.api_operator import TechnicalAnalysisOperator
 
         stock_id = 123
         operator = TechnicalAnalysisOperator(
@@ -249,7 +249,7 @@ class TestDataValidationOperator:
 
     def test_default_base_url_inheritance(self):
         """測試繼承的預設 base_url"""
-        from common.operators.api_operator import DataValidationOperator
+        from ...plugins.operators.api_operator import DataValidationOperator
 
         operator = DataValidationOperator(
             task_id='test_task',
@@ -260,7 +260,7 @@ class TestDataValidationOperator:
 
     def test_validation_endpoint_construction(self):
         """測試驗證端點構建"""
-        from common.operators.api_operator import DataValidationOperator
+        from ...plugins.operators.api_operator import DataValidationOperator
 
         stock_id = 456
         operator = DataValidationOperator(
@@ -282,7 +282,7 @@ class TestURLCompatibility:
 
     def test_backwards_compatibility_with_old_endpoints(self):
         """測試與舊端點格式的向後兼容性"""
-        from common.operators.api_operator import APICallOperator
+        from ...plugins.operators.api_operator import APICallOperator
 
         # 測試各種端點格式
         test_cases = [
@@ -308,7 +308,7 @@ class TestURLCompatibility:
 
     def test_no_double_slashes_in_url(self):
         """測試 URL 中沒有雙斜槓"""
-        from common.operators.api_operator import APICallOperator
+        from ...plugins.operators.api_operator import APICallOperator
 
         # 測試各種 base_url 和 endpoint 組合
         test_cases = [

@@ -13,9 +13,6 @@ os.environ['AIRFLOW_HOME'] = str(Path(__file__).parent)
 os.environ['AIRFLOW__CORE__DAGS_FOLDER'] = str(Path(__file__).parent / 'dags')
 os.environ['AIRFLOW__CORE__LOAD_EXAMPLES'] = 'False'
 
-# 將 DAG 目錄加入 Python 路徑
-dags_path = Path(__file__).parent.parent.parent / 'dags'
-sys.path.append(str(dags_path))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,7 +24,7 @@ def test_dag_import():
     
     try:
         # 測試匯入現有的 DAG
-        from stock_data.daily_collection_api import dag as daily_collection_dag
+        from ...dags.stock_daily_collection import dag as daily_collection_dag
         
         if daily_collection_dag:
             logger.info("✅ daily_collection_api DAG 匯入成功")

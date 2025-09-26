@@ -4,17 +4,13 @@
 确保所有监控组件正确使用台北时区
 """
 import pytest
-import sys
-import os
 from unittest.mock import Mock, patch
 from datetime import datetime
 
-# 添加路径以便导入
-sys.path.insert(0, '/Users/zhengchy/Documents/projects/kiro-stock-platform/airflow/dags')
 
 try:
     import pendulum
-    from common.utils.date_utils import get_taipei_now
+    from ...plugins.utils.date_utils import get_taipei_now
     PENDULUM_AVAILABLE = True
 except ImportError:
     PENDULUM_AVAILABLE = False
@@ -73,7 +69,7 @@ class TestTimezoneHandling:
         # 台北时区的 ISO 格式应该以 +08:00 结尾
         assert '+08:00' in iso_string or '+0800' in iso_string
 
-    @patch('common.storage.xcom_storage.get_taipei_now')
+    @patch('plugins.storage.xcom_storage.get_taipei_now')
     def test_storage_manager_uses_taipei_time(self, mock_get_taipei_now):
         """测试存储管理器使用台北时间"""
         if not PENDULUM_AVAILABLE:
@@ -84,7 +80,7 @@ class TestTimezoneHandling:
         mock_get_taipei_now.return_value = mock_taipei_time
 
         try:
-            from common.storage.xcom_storage import XComStorageManager
+            from ...plugins.storage.xcom_storage import XComStorageManager
 
             # 由于没有实际的 Redis，这个会失败，但我们可以验证时间函数的调用
             storage = XComStorageManager()
@@ -96,7 +92,7 @@ class TestTimezoneHandling:
             # 预期会失败（没有 Redis），但我们已经验证了时间函数的调用
             pass
 
-    @patch('common.utils.notification_manager.get_taipei_now')
+    @patch('plugins.utils.notification_manager.get_taipei_now')
     def test_notification_manager_uses_taipei_time(self, mock_get_taipei_now):
         """测试通知管理器使用台北时间"""
         if not PENDULUM_AVAILABLE:
@@ -107,7 +103,7 @@ class TestTimezoneHandling:
         mock_get_taipei_now.return_value = mock_taipei_time
 
         try:
-            from common.utils.notification_manager import NotificationManager, NotificationLevel
+            from ...plugins.utils.notification_manager import NotificationManager, NotificationLevel
 
             manager = NotificationManager()
 
@@ -128,7 +124,7 @@ class TestTimezoneHandling:
         except ImportError:
             pytest.skip("Notification manager not available")
 
-    @patch('common.utils.storage_dashboard.get_taipei_now')
+    @patch('plugins.utils.storage_dashboard.get_taipei_now')
     def test_storage_dashboard_uses_taipei_time(self, mock_get_taipei_now):
         """测试存储仪表板使用台北时间"""
         if not PENDULUM_AVAILABLE:
@@ -139,7 +135,7 @@ class TestTimezoneHandling:
         mock_get_taipei_now.return_value = mock_taipei_time
 
         try:
-            from common.utils.storage_dashboard import StorageHealthReport
+            from ...plugins.utils.storage_dashboard import StorageHealthReport
 
             # 创建健康报告
             health_report = StorageHealthReport(
@@ -205,7 +201,7 @@ class TestTimezoneHandling:
         if not PENDULUM_AVAILABLE:
             pytest.skip("Pendulum not available")
 
-        from common.utils.date_utils import is_market_hours
+        from ...plugins.utils.date_utils import is_market_hours
 
         # 创建台湾股市开盘时间（09:30）
         market_open = pendulum.now('Asia/Taipei').replace(hour=9, minute=30, second=0, microsecond=0)
@@ -255,7 +251,7 @@ class TestTimezoneEdgeCases:
 def test_timezone_imports():
     """测试时区相关的导入是否正常"""
     try:
-        from common.utils.date_utils import get_taipei_now, get_taipei_today, is_market_hours
+        from ...plugins.utils.date_utils import get_taipei_now, get_taipei_today, is_market_hours
 
         # 验证函数可调用
         assert callable(get_taipei_now)

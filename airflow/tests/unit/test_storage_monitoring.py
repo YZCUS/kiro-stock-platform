@@ -15,7 +15,7 @@ class TestNotificationManager:
 
     def test_notification_manager_initialization(self):
         """测试通知管理器初始化"""
-        from common.utils.notification_manager import NotificationManager
+        from ...plugins.utils.notification_manager import NotificationManager
 
         manager = NotificationManager()
 
@@ -27,7 +27,7 @@ class TestNotificationManager:
     @patch('requests.post')
     def test_slack_notification_success(self, mock_post):
         """测试 Slack 通知成功发送"""
-        from common.utils.notification_manager import NotificationManager, NotificationLevel
+        from ...plugins.utils.notification_manager import NotificationManager, NotificationLevel
 
         # 模拟成功响应
         mock_response = Mock()
@@ -50,7 +50,7 @@ class TestNotificationManager:
 
     def test_storage_failure_alert(self):
         """测试存储失败警报"""
-        from common.utils.notification_manager import NotificationManager
+        from ...plugins.utils.notification_manager import NotificationManager
 
         manager = NotificationManager()
 
@@ -71,7 +71,7 @@ class TestNotificationManager:
 
     def test_notification_level_routing(self):
         """测试通知级别路由"""
-        from common.utils.notification_manager import NotificationManager, NotificationLevel
+        from ...plugins.utils.notification_manager import NotificationManager, NotificationLevel
 
         manager = NotificationManager()
 
@@ -93,7 +93,7 @@ class TestEnhancedStorageManager:
     @patch('redis.from_url')
     def test_storage_manager_health_check(self, mock_redis):
         """测试存储管理器健康检查"""
-        from common.storage.xcom_storage import XComStorageManager
+        from ...plugins.storage.xcom_storage import XComStorageManager
 
         # 模拟 Redis 客户端
         mock_client = Mock()
@@ -118,7 +118,7 @@ class TestEnhancedStorageManager:
     @patch('redis.from_url')
     def test_storage_manager_health_check_failure(self, mock_redis):
         """测试存储管理器健康检查失败"""
-        from common.storage.xcom_storage import XComStorageManager
+        from ...plugins.storage.xcom_storage import XComStorageManager
 
         # 模拟 Redis 连接失败
         mock_client = Mock()
@@ -135,7 +135,7 @@ class TestEnhancedStorageManager:
     @patch('redis.from_url')
     def test_performance_monitoring(self, mock_redis):
         """测试性能监控"""
-        from common.storage.xcom_storage import XComStorageManager
+        from ...plugins.storage.xcom_storage import XComStorageManager
 
         # 模拟 Redis 客户端
         mock_client = Mock()
@@ -163,7 +163,7 @@ class TestEnhancedStorageManager:
     @patch('redis.from_url')
     def test_storage_with_monitoring(self, mock_redis):
         """测试带监控的存储操作"""
-        from common.storage.xcom_storage import XComStorageManager
+        from ...plugins.storage.xcom_storage import XComStorageManager
 
         # 模拟 Redis 客户端
         mock_client = Mock()
@@ -190,7 +190,7 @@ class TestEnhancedStorageManager:
     @patch('redis.from_url')
     def test_metrics_summary(self, mock_redis):
         """测试指标汇总"""
-        from common.storage.xcom_storage import XComStorageManager
+        from ...plugins.storage.xcom_storage import XComStorageManager
 
         # 模拟 Redis 客户端和数据
         mock_client = Mock()
@@ -233,7 +233,7 @@ class TestStorageDashboard:
 
     def test_dashboard_initialization(self):
         """测试仪表板初始化"""
-        from common.utils.storage_dashboard import StorageDashboard
+        from ...plugins.utils.storage_dashboard import StorageDashboard
 
         dashboard = StorageDashboard()
 
@@ -242,10 +242,10 @@ class TestStorageDashboard:
         assert hasattr(dashboard, 'size_warning_threshold_mb')
         assert hasattr(dashboard, 'size_critical_threshold_mb')
 
-    @patch('common.storage.xcom_storage.get_storage_manager')
+    @patch('plugins.storage.xcom_storage.get_storage_manager')
     def test_comprehensive_health_report(self, mock_get_storage_manager):
         """测试综合健康报告"""
-        from common.utils.storage_dashboard import StorageDashboard
+        from ...plugins.utils.storage_dashboard import StorageDashboard
 
         # 模拟存储管理器
         mock_manager = Mock()
@@ -272,10 +272,10 @@ class TestStorageDashboard:
         assert health_report.redis_connected is True
         assert len(health_report.issues) == 0
 
-    @patch('common.storage.xcom_storage.get_storage_manager')
+    @patch('plugins.storage.xcom_storage.get_storage_manager')
     def test_health_report_with_issues(self, mock_get_storage_manager):
         """测试带问题的健康报告"""
-        from common.utils.storage_dashboard import StorageDashboard
+        from ...plugins.utils.storage_dashboard import StorageDashboard
 
         # 模拟存储管理器有问题
         mock_manager = Mock()
@@ -304,10 +304,10 @@ class TestStorageDashboard:
         assert len(health_report.issues) >= 3  # 大小、失败次数、响应时间
         assert len(health_report.recommendations) >= 3
 
-    @patch('common.storage.xcom_storage.get_storage_manager')
+    @patch('plugins.storage.xcom_storage.get_storage_manager')
     def test_automated_maintenance(self, mock_get_storage_manager):
         """测试自动化维护"""
-        from common.utils.storage_dashboard import StorageDashboard
+        from ...plugins.utils.storage_dashboard import StorageDashboard
 
         # 模拟存储管理器
         mock_manager = Mock()
@@ -339,7 +339,7 @@ class TestStorageDashboard:
 
     def test_generate_alerts(self):
         """测试警报生成"""
-        from common.utils.storage_dashboard import StorageDashboard, StorageHealthReport
+        from ...plugins.utils.storage_dashboard import StorageDashboard, StorageHealthReport
 
         dashboard = StorageDashboard()
 
@@ -368,12 +368,12 @@ class TestStorageDashboard:
 class TestAPIOperatorIntegration:
     """API 操作器集成测试"""
 
-    @patch('common.storage.xcom_storage.store_large_data')
-    @patch('common.utils.notification_manager.get_notification_manager')
+    @patch('plugins.storage.xcom_storage.store_large_data')
+    @patch('plugins.utils.notification_manager.get_notification_manager')
     @patch('requests.get')
     def test_api_operator_storage_failure_notification(self, mock_get, mock_get_notification, mock_store):
         """测试 API 操作器存储失败通知"""
-        from common.operators.api_operator import APICallOperator
+        from ...plugins.operators.api_operator import APICallOperator
 
         # 模拟 API 响应
         mock_response = Mock()
@@ -411,11 +411,11 @@ class TestAPIOperatorIntegration:
         # 验证回退行为（直接返回数据）
         assert result == {'large_data': 'x' * 100000}
 
-    @patch('common.storage.xcom_storage.retrieve_large_data')
-    @patch('common.utils.notification_manager.get_notification_manager')
+    @patch('plugins.storage.xcom_storage.retrieve_large_data')
+    @patch('plugins.utils.notification_manager.get_notification_manager')
     def test_stock_collection_operator_retrieve_failure_notification(self, mock_get_notification, mock_retrieve):
         """测试股票收集操作器检索失败通知"""
-        from common.operators.api_operator import StockDataCollectionOperator
+        from ...plugins.operators.api_operator import StockDataCollectionOperator
 
         # 模拟检索失败
         mock_retrieve.side_effect = Exception("Data not found in Redis")
@@ -454,10 +454,10 @@ class TestAPIOperatorIntegration:
 class TestStorageMonitoringDAG:
     """存储监控 DAG 测试"""
 
-    @patch('common.utils.storage_dashboard.run_health_check')
+    @patch('plugins.utils.storage_dashboard.run_health_check')
     def test_storage_health_check_task(self, mock_health_check):
         """测试存储健康检查任务"""
-        from monitoring.storage_monitoring import storage_health_check
+        from ...dags.storage_monitoring import storage_health_check
 
         # 模拟健康检查结果
         mock_health_report = Mock()
@@ -482,10 +482,10 @@ class TestStorageMonitoringDAG:
         assert result['redis_connected'] is True
         assert result['issues_count'] == 0
 
-    @patch('common.utils.storage_dashboard.run_maintenance')
+    @patch('plugins.utils.storage_dashboard.run_maintenance')
     def test_storage_maintenance_task(self, mock_maintenance):
         """测试存储维护任务"""
-        from monitoring.storage_monitoring import storage_maintenance
+        from ...dags.storage_monitoring import storage_maintenance
 
         # 模拟维护结果
         mock_maintenance.return_value = {

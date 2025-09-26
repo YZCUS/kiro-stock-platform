@@ -1,6 +1,3 @@
-# Airflow核心依賴
-apache-airflow==2.8.0
-
 # HTTP請求 (用於API調用)
 requests==2.31.0
 

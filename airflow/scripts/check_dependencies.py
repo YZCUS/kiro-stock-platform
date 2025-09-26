@@ -112,7 +112,7 @@ def get_package_mapping() -> Dict[str, str]:
 
 def check_airflow_dependencies(airflow_dir: Path) -> Dict[str, any]:
     """檢查 Airflow DAG 依賴"""
-    print("🔍 檢查 Airflow DAG 依賴...")
+    print("檢查 Airflow DAG 依賴...")
 
     # 查找所有 Python 文件
     python_files = list(airflow_dir.rglob("*.py"))
@@ -157,42 +157,42 @@ def check_airflow_dependencies(airflow_dir: Path) -> Dict[str, any]:
 def generate_dependency_report(results: Dict[str, any]) -> None:
     """生成依賴報告"""
     print("\n" + "="*60)
-    print("📊 Airflow DAG 依賴分析報告")
+    print("Airflow DAG 依賴分析報告")
     print("="*60)
 
-    print(f"\n📁 掃描的 Python 文件數量: {results['python_files']}")
-    print(f"📦 發現的外部導入數量: {len(results['all_imports'])}")
-    print(f"📋 requirements.txt 中的依賴數量: {len(results['declared_requirements'])}")
+    print(f"\n掃描的 Python 文件數量: {results['python_files']}")
+    print(f"發現的外部導入數量: {len(results['all_imports'])}")
+    print(f"requirements.txt 中的依賴數量: {len(results['declared_requirements'])}")
 
     if not results['requirements_file_exists']:
-        print("\n❌ requirements.txt 文件不存在！")
+        print("\nrequirements.txt 文件不存在！")
         return
 
-    print("\n📦 所有外部導入:")
+    print("\n所有外部導入:")
     for imp in sorted(results['all_imports']):
         print(f"  - {imp}")
 
-    print("\n📋 已聲明的依賴:")
+    print("\n已聲明的依賴:")
     for dep in sorted(results['declared_requirements']):
         print(f"  - {dep}")
 
     if results['missing_dependencies']:
-        print(f"\n❌ 缺失的依賴 ({len(results['missing_dependencies'])} 個):")
+        print(f"\n缺失的依賴 ({len(results['missing_dependencies'])} 個):")
         for import_name, package_name in sorted(results['missing_dependencies']):
             print(f"  - {import_name} (需要安裝: {package_name})")
 
-        print("\n🔧 建議在 requirements.txt 中添加:")
+        print("\n建議在 requirements.txt 中添加:")
         for import_name, package_name in sorted(results['missing_dependencies']):
             print(f"  {package_name}")
     else:
-        print("\n✅ 所有依賴都已正確聲明！")
+        print("\n所有依賴都已正確聲明！")
 
-    print("\n📂 各文件的導入詳情:")
+    print("\n各文件的導入詳情:")
     for file_path, imports in results['file_imports'].items():
         if imports:
-            print(f"\n  📄 {file_path}:")
+            print(f"\n  {file_path}:")
             for imp in sorted(imports):
-                status = "❌" if any(imp == missing[0] for missing in results['missing_dependencies']) else "✅"
+                status = "No missing dependency" if any(imp == missing[0] for missing in results['missing_dependencies']) else "Missing dependency"
                 print(f"    {status} {imp}")
 
 
@@ -202,7 +202,7 @@ def suggest_fixes(results: Dict[str, any]) -> None:
         return
 
     print("\n" + "="*60)
-    print("🔧 修復建議")
+    print("修復建議")
     print("="*60)
 
     requirements_additions = []
@@ -241,10 +241,10 @@ def main():
     airflow_dir = script_dir.parent
 
     if not airflow_dir.exists():
-        print(f"❌ Airflow 目錄不存在: {airflow_dir}")
+        print(f"Airflow 目錄不存在: {airflow_dir}")
         sys.exit(1)
 
-    print(f"🏗️  檢查 Airflow 目錄: {airflow_dir}")
+    print(f"檢查 Airflow 目錄: {airflow_dir}")
 
     # 執行依賴檢查
     try:
@@ -254,14 +254,14 @@ def main():
 
         # 根據結果設置退出碼
         if results['missing_dependencies']:
-            print(f"\n⚠️  發現 {len(results['missing_dependencies'])} 個缺失的依賴")
+            print(f"\n  發現 {len(results['missing_dependencies'])} 個缺失的依賴")
             sys.exit(1)
         else:
-            print("\n🎉 所有依賴檢查通過！")
+            print("\n所有依賴檢查通過！")
             sys.exit(0)
 
     except Exception as e:
-        print(f"❌ 檢查過程中發生錯誤: {e}")
+        print(f"檢查過程中發生錯誤: {e}")
         sys.exit(1)
 
 

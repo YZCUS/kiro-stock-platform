@@ -6,11 +6,11 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.dummy import DummyOperator
+from airflow.operators.empty import EmptyOperator
 from airflow.utils.trigger_rule import TriggerRule
 
-from common.utils.storage_dashboard import get_storage_dashboard, run_health_check, run_maintenance
-from common.utils.notification_manager import get_notification_manager, NotificationLevel
+from ..plugins.utils.storage_dashboard import get_storage_dashboard, run_health_check, run_maintenance
+from ..plugins.utils.notification_manager import get_notification_manager, NotificationLevel
 
 
 # DAG 配置
@@ -38,7 +38,7 @@ dag = DAG(**dag_config)
 
 def storage_health_check(**context):
     """执行存储健康检查"""
-    from common.utils.date_utils import get_taipei_now
+    from ..plugins.utils.date_utils import get_taipei_now
 
     try:
         taipei_now = get_taipei_now()
@@ -112,7 +112,7 @@ def storage_health_check(**context):
 
 def storage_maintenance(**context):
     """执行存储维护任务"""
-    from common.utils.date_utils import get_taipei_now
+    from ..plugins.utils.date_utils import get_taipei_now
 
     try:
         taipei_now = get_taipei_now()
@@ -143,7 +143,7 @@ def storage_maintenance(**context):
 
 def generate_storage_report(**context):
     """生成存储状态报告"""
-    from common.utils.date_utils import get_taipei_now
+    from ..plugins.utils.date_utils import get_taipei_now
 
     try:
         taipei_now = get_taipei_now()
@@ -192,7 +192,7 @@ def generate_storage_report(**context):
 
 def check_storage_capacity(**context):
     """检查存储容量并发送警报"""
-    from common.utils.date_utils import get_taipei_now
+    from ..plugins.utils.date_utils import get_taipei_now
 
     try:
         taipei_now = get_taipei_now()
@@ -286,7 +286,7 @@ maintenance_task = PythonOperator(
 )
 
 # 汇总任务
-summary_task = DummyOperator(
+summary_task = EmptyOperator(
     task_id='monitoring_complete',
     trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
     dag=dag
