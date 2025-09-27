@@ -8,6 +8,9 @@ from models.repositories.crud import CRUDBase
 from models.domain.price_history import PriceHistory
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 
 class CRUDPriceHistory(CRUDBase[PriceHistory, Dict[str, Any], Dict[str, Any]]):
@@ -175,6 +178,98 @@ class CRUDPriceHistory(CRUDBase[PriceHistory, Dict[str, Any], Dict[str, Any]]):
                 errors.append(f"建立價格數據失敗 {price_data}: {str(e)}")
         
         return created_prices
+
+    async def bulk_upsert_price_data(
+        self,
+        db: AsyncSession,
+        *,
+        price_data_list: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """批次新增或更新價格數據（高效版本）"""
+        if not price_data_list:
+            return {'created': 0, 'updated': 0, 'errors': []}
+
+        created_count = 0
+        updated_count = 0
+        errors = []
+
+        try:
+            # 將數據按照 stock_id 分組以提升查詢效率
+            from collections import defaultdict
+            grouped_data = defaultdict(list)
+            for data in price_data_list:
+                grouped_data[data['stock_id']].append(data)
+
+            for stock_id, stock_data in grouped_data.items():
+                try:
+                    # 批次查詢該股票的現有數據
+                    dates = [data['date'] for data in stock_data]
+                    existing_query = select(PriceHistory).where(
+                        and_(
+                            PriceHistory.stock_id == stock_id,
+                            PriceHistory.date.in_(dates)
+                        )
+                    )
+                    result = await db.execute(existing_query)
+                    existing_records = {record.date: record for record in result.scalars().all()}
+
+                    # 分離新增和更新的數據
+                    records_to_create = []
+                    records_to_update = []
+
+                    for data in stock_data:
+                        if data['date'] in existing_records:
+                            # 更新現有記錄
+                            existing_record = existing_records[data['date']]
+                            for key, value in data.items():
+                                if key != 'stock_id' and key != 'date':  # 不更新主鍵
+                                    setattr(existing_record, key, value)
+                            records_to_update.append(existing_record)
+                        else:
+                            # 新建記錄
+                            records_to_create.append(PriceHistory(**data))
+
+                    # 批次新增
+                    if records_to_create:
+                        db.add_all(records_to_create)
+                        created_count += len(records_to_create)
+
+                    # 批次更新（已經在上面的循環中修改了對象）
+                    updated_count += len(records_to_update)
+
+                except Exception as e:
+                    error_msg = f"股票 {stock_id} 批次操作失敗: {str(e)}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+
+            # 一次性提交所有變更
+            await db.commit()
+
+            logger.info(
+                f"批次價格數據操作完成",
+                total=len(price_data_list),
+                created=created_count,
+                updated=updated_count,
+                errors=len(errors)
+            )
+
+            return {
+                'created': created_count,
+                'updated': updated_count,
+                'total_processed': len(price_data_list),
+                'errors': errors
+            }
+
+        except Exception as e:
+            await db.rollback()
+            error_msg = f"批次價格數據操作失敗: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'created': 0,
+                'updated': 0,
+                'total_processed': 0,
+                'errors': [error_msg]
+            }
     
     async def get_price_statistics(
         self, 

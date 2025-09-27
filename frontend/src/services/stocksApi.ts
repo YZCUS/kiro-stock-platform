@@ -165,7 +165,13 @@ export class StocksApiService {
     } = {}
   ): Promise<{
     message: string;
-    task_id: string;
+    completed: boolean;
+    success: boolean;
+    symbol: string;
+    records_processed: number;
+    records_saved: number;
+    date_range: any;
+    timestamp: string;
   }> {
     return ApiService.post(API_ENDPOINTS.PRICES.BACKFILL(stockId), params);
   }

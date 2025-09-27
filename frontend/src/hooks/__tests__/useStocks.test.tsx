@@ -24,13 +24,11 @@ const mockStock: Stock = {
 };
 
 const mockPaginatedResponse: PaginatedResponse<Stock> = {
-  data: [mockStock],
-  pagination: {
-    page: 1,
-    pageSize: 10,
-    total: 1,
-    totalPages: 1,
-  },
+  items: [mockStock],
+  total: 1,
+  page: 1,
+  per_page: 10,
+  total_pages: 1,
 };
 
 // Test wrapper with QueryClient
@@ -233,7 +231,16 @@ describe('useBackfillStockData - 優化後的緩存失效測試', () => {
   );
 
   it('應該使用精確的 queryKey 進行緩存失效而不是 predicate', async () => {
-    const mockBackfillResponse = { success: true, records_added: 100 };
+    const mockBackfillResponse = {
+      message: "數據回填已完成",
+      completed: true,
+      success: true,
+      symbol: "2330.TW",
+      records_processed: 100,
+      records_saved: 100,
+      date_range: { start: "2024-01-01", end: "2024-01-31" },
+      timestamp: "2024-01-01T00:00:00Z"
+    };
     mockedStocksApiService.backfillStockData.mockResolvedValueOnce(mockBackfillResponse);
 
     const { result } = renderHook(() => useBackfillStockData(), {
@@ -303,7 +310,16 @@ describe('useBackfillStockData - 優化後的緩存失效測試', () => {
   });
 
   it('應該正確處理不同股票和參數的緩存失效', async () => {
-    const mockResponse = { success: true, records_added: 50 };
+    const mockResponse = {
+      message: "數據回填已完成",
+      completed: true,
+      success: true,
+      symbol: "AAPL",
+      records_processed: 50,
+      records_saved: 50,
+      date_range: { start: "2024-01-01", end: "2024-01-31" },
+      timestamp: "2024-01-01T00:00:00Z"
+    };
     mockedStocksApiService.backfillStockData.mockResolvedValue(mockResponse);
 
     const { result } = renderHook(() => useBackfillStockData(), {
@@ -355,7 +371,16 @@ describe('useBackfillStockData - 優化後的緩存失效測試', () => {
 
   it('性能對比：新方法 vs 舊方法', async () => {
     // 這個測試展示了優化的好處
-    const mockResponse = { success: true };
+    const mockResponse = {
+      message: "數據回填已完成",
+      completed: true,
+      success: true,
+      symbol: "TSLA",
+      records_processed: 0,
+      records_saved: 0,
+      date_range: {},
+      timestamp: "2024-01-01T00:00:00Z"
+    };
     mockedStocksApiService.backfillStockData.mockResolvedValueOnce(mockResponse);
 
     const { result } = renderHook(() => useBackfillStockData(), {

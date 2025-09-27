@@ -9,20 +9,74 @@
   CREATE INDEX idx_stocks_symbol_search ON stocks(symbol);
   CREATE INDEX idx_stocks_name_search ON stocks(name);
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime
 from pydantic import BaseModel
+import redis
+import json
+import hashlib
+from core.config import settings
 
 from core.database import get_db_session
 from services.data.collection import data_collection_service
 from services.data.validation import data_validation_service
+from services.analysis.technical_analysis import TechnicalAnalysisService, IndicatorType
 from models.repositories.crud_stock import stock_crud
 from models.repositories.crud_price_history import price_history_crud
 from models.repositories.crud_trading_signal import trading_signal_crud
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
+
+# Redis 連接配置
+try:
+    redis_client = redis.Redis(
+        host=getattr(settings, 'REDIS_HOST', 'localhost'),
+        port=getattr(settings, 'REDIS_PORT', 6379),
+        db=getattr(settings, 'REDIS_DB', 0),
+        decode_responses=True,
+        socket_timeout=5
+    )
+    # 測試連接
+    redis_client.ping()
+except Exception as e:
+    print(f"Redis 連接失敗，快取將被禁用: {e}")
+    redis_client = None
+
+
+def _get_cache_key(prefix: str, market: Optional[str] = None) -> str:
+    """生成快取鍵"""
+    key_parts = [prefix]
+    if market:
+        key_parts.append(f"market:{market}")
+    return ":".join(key_parts)
+
+
+def _get_cached_data(cache_key: str) -> Optional[List[Dict[str, Any]]]:
+    """從快取獲取數據"""
+    if not redis_client:
+        return None
+
+    try:
+        cached_data = redis_client.get(cache_key)
+        if cached_data:
+            return json.loads(cached_data)
+    except Exception as e:
+        print(f"快取讀取失敗: {e}")
+
+    return None
+
+
+def _set_cached_data(cache_key: str, data: List[Dict[str, Any]], ttl: int = 300) -> None:
+    """設置快取數據"""
+    if not redis_client:
+        return
+
+    try:
+        redis_client.setex(cache_key, ttl, json.dumps(data, ensure_ascii=False))
+    except Exception as e:
+        print(f"快取設置失敗: {e}")
 
 
 # Pydantic模型
@@ -100,11 +154,11 @@ class DataCollectionResponse(BaseModel):
 
 
 class StockListResponse(BaseModel):
-    """股票清單響應模型"""
+    """股票清單響應模型（與前端PaginatedResponse兼容）"""
     items: List[StockResponse]
     total: int
     page: int
-    page_size: int
+    per_page: int  # 改為 per_page 以匹配前端期望
     total_pages: int
 
 
@@ -114,7 +168,7 @@ async def get_stocks(
     is_active: Optional[bool] = Query(True, description="股票狀態篩選"),
     search: Optional[str] = Query(None, description="搜尋關鍵字（股票代號或名稱）"),
     page: int = Query(1, ge=1, description="頁碼"),
-    page_size: int = Query(50, ge=1, le=200, description="每頁數量"),
+    per_page: int = Query(50, ge=1, le=200, description="每頁數量"),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -122,7 +176,7 @@ async def get_stocks(
     """
     try:
         # 計算分頁偏移量
-        skip = (page - 1) * page_size
+        skip = (page - 1) * per_page
 
         # 在資料庫層進行過濾和分頁
         stocks = await stock_crud.get_stocks_with_filters(
@@ -131,7 +185,7 @@ async def get_stocks(
             is_active=is_active,
             search_term=search,
             skip=skip,
-            limit=page_size
+            limit=per_page
         )
 
         # 計算總數（用於分頁信息）
@@ -143,13 +197,13 @@ async def get_stocks(
         )
 
         # 計算總頁數
-        total_pages = (total_count + page_size - 1) // page_size
+        total_pages = (total_count + per_page - 1) // per_page
 
         return StockListResponse(
-            items=[StockResponse.from_orm(stock) for stock in stocks],
+            items=[StockResponse.model_validate(stock) for stock in stocks],
             total=total_count,
             page=page,
-            page_size=page_size,
+            per_page=per_page,
             total_pages=total_pages
         )
 
@@ -160,13 +214,25 @@ async def get_stocks(
 @router.get("/active", response_model=List[Dict[str, Any]])
 async def get_active_stocks(
     market: Optional[str] = Query(None, description="市場代碼 (TW/US)"),
+    force_refresh: bool = Query(False, description="強制刷新快取"),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
     取得所有活躍股票清單（用於數據收集，不分頁）
+    支援快取機制以提升性能
     """
     try:
-        # 獲取所有活躍股票，不限制數量
+        # 生成快取鍵
+        cache_key = _get_cache_key("active_stocks", market)
+
+        # 嘗試從快取獲取數據（除非強制刷新）
+        if not force_refresh:
+            cached_data = _get_cached_data(cache_key)
+            if cached_data:
+                print(f"從快取返回活躍股票清單，數量: {len(cached_data)}")
+                return cached_data
+
+        # 獲取所有活躍股票，添加安全限制
         stocks = await stock_crud.get_stocks_with_filters(
             db,
             market=market,
@@ -175,6 +241,14 @@ async def get_active_stocks(
             skip=0,
             limit=None  # 不限制數量
         )
+
+        # 安全檢查：防止意外返回過多數據
+        MAX_STOCKS = 10000  # 設置合理的上限
+        if len(stocks) > MAX_STOCKS:
+            raise HTTPException(
+                status_code=500,
+                detail=f"活躍股票數量過多 ({len(stocks)})，超過安全限制 ({MAX_STOCKS})"
+            )
 
         # 回傳簡化的股票清單，僅包含收集所需的欄位
         stock_list = []
@@ -186,8 +260,14 @@ async def get_active_stocks(
                 'name': stock.name
             })
 
+        # 設置快取（TTL: 5分鐘）
+        _set_cached_data(cache_key, stock_list, ttl=300)
+
+        print(f"從資料庫返回活躍股票清單，數量: {len(stock_list)}")
         return stock_list
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"取得活躍股票清單失敗: {str(e)}")
 
@@ -227,12 +307,29 @@ async def get_stock_data(
     start_date: Optional[date] = Query(None, description="開始日期"),
     end_date: Optional[date] = Query(None, description="結束日期"),
     page: int = Query(1, ge=1, description="頁碼"),
-    page_size: int = Query(100, ge=1, le=1000, description="每頁數量"),
+    per_page: int = Query(100, ge=1, le=1000, description="每頁數量"),
     include_indicators: bool = Query(False, description="包含技術指標"),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
     取得股票完整數據（價格 + 可選技術指標）
+
+    ## 回傳結構
+    ```json
+    {
+        "stock": {"id": int, "symbol": str, "market": str, "name": str},
+        "price_data": {
+            "items": [{"date": str, "open": float, "high": float, "low": float, "close": float, "volume": int}],
+            "pagination": {"total": int, "page": int, "per_page": int, "total_pages": int}
+        },
+        "indicators": {"RSI": [...], "SMA": [...]} // 僅當 include_indicators=true 時
+    }
+    ```
+
+    ## 與 /prices 端點差異
+    - `/data`: 包含分頁資訊、股票基本資料、可選技術指標（適合複雜查詢）
+    - `/prices`: 僅返回價格陣列（適合輕量級查詢）
+    - `/price-history`: 返回與前端期望格式兼容的結構
     """
     try:
         # 檢查股票是否存在
@@ -241,19 +338,26 @@ async def get_stock_data(
             raise HTTPException(status_code=404, detail="股票不存在")
         
         # 計算分頁偏移量
-        offset = (page - 1) * page_size
-        
+        offset = (page - 1) * per_page
+
         # 取得價格數據
         if start_date and end_date:
-            prices = await price_history_crud.get_by_stock_and_date_range(
-                db, stock_id, start_date, end_date, offset=offset, limit=page_size
+            prices = await price_history_crud.get_stock_price_range(
+                db, stock_id=stock_id, start_date=start_date, end_date=end_date, limit=per_page
             )
-            total_count = await price_history_crud.count_by_stock_and_date_range(
-                db, stock_id, start_date, end_date
+            # 簡化計算總數 - 使用已有方法
+            all_prices = await price_history_crud.get_stock_price_range(
+                db, stock_id=stock_id, start_date=start_date, end_date=end_date
             )
+            total_count = len(all_prices)
         else:
-            prices = await price_history_crud.get_by_stock(db, stock_id, offset=offset, limit=page_size)
-            total_count = await price_history_crud.count_by_stock(db, stock_id)
+            prices = await price_history_crud.get_stock_price_range(
+                db, stock_id=stock_id, limit=per_page
+            )
+            all_prices = await price_history_crud.get_stock_price_range(
+                db, stock_id=stock_id
+            )
+            total_count = len(all_prices)
         
         # 格式化價格數據
         price_data = []
@@ -270,8 +374,8 @@ async def get_stock_data(
             price_data.append(price_item)
         
         # 計算分頁資訊
-        total_pages = (total_count + page_size - 1) // page_size
-        
+        total_pages = (total_count + per_page - 1) // per_page
+
         result = {
             "stock": {
                 "id": stock.id,
@@ -284,7 +388,7 @@ async def get_stock_data(
                 "pagination": {
                     "total": total_count,
                     "page": page,
-                    "page_size": page_size,
+                    "per_page": per_page,
                     "total_pages": total_pages
                 }
             }
@@ -330,7 +434,25 @@ async def get_stock_prices(
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    取得股票價格數據（簡化版本）
+    取得股票價格數據（輕量級版本）
+
+    ## 回傳結構
+    ```json
+    [
+        {"date": "2024-01-01", "open": 100.0, "high": 105.0, "low": 99.0, "close": 103.0, "volume": 1000000}
+    ]
+    ```
+
+    ## 使用場景
+    - 僅需要價格數據時使用
+    - 無分頁功能，使用 limit 參數控制數量
+    - 無額外資訊（股票基本資料、技術指標）
+    - 適合圖表顯示、輕量級查詢
+
+    ## 相關端點
+    - 如需分頁資訊：使用 `/data` 端點
+    - 如需技術指標：使用 `/data?include_indicators=true`
+    - 如需前端兼容格式：使用 `/price-history`
     """
     try:
         # 檢查股票是否存在
@@ -362,6 +484,284 @@ async def get_stock_prices(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"取得價格數據失敗: {str(e)}")
+
+
+# 新增前端期望的價格歷史端點
+@router.get("/{stock_id}/price-history", response_model=Dict[str, Any])
+async def get_stock_price_history(
+    stock_id: int,
+    start_date: Optional[date] = Query(None, description="開始日期"),
+    end_date: Optional[date] = Query(None, description="結束日期"),
+    interval: Optional[str] = Query("1d", description="時間間隔"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    取得股票價格歷史（前端兼容端點）
+    """
+    try:
+        # 檢查股票是否存在
+        stock = await stock_crud.get(db, stock_id)
+        if not stock:
+            raise HTTPException(status_code=404, detail="股票不存在")
+
+        # 取得價格數據
+        prices = await price_history_crud.get_stock_price_range(
+            db,
+            stock_id=stock_id,
+            start_date=start_date,
+            end_date=end_date,
+            limit=1000  # 合理的默認限制
+        )
+
+        return {
+            "symbol": stock.symbol,
+            "data": [
+                {
+                    "date": price.date.isoformat(),
+                    "open": float(price.open_price),
+                    "high": float(price.high_price),
+                    "low": float(price.low_price),
+                    "close": float(price.close_price),
+                    "volume": price.volume,
+                    "adjusted_close": float(price.adjusted_close or price.close_price)
+                }
+                for price in prices
+            ]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"取得價格歷史失敗: {str(e)}")
+
+
+# 新增前端期望的最新價格端點
+@router.get("/{stock_id}/price/latest", response_model=Dict[str, Any])
+async def get_stock_latest_price(
+    stock_id: int,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    取得股票最新價格（前端兼容端點）
+    """
+    try:
+        # 檢查股票是否存在
+        stock = await stock_crud.get(db, stock_id)
+        if not stock:
+            raise HTTPException(status_code=404, detail="股票不存在")
+
+        # 取得最新價格
+        latest_price = await price_history_crud.get_latest_price(db, stock_id=stock_id)
+        if not latest_price:
+            raise HTTPException(status_code=404, detail="沒有價格數據")
+
+        # 計算變動
+        previous_prices = await price_history_crud.get_stock_price_range(
+            db, stock_id=stock_id, limit=2
+        )
+
+        change = 0.0
+        change_percent = 0.0
+        if len(previous_prices) >= 2:
+            prev_close = float(previous_prices[1].close_price)
+            current_close = float(latest_price.close_price)
+            change = current_close - prev_close
+            change_percent = (change / prev_close) * 100 if prev_close != 0 else 0.0
+
+        return {
+            "symbol": stock.symbol,
+            "price": float(latest_price.close_price),
+            "change": change,
+            "change_percent": change_percent,
+            "volume": latest_price.volume,
+            "timestamp": latest_price.date.isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"取得最新價格失敗: {str(e)}")
+
+
+# 新增前端期望的數據回填端點
+@router.post("/{stock_id}/price/backfill", response_model=Dict[str, Any])
+async def backfill_stock_data(
+    stock_id: int,
+    start_date: Optional[date] = Query(None, description="開始日期"),
+    end_date: Optional[date] = Query(None, description="結束日期"),
+    force: bool = Query(False, description="強制回填（暫未實現，預留參數）"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    觸發股票數據回填（前端兼容端點）
+
+    注意：force 參數目前暫未實現，數據收集服務會自動處理重複數據
+    """
+    try:
+        # 檢查股票是否存在
+        stock = await stock_crud.get(db, stock_id)
+        if not stock:
+            raise HTTPException(status_code=404, detail="股票不存在")
+
+        # 調用數據收集服務（同步完成）
+        result = await data_collection_service.collect_stock_data(
+            db_session=db,
+            symbol=stock.symbol,
+            market=stock.market,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        if result["success"]:
+            # 實際上是同步完成的，不需要 task_id
+            return {
+                "message": result.get("message", "數據回填已完成"),
+                "completed": True,
+                "success": True,
+                "symbol": stock.symbol,
+                "records_processed": result.get("records_processed", 0),
+                "records_saved": result.get("records_saved", 0),
+                "date_range": result.get("date_range", {}),
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            raise HTTPException(status_code=500, detail=result.get("message", "數據回填失敗"))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"啟動數據回填失敗: {str(e)}")
+
+
+# 新增前端期望的指標計算端點
+@router.get("/{stock_id}/indicators/calculate", response_model=Dict[str, Any])
+async def calculate_stock_indicators(
+    stock_id: int,
+    indicator_types: Optional[str] = Query(None, description="指標類型（逗號分隔）"),
+    period: int = Query(30, description="計算週期"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    計算股票技術指標（前端兼容端點）
+    """
+    try:
+        # 檢查股票是否存在
+        stock = await stock_crud.get(db, stock_id)
+        if not stock:
+            raise HTTPException(status_code=404, detail="股票不存在")
+
+        # 取得價格數據
+        prices = await price_history_crud.get_stock_price_range(
+            db, stock_id=stock_id, limit=period + 50  # 額外數據確保計算準確
+        )
+
+        if not prices:
+            raise HTTPException(status_code=404, detail="沒有價格數據")
+
+        # 使用真實的技術分析服務進行計算
+        analysis_service = TechnicalAnalysisService()
+
+        # 解析指標類型
+        requested_indicators = []
+        if indicator_types:
+            indicator_list = [t.strip().upper() for t in indicator_types.split(',')]
+            for indicator_type in indicator_list:
+                try:
+                    requested_indicators.append(IndicatorType(indicator_type))
+                except ValueError:
+                    # 忽略不支援的指標類型
+                    continue
+
+        # 如果沒有指定或無效的指標類型，使用預設指標
+        if not requested_indicators:
+            requested_indicators = [IndicatorType.RSI, IndicatorType.SMA, IndicatorType.MACD]
+
+        # 調用分析服務計算指標
+        analysis_result = await analysis_service.calculate_stock_indicators(
+            db_session=db,
+            stock_id=stock_id,
+            indicators=requested_indicators,
+            days=period + 50,  # 額外數據確保計算準確
+            save_to_db=False  # 不保存到資料庫，僅用於API回傳
+        )
+
+        # 轉換結果格式以匹配前端期望，即使部分失敗也嘗試返回可用數據
+        indicators = {}
+        errors = []
+        warnings = []
+
+        # 收集錯誤和警告信息
+        if analysis_result.errors:
+            errors.extend(analysis_result.errors)
+        if analysis_result.warnings:
+            warnings.extend(analysis_result.warnings)
+
+        # 處理指標數據，即使 success=False 也檢查是否有部分可用數據
+        if analysis_result.indicators:
+            for indicator_name, values in analysis_result.indicators.items():
+                if values:  # 確保有數值
+                    # 修正：使用更精確的指標類型匹配
+                    indicator_upper = indicator_name.upper()
+
+                    if 'RSI' in indicator_upper and len(values) > 0:
+                        indicators["rsi"] = values[-1]  # 取最新值
+                    elif 'SMA' in indicator_upper and len(values) > 0:
+                        # 處理不同週期的 SMA (SMA_20, SMA_50 等)
+                        if 'SMA_20' in indicator_upper:
+                            indicators["sma_20"] = values[-1]
+                        elif 'SMA_50' in indicator_upper:
+                            indicators["sma_50"] = values[-1]
+                        else:
+                            indicators["sma"] = values[-1]  # 通用 SMA
+                    elif 'EMA' in indicator_upper and len(values) > 0:
+                        # 處理不同週期的 EMA
+                        if 'EMA_12' in indicator_upper:
+                            indicators["ema_12"] = values[-1]
+                        elif 'EMA_26' in indicator_upper:
+                            indicators["ema_26"] = values[-1]
+                        else:
+                            indicators["ema"] = values[-1]  # 通用 EMA
+                    elif 'MACD' in indicator_upper and isinstance(values, dict):
+                        # MACD 返回字典格式
+                        indicators["macd"] = {
+                            "macd": values.get('macd', [0])[-1] if values.get('macd') else 0,
+                            "signal": values.get('signal', [0])[-1] if values.get('signal') else 0,
+                            "histogram": values.get('histogram', [0])[-1] if values.get('histogram') else 0
+                        }
+                    elif 'BOLLINGER' in indicator_upper and isinstance(values, dict):
+                        # 布林帶返回字典格式
+                        indicators["bollinger"] = {
+                            "upper": values.get('upper', [0])[-1] if values.get('upper') else 0,
+                            "middle": values.get('middle', [0])[-1] if values.get('middle') else 0,
+                            "lower": values.get('lower', [0])[-1] if values.get('lower') else 0
+                        }
+
+        # 如果沒有任何指標數據且有錯誤，提供詳細錯誤信息
+        if not indicators and not analysis_result.success:
+            if not errors:
+                errors.append("無法計算技術指標，可能由於數據不足")
+
+        result = {
+            "symbol": stock.symbol,
+            "indicators": indicators,
+            "period": period,
+            "timestamp": datetime.now().isoformat(),
+            "success": analysis_result.success,
+            "data_points": len(prices) if prices else 0
+        }
+
+        # 只在有錯誤或警告時才加入這些欄位
+        if errors:
+            result["errors"] = errors
+        if warnings:
+            result["warnings"] = warnings
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"計算技術指標失敗: {str(e)}")
 
 
 @router.get("/{stock_id}/indicators", response_model=Dict[str, Any])
@@ -777,7 +1177,7 @@ async def search_stocks(
     market: Optional[str] = Query(None, description="市場代碼 (TW/US)"),
     is_active: Optional[bool] = Query(True, description="股票狀態篩選"),
     page: int = Query(1, ge=1, description="頁碼"),
-    page_size: int = Query(20, ge=1, le=100, description="每頁數量"),
+    per_page: int = Query(20, ge=1, le=100, description="每頁數量"),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -785,7 +1185,7 @@ async def search_stocks(
     """
     try:
         # 計算分頁偏移量
-        skip = (page - 1) * page_size
+        skip = (page - 1) * per_page
 
         # 在資料庫層進行搜尋和分頁
         stocks = await stock_crud.get_stocks_with_filters(
@@ -794,7 +1194,7 @@ async def search_stocks(
             is_active=is_active,
             search_term=q,
             skip=skip,
-            limit=page_size
+            limit=per_page
         )
 
         # 計算總數
@@ -806,13 +1206,13 @@ async def search_stocks(
         )
 
         # 計算總頁數
-        total_pages = (total_count + page_size - 1) // page_size
+        total_pages = (total_count + per_page - 1) // per_page
 
         return StockListResponse(
-            items=[StockResponse.from_orm(stock) for stock in stocks],
+            items=[StockResponse.model_validate(stock) for stock in stocks],
             total=total_count,
             page=page,
-            page_size=page_size,
+            per_page=per_page,
             total_pages=total_pages
         )
 
@@ -840,7 +1240,7 @@ async def get_stocks_simple(
             limit=limit
         )
 
-        return [StockResponse.from_orm(stock) for stock in stocks]
+        return [StockResponse.model_validate(stock) for stock in stocks]
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"取得股票清單失敗: {str(e)}")

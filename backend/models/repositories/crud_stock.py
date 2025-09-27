@@ -225,6 +225,10 @@ class CRUDStock(CRUDBase[Stock, Dict[str, Any], Dict[str, Any]]):
         query = query.order_by(Stock.symbol).offset(skip)
         if limit is not None:
             query = query.limit(limit)
+        else:
+            # 安全機制：即使沒有指定 limit，也設置合理的硬限制防止意外的大查詢
+            MAX_UNLIMITED_QUERY = 50000  # 設置足夠大但安全的限制
+            query = query.limit(MAX_UNLIMITED_QUERY)
 
         result = await db.execute(query)
         return result.scalars().all()

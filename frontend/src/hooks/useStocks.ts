@@ -203,27 +203,58 @@ export function useRefreshStockData(
  * 股票數據回填
  */
 export function useBackfillStockData(
-  options?: UseMutationOptions<any, Error, { stockId: number; params: any }>
+  options?: UseMutationOptions<{
+    message: string;
+    completed: boolean;
+    success: boolean;
+    symbol: string;
+    records_processed: number;
+    records_saved: number;
+    date_range: any;
+    timestamp: string;
+  }, Error, { stockId: number; params: any }>
 ) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: ({ stockId, params }) => StocksApiService.backfillStockData(stockId, params),
     onSuccess: (_, { stockId, params }) => {
-      // 精確地使特定股票相關的價格查詢失效，而不是所有股票
+      // 修正：使用多層級策略確保所有相關快取都被正確無效化
+      // 解決了之前 includes() 方法無法正確匹配 React Query 鍵結構的問題
+
+      // 1. 無效化所有價格相關查詢（使用查詢鍵前綴匹配）
+      // 這會無效化所有以 ['stocks', 'prices'] 開頭的查詢
+      queryClient.invalidateQueries({
+        queryKey: STOCKS_QUERY_KEYS.prices()
+      });
+
+      // 2. 無效化特定股票的價格歷史查詢（精確匹配）
+      queryClient.invalidateQueries({
+        queryKey: STOCKS_QUERY_KEYS.priceHistory(stockId, params)
+      });
+
+      // 3. 無效化該股票的所有價格歷史查詢（不限參數）
+      // 使用精確的陣列位置檢查，而非不可靠的 includes()
       queryClient.invalidateQueries({
         predicate: (query) => {
-          const queryKey = query.queryKey as string[];
-          // 只匹配包含特定 stockId 的價格相關查詢
-          return queryKey.includes('stocks') &&
-                 queryKey.includes('prices') &&
-                 queryKey.includes(stockId.toString());
+          const queryKey = query.queryKey;
+          // 檢查查詢鍵結構：['stocks', 'prices', stockId, params]
+          return Array.isArray(queryKey) &&
+                 queryKey.length >= 3 &&
+                 queryKey[0] === 'stocks' &&
+                 queryKey[1] === 'prices' &&
+                 queryKey[2] === stockId;
         }
       });
 
-      // 額外確保最新價格也被更新
+      // 4. 無效化最新價格查詢
       queryClient.invalidateQueries({
         queryKey: STOCKS_QUERY_KEYS.latestPrice(stockId)
+      });
+
+      // 5. 無效化股票詳情以確保相關數據同步
+      queryClient.invalidateQueries({
+        queryKey: STOCKS_QUERY_KEYS.detail(stockId)
       });
     },
     ...options,

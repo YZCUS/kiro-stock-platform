@@ -70,6 +70,10 @@ class APICallOperator(BaseOperator):
             response.raise_for_status()
 
             result_data = response.json()
+
+            # 檢查應用層面的錯誤狀態（在 HTTP 200 的情況下）
+            self._validate_api_response(result_data)
+
             self.log.info(f"API調用成功: {self.method} {self.endpoint}")
 
             # 檢查數據大小是否需要外部存儲
@@ -108,6 +112,51 @@ class APICallOperator(BaseOperator):
         except requests.exceptions.RequestException as e:
             self.log.error(f"API調用失敗: {self.method} {self.endpoint}, 錯誤: {str(e)}")
             raise
+
+    def _validate_api_response(self, result_data: Dict[str, Any]) -> None:
+        """驗證API響應的應用層狀態，如果有錯誤則拋出異常"""
+
+        # 檢查 success 欄位（常見於所有收集端點）
+        if isinstance(result_data, dict) and 'success' in result_data:
+            if not result_data.get('success', True):
+                # 提取錯誤信息用於異常消息
+                message = result_data.get('message', '未知錯誤')
+                error_count = result_data.get('error_count', 0)
+                errors = result_data.get('errors', [])
+
+                # 構建詳細的錯誤消息
+                error_details = []
+                if error_count > 0:
+                    error_details.append(f"錯誤數量: {error_count}")
+                if errors:
+                    # 顯示前3個錯誤，避免消息過長
+                    sample_errors = errors[:3]
+                    error_details.append(f"錯誤示例: {', '.join(sample_errors)}")
+                    if len(errors) > 3:
+                        error_details.append(f"還有 {len(errors) - 3} 個其他錯誤")
+
+                error_msg = f"API應用層錯誤: {message}"
+                if error_details:
+                    error_msg += f" ({'; '.join(error_details)})"
+
+                self.log.error(f"API響應包含應用層錯誤: {error_msg}")
+                raise Exception(error_msg)
+
+        # 檢查 error_count 欄位（即使沒有 success 欄位）
+        elif isinstance(result_data, dict) and 'error_count' in result_data:
+            error_count = result_data.get('error_count', 0)
+            if error_count > 0:
+                errors = result_data.get('errors', [])
+                total_stocks = result_data.get('total_stocks', 0)
+                success_count = result_data.get('success_count', 0)
+
+                error_msg = f"數據收集部分失敗: {error_count}/{total_stocks} 失敗"
+                if errors:
+                    sample_errors = errors[:2]
+                    error_msg += f" (示例: {', '.join(sample_errors)})"
+
+                self.log.error(f"檢測到收集錯誤: {error_msg}")
+                raise Exception(error_msg)
 
     def _create_data_summary(self, data: Any) -> Dict[str, Any]:
         """創建數據摘要以便在XCom中顯示"""
