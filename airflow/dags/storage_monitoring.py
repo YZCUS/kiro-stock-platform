@@ -19,6 +19,7 @@ dag_config = {
     'description': '外部存储监控和维护工作流程',
     'schedule_interval': '*/30 * * * *',  # 每30分钟运行一次
     'max_active_runs': 1,
+    'catchup': False,  # 移至 DAG 層級，避免補跑歷史排程
     'tags': ['monitoring', 'storage', 'maintenance'],
     'default_args': {
         'owner': 'data-platform',
@@ -27,8 +28,7 @@ dag_config = {
         'email_on_failure': True,
         'email_on_retry': False,
         'retries': 1,
-        'retry_delay': timedelta(minutes=5),
-        'catchup': False
+        'retry_delay': timedelta(minutes=5)
     }
 }
 

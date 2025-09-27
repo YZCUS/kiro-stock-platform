@@ -194,7 +194,7 @@ class CRUDStock(CRUDBase[Stock, Dict[str, Any], Dict[str, Any]]):
         is_active: Optional[bool] = None,
         search_term: Optional[str] = None,
         skip: int = 0,
-        limit: int = 100
+        limit: Optional[int] = 100
     ) -> List[Stock]:
         """根據過濾條件取得股票清單（在資料庫層進行過濾）"""
         query = select(Stock)
@@ -222,7 +222,9 @@ class CRUDStock(CRUDBase[Stock, Dict[str, Any], Dict[str, Any]]):
             query = query.where(and_(*conditions))
 
         # 添加排序、分頁
-        query = query.order_by(Stock.symbol).offset(skip).limit(limit)
+        query = query.order_by(Stock.symbol).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
 
         result = await db.execute(query)
         return result.scalars().all()

@@ -10,7 +10,7 @@ from datetime import datetime
 
 try:
     import pendulum
-    from ...plugins.utils.date_utils import get_taipei_now
+    from airflow.plugins.utils.date_utils import get_taipei_now
     PENDULUM_AVAILABLE = True
 except ImportError:
     PENDULUM_AVAILABLE = False
@@ -69,7 +69,7 @@ class TestTimezoneHandling:
         # 台北时区的 ISO 格式应该以 +08:00 结尾
         assert '+08:00' in iso_string or '+0800' in iso_string
 
-    @patch('plugins.storage.xcom_storage.get_taipei_now')
+    @patch('airflow.plugins.storage.xcom_storage.get_taipei_now')
     def test_storage_manager_uses_taipei_time(self, mock_get_taipei_now):
         """测试存储管理器使用台北时间"""
         if not PENDULUM_AVAILABLE:
@@ -80,7 +80,7 @@ class TestTimezoneHandling:
         mock_get_taipei_now.return_value = mock_taipei_time
 
         try:
-            from ...plugins.storage.xcom_storage import XComStorageManager
+            from airflow.plugins.storage.xcom_storage import XComStorageManager
 
             # 由于没有实际的 Redis，这个会失败，但我们可以验证时间函数的调用
             storage = XComStorageManager()
@@ -92,7 +92,7 @@ class TestTimezoneHandling:
             # 预期会失败（没有 Redis），但我们已经验证了时间函数的调用
             pass
 
-    @patch('plugins.utils.notification_manager.get_taipei_now')
+    @patch('airflow.plugins.utils.notification_manager.get_taipei_now')
     def test_notification_manager_uses_taipei_time(self, mock_get_taipei_now):
         """测试通知管理器使用台北时间"""
         if not PENDULUM_AVAILABLE:
@@ -103,7 +103,7 @@ class TestTimezoneHandling:
         mock_get_taipei_now.return_value = mock_taipei_time
 
         try:
-            from ...plugins.utils.notification_manager import NotificationManager, NotificationLevel
+            from airflow.plugins.utils.notification_manager import NotificationManager, NotificationLevel
 
             manager = NotificationManager()
 
@@ -124,7 +124,7 @@ class TestTimezoneHandling:
         except ImportError:
             pytest.skip("Notification manager not available")
 
-    @patch('plugins.utils.storage_dashboard.get_taipei_now')
+    @patch('airflow.plugins.utils.storage_dashboard.get_taipei_now')
     def test_storage_dashboard_uses_taipei_time(self, mock_get_taipei_now):
         """测试存储仪表板使用台北时间"""
         if not PENDULUM_AVAILABLE:
@@ -135,7 +135,7 @@ class TestTimezoneHandling:
         mock_get_taipei_now.return_value = mock_taipei_time
 
         try:
-            from ...plugins.utils.storage_dashboard import StorageHealthReport
+            from airflow.plugins.utils.storage_dashboard import StorageHealthReport
 
             # 创建健康报告
             health_report = StorageHealthReport(
@@ -201,7 +201,7 @@ class TestTimezoneHandling:
         if not PENDULUM_AVAILABLE:
             pytest.skip("Pendulum not available")
 
-        from ...plugins.utils.date_utils import is_market_hours
+        from airflow.plugins.utils.date_utils import is_market_hours
 
         # 创建台湾股市开盘时间（09:30）
         market_open = pendulum.now('Asia/Taipei').replace(hour=9, minute=30, second=0, microsecond=0)
@@ -251,38 +251,38 @@ class TestTimezoneEdgeCases:
 def test_timezone_imports():
     """测试时区相关的导入是否正常"""
     try:
-        from ...plugins.utils.date_utils import get_taipei_now, get_taipei_today, is_market_hours
+        from airflow.plugins.utils.date_utils import get_taipei_now, get_taipei_today, is_market_hours
 
         # 验证函数可调用
         assert callable(get_taipei_now)
         assert callable(get_taipei_today)
         assert callable(is_market_hours)
 
-        print("✅ 时区工具函数导入成功")
+        print("时区工具函数导入成功")
         return True
 
     except ImportError as e:
-        print(f"❌ 时区工具函数导入失败: {e}")
+        print(f"时区工具函数导入失败: {e}")
         return False
 
 
 if __name__ == '__main__':
     # 基础导入测试
     if test_timezone_imports():
-        print("🕐 时区处理测试模块准备就绪")
+        print("时区处理测试模块准备就绪")
 
         if PENDULUM_AVAILABLE:
             # 运行基础时区测试
             try:
                 taipei_now = get_taipei_now()
-                print(f"✅ 当前台北时间: {taipei_now.isoformat()}")
-                print(f"✅ 时区: {taipei_now.timezone.name}")
-                print(f"✅ UTC偏移: +{taipei_now.offset_hours}小时")
+                print(f"当前台北时间: {taipei_now.isoformat()}")
+                print(f"时区: {taipei_now.timezone.name}")
+                print(f"UTC偏移: + {taipei_now.offset_hours}小时")
             except Exception as e:
-                print(f"❌ 基础时区测试失败: {e}")
+                print(f"基础时区测试失败: {e}")
         else:
-            print("⚠️ Pendulum 库不可用，跳过详细测试")
+            print("Pendulum 库不可用，跳过详细测试")
     else:
-        print("❌ 时区处理测试模块初始化失败")
+        print("时区处理测试模块初始化失败")
 
     print("\n要运行完整测试套件，请使用: pytest test_timezone_handling.py -v")

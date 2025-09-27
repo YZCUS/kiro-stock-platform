@@ -586,10 +586,14 @@ class XComStorageManager:
                 # 记录性能数据
                 duration = metric_data.get('duration_seconds', 0)
                 perf_key = f'avg_{operation}_time'
-                if perf_key not in summary['_temp_performance']:
-                    summary['_temp_performance'] = {}
+
+                # 确保 _temp_performance 字典存在
+                summary.setdefault('_temp_performance', {})
+
+                # 确保特定性能指标的列表存在
                 if perf_key not in summary['_temp_performance']:
                     summary['_temp_performance'][perf_key] = []
+
                 summary['_temp_performance'][perf_key].append(duration)
 
         elif metric_type == 'operation_failure':
@@ -599,9 +603,7 @@ class XComStorageManager:
 
         elif metric_type == 'store_success':
             data_size = metric_data.get('data_size', 0)
-            if '_temp_sizes' not in summary:
-                summary['_temp_sizes'] = []
-            summary['_temp_sizes'].append(data_size)
+            summary.setdefault('_temp_sizes', []).append(data_size)
 
         elif metric_type == 'health_check':
             summary['health_checks']['total'] += 1
@@ -609,10 +611,8 @@ class XComStorageManager:
                 summary['health_checks']['failed'] += 1
 
             response_time = metric_data.get('response_time_seconds', 0)
-            if '_temp_response_times' not in summary:
-                summary['_temp_response_times'] = []
             if response_time > 0:
-                summary['_temp_response_times'].append(response_time)
+                summary.setdefault('_temp_response_times', []).append(response_time)
 
     def _calculate_averages(self, summary: Dict) -> None:
         """计算平均值"""

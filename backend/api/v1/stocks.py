@@ -85,6 +85,13 @@ class DataCollectionRequest(BaseModel):
     end_date: Optional[date] = None
 
 
+class BatchCollectionRequest(BaseModel):
+    stocks: List[Dict[str, str]]  # [{"symbol": "2330", "market": "TW"}, ...]
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    use_stock_list: Optional[bool] = True
+
+
 class DataCollectionResponse(BaseModel):
     success: bool
     message: str
@@ -148,6 +155,41 @@ async def get_stocks(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"取得股票清單失敗: {str(e)}")
+
+
+@router.get("/active", response_model=List[Dict[str, Any]])
+async def get_active_stocks(
+    market: Optional[str] = Query(None, description="市場代碼 (TW/US)"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    取得所有活躍股票清單（用於數據收集，不分頁）
+    """
+    try:
+        # 獲取所有活躍股票，不限制數量
+        stocks = await stock_crud.get_stocks_with_filters(
+            db,
+            market=market,
+            is_active=True,
+            search_term=None,
+            skip=0,
+            limit=None  # 不限制數量
+        )
+
+        # 回傳簡化的股票清單，僅包含收集所需的欄位
+        stock_list = []
+        for stock in stocks:
+            stock_list.append({
+                'id': stock.id,
+                'symbol': stock.symbol,
+                'market': stock.market,
+                'name': stock.name
+            })
+
+        return stock_list
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"取得活躍股票清單失敗: {str(e)}")
 
 
 @router.get("/{stock_id}", response_model=StockResponse)
@@ -452,8 +494,8 @@ async def collect_stock_data(
         return DataCollectionResponse(
             success=result.get('success', False),
             message=result.get('message', ''),
-            data_points=result.get('data_saved', 0),
-            errors=result.get('errors', [])
+            data_points=result.get('records_saved', 0),
+            errors=[result.get('error')] if result.get('error') else []
         )
     
     except Exception as e:
@@ -469,17 +511,73 @@ async def collect_all_stocks_data(
     """
     try:
         result = await data_collection_service.collect_all_stocks_data(db)
-        
+
+        # 直接回傳服務層的成功狀態，而非固定為 True
+        service_success = result.get('success', False)
+
+        # 詳細錯誤資訊（保持向後兼容）
+        collection_errors = result.get('collection_errors', [])
+        save_errors = result.get('save_errors', [])
+        all_errors = collection_errors + save_errors
+
         return {
-            'success': True,
-            'message': '批次數據收集完成',
+            'success': service_success,
+            'message': '批次數據收集完成' if service_success else '批次數據收集部分失敗',
             'total_stocks': result.get('total_stocks', 0),
             'success_count': result.get('success_count', 0),
             'error_count': result.get('error_count', 0),
             'total_data_saved': result.get('total_data_saved', 0),
-            'errors': result.get('collection_errors', []) + result.get('save_errors', [])
+            'errors': all_errors,  # 向後兼容的聚合錯誤
+            'error_details': {
+                'collection_errors': collection_errors,
+                'save_errors': save_errors,
+                'failed_symbols': [error.split(':')[0] for error in collection_errors if ':' in error]
+            }
         }
     
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"批次數據收集失敗: {str(e)}")
+
+
+@router.post("/collect-batch", response_model=Dict[str, Any])
+async def collect_batch_stocks_data(
+    request: BatchCollectionRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    批次收集指定股票數據
+    """
+    try:
+        result = await data_collection_service.collect_batch_stocks_data(
+            db,
+            request.stocks,
+            request.start_date,
+            request.end_date
+        )
+
+        # 直接回傳服務層的成功狀態
+        service_success = result.get('success', False)
+
+        # 詳細錯誤資訊（保持向後兼容）
+        collection_errors = result.get('collection_errors', [])
+        save_errors = result.get('save_errors', [])
+        all_errors = collection_errors + save_errors
+
+        return {
+            'success': service_success,
+            'message': result.get('message', '批次收集完成' if service_success else '批次收集部分失敗'),
+            'total_stocks': result.get('total_stocks', 0),
+            'success_count': result.get('success_count', 0),
+            'error_count': result.get('error_count', 0),
+            'total_data_saved': result.get('total_data_saved', 0),
+            'errors': all_errors,  # 向後兼容的聚合錯誤
+            'error_details': {
+                'collection_errors': collection_errors,
+                'save_errors': save_errors,
+                'failed_symbols': [error.split(':')[0] for error in collection_errors if ':' in error]
+            }
+        }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"批次數據收集失敗: {str(e)}")
 

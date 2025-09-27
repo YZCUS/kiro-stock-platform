@@ -24,17 +24,17 @@ def test_dag_import():
     
     try:
         # 測試匯入現有的 DAG
-        from ...dags.stock_daily_collection import dag as daily_collection_dag
+        from airflow.plugins.dags.stock_daily_collection import dag as daily_collection_dag
         
         if daily_collection_dag:
-            logger.info("✅ daily_collection_api DAG 匯入成功")
+            logger.info("daily_collection_api DAG 匯入成功")
             return True
         else:
-            logger.error("❌ daily_collection_api DAG 匯入失敗")
+            logger.error("daily_collection_api DAG 匯入失敗")
             return False
         
     except Exception as e:
-        logger.error(f"❌ DAG 匯入失敗: {str(e)}")
+        logger.error(f"DAG 匯入失敗: {str(e)}")
         return False
 
 
@@ -64,20 +64,20 @@ def test_dag_structure():
         
         for dag_id in expected_dags:
             if dag_id not in found_dags:
-                logger.error(f"❌ 缺少 DAG: {dag_id}")
+                logger.error(f"缺少 DAG: {dag_id}")
                 return False
             
             dag = dagbag.get_dag(dag_id)
             if not dag:
-                logger.error(f"❌ 無法載入 DAG: {dag_id}")
+                logger.error(f"無法載入 DAG: {dag_id}")
                 return False
             
-            logger.info(f"✅ DAG {dag_id} 結構正確，包含 {len(dag.tasks)} 個任務")
+            logger.info(f"DAG {dag_id} 結構正確，包含 {len(dag.tasks)} 個任務")
         
         return True
         
     except Exception as e:
-        logger.error(f"❌ DAG 結構測試失敗: {str(e)}")
+        logger.error(f"DAG 結構測試失敗: {str(e)}")
         return False
 
 
@@ -95,7 +95,7 @@ def test_dag_tasks():
             dag = dagbag.get_dag(dag_id)
             
             if not dag:
-                logger.error(f"❌ 無法載入 DAG: {dag_id}")
+                logger.error(f"無法載入 DAG: {dag_id}")
                 continue
             
             logger.info(f"測試 DAG: {dag_id}")
@@ -117,15 +117,15 @@ def test_dag_tasks():
             # 檢查 DAG 是否有循環依賴
             try:
                 dag.test_cycle()
-                logger.info(f"✅ DAG {dag_id} 無循環依賴")
+                logger.info(f"DAG {dag_id} 無循環依賴")
             except Exception as e:
-                logger.error(f"❌ DAG {dag_id} 存在循環依賴: {str(e)}")
+                logger.error(f"DAG {dag_id} 存在循環依賴: {str(e)}")
                 return False
         
         return True
         
     except Exception as e:
-        logger.error(f"❌ DAG 任務測試失敗: {str(e)}")
+        logger.error(f"DAG 任務測試失敗: {str(e)}")
         return False
 
 
@@ -149,20 +149,20 @@ def test_dag_scheduling():
             dag = dagbag.get_dag(dag_id)
             
             if not dag:
-                logger.error(f"❌ 無法載入 DAG: {dag_id}")
+                logger.error(f"無法載入 DAG: {dag_id}")
                 continue
             
             actual_schedule = dag.schedule_interval
             
             if str(actual_schedule) == expected_schedule:
-                logger.info(f"✅ DAG {dag_id} 排程正確: {actual_schedule}")
+                logger.info(f"DAG {dag_id} 排程正確: {actual_schedule}")
             else:
-                logger.warning(f"⚠️  DAG {dag_id} 排程不符預期: 實際={actual_schedule}, 預期={expected_schedule}")
+                logger.warning(f"DAG {dag_id} 排程不符預期: 實際={actual_schedule}, 預期={expected_schedule}")
         
         return True
         
     except Exception as e:
-        logger.error(f"❌ DAG 排程測試失敗: {str(e)}")
+        logger.error(f"DAG 排程測試失敗: {str(e)}")
         return False
 
 
@@ -179,7 +179,7 @@ def test_dag_configuration():
             dag = dagbag.get_dag(dag_id)
             
             if not dag:
-                logger.error(f"❌ 無法載入 DAG: {dag_id}")
+                logger.error(f"無法載入 DAG: {dag_id}")
                 continue
             
             # 檢查基本配置
@@ -193,19 +193,19 @@ def test_dag_configuration():
             
             # 檢查重要配置
             if not dag.catchup:
-                logger.info(f"✅ DAG {dag_id} 已禁用 catchup")
+                logger.info(f"DAG {dag_id} 已禁用 catchup")
             else:
-                logger.warning(f"⚠️  DAG {dag_id} 啟用了 catchup，可能導致大量歷史執行")
+                logger.warning(f"DAG {dag_id} 啟用了 catchup，可能導致大量歷史執行")
             
             if dag.max_active_runs == 1:
-                logger.info(f"✅ DAG {dag_id} 限制同時執行數為 1")
+                logger.info(f"DAG {dag_id} 限制同時執行數為 1")
             else:
-                logger.warning(f"⚠️  DAG {dag_id} 允許多個同時執行")
+                logger.warning(f"DAG {dag_id} 允許多個同時執行")
         
         return True
         
     except Exception as e:
-        logger.error(f"❌ DAG 配置測試失敗: {str(e)}")
+        logger.error(f"DAG 配置測試失敗: {str(e)}")
         return False
 
 
@@ -233,12 +233,12 @@ def main():
             results[test_name] = result
             
             if result:
-                logger.info(f"✅ {test_name} - 通過")
+                logger.info(f"{test_name} - 通過")
             else:
-                logger.error(f"❌ {test_name} - 失敗")
+                logger.error(f"{test_name} - 失敗")
                 
         except Exception as e:
-            logger.error(f"❌ {test_name} - 異常：{str(e)}")
+            logger.error(f"{test_name} - 異常：{str(e)}")
             results[test_name] = False
     
     # 總結
@@ -250,16 +250,16 @@ def main():
     total = len(results)
     
     for test_name, result in results.items():
-        status = "✅ 通過" if result else "❌ 失敗"
+        status = "通過" if result else "失敗"
         logger.info(f"{test_name}: {status}")
     
     logger.info(f"\n總計：{passed}/{total} 個測試通過")
     
     if passed == total:
-        logger.info("🎉 所有 DAG 測試都通過了！")
+        logger.info("所有 DAG 測試都通過了！")
         return 0
     else:
-        logger.error("⚠️  部分 DAG 測試失敗，請檢查配置")
+        logger.error("部分 DAG 測試失敗，請檢查配置")
         return 1
 
 
