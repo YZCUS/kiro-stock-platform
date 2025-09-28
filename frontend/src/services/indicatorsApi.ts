@@ -7,6 +7,7 @@ import { TechnicalIndicator } from '../types';
 export interface IndicatorListParams {
   stock_id: number;
   indicator_types?: string[];
+  period?: number;  // 週期參數（覆蓋指標預設週期）
   start_date?: string;
   end_date?: string;
   timeframe?: '1d' | '1h' | '5m';
@@ -72,6 +73,9 @@ export class IndicatorsApiService {
       params.indicator_types.forEach(type => {
         queryParams.append('indicator_types', type);
       });
+    }
+    if (params.period) {
+      queryParams.append('period', params.period.toString());
     }
     if (params.start_date) {
       queryParams.append('start_date', params.start_date);
