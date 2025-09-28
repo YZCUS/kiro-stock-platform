@@ -9,14 +9,13 @@
   CREATE INDEX idx_stocks_symbol_search ON stocks(symbol);
   CREATE INDEX idx_stocks_name_search ON stocks(name);
 """
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import redis
 import json
-import hashlib
 from core.config import settings
 
 from core.database import get_db_session
@@ -337,8 +336,8 @@ async def get_stock_data(
         if not stock:
             raise HTTPException(status_code=404, detail="股票不存在")
         
-        # 計算分頁偏移量
-        offset = (page - 1) * per_page
+        # 計算分頁偏移量（暫未實現偏移式分頁，保留供未來使用）
+        # offset = (page - 1) * per_page
 
         # 取得價格數據
         if start_date and end_date:
@@ -492,13 +491,16 @@ async def get_stock_price_history(
     stock_id: int,
     start_date: Optional[date] = Query(None, description="開始日期"),
     end_date: Optional[date] = Query(None, description="結束日期"),
-    interval: Optional[str] = Query("1d", description="時間間隔"),
+    interval: Optional[str] = Query("1d", description="時間間隔（暫未實現，保留參數）"),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
     取得股票價格歷史（前端兼容端點）
     """
     try:
+        # 注意：interval 參數暫未實現，目前統一返回日線數據
+        _ = interval  # 消除未使用警告
+
         # 檢查股票是否存在
         stock = await stock_crud.get(db, stock_id)
         if not stock:
@@ -555,15 +557,29 @@ async def get_stock_latest_price(
         if not latest_price:
             raise HTTPException(status_code=404, detail="沒有價格數據")
 
-        # 計算變動
-        previous_prices = await price_history_crud.get_stock_price_range(
-            db, stock_id=stock_id, limit=2
-        )
-
+        # 計算變動 - 使用更強健的方法直接查詢前一個交易日
         change = 0.0
         change_percent = 0.0
-        if len(previous_prices) >= 2:
-            prev_close = float(previous_prices[1].close_price)
+
+        # 直接查詢小於當前日期的最近一筆價格記錄
+        # 優點：
+        # 1. 正確處理週末和假日（自動跳過非交易日）
+        # 2. 處理資料缺漏情況（找到實際存在的前一個交易日）
+        # 3. 避免使用相同結果集推算（确保是真正的前一個交易日）
+        # 4. 不依賴固定的日期計算（timedelta 可能跨越多個非交易日）
+        from sqlalchemy import select, desc
+        from models.domain.price_history import PriceHistory
+
+        previous_price_query = select(PriceHistory).where(
+            PriceHistory.stock_id == stock_id,
+            PriceHistory.date < latest_price.date
+        ).order_by(desc(PriceHistory.date)).limit(1)
+
+        result = await db.execute(previous_price_query)
+        previous_price = result.scalar_one_or_none()
+
+        if previous_price:
+            prev_close = float(previous_price.close_price)
             current_close = float(latest_price.close_price)
             change = current_close - prev_close
             change_percent = (change / prev_close) * 100 if prev_close != 0 else 0.0
@@ -598,6 +614,9 @@ async def backfill_stock_data(
     注意：force 參數目前暫未實現，數據收集服務會自動處理重複數據
     """
     try:
+        # 注意：force 參數暫未實現，預留供未來功能
+        _ = force  # 消除未使用警告
+
         # 檢查股票是否存在
         stock = await stock_crud.get(db, stock_id)
         if not stock:
@@ -650,9 +669,11 @@ async def calculate_stock_indicators(
         if not stock:
             raise HTTPException(status_code=404, detail="股票不存在")
 
-        # 取得價格數據
+        # 取得價格數據，使用動態 buffer
+        # 根據周期動態調整 buffer，最小 20，最大 100
+        buffer_size = max(20, min(100, period * 2))
         prices = await price_history_crud.get_stock_price_range(
-            db, stock_id=stock_id, limit=period + 50  # 額外數據確保計算準確
+            db, stock_id=stock_id, limit=period + buffer_size
         )
 
         if not prices:
@@ -674,70 +695,111 @@ async def calculate_stock_indicators(
 
         # 如果沒有指定或無效的指標類型，使用預設指標
         if not requested_indicators:
-            requested_indicators = [IndicatorType.RSI, IndicatorType.SMA, IndicatorType.MACD]
+            requested_indicators = [IndicatorType.RSI, IndicatorType.SMA_20, IndicatorType.MACD]
 
-        # 調用分析服務計算指標
-        analysis_result = await analysis_service.calculate_stock_indicators(
-            db_session=db,
-            stock_id=stock_id,
-            indicators=requested_indicators,
-            days=period + 50,  # 額外數據確保計算準確
-            save_to_db=False  # 不保存到資料庫，僅用於API回傳
-        )
+        # 將 IndicatorType 枚舉轉換為字符串列表
+        indicator_type_strings = [indicator.value for indicator in requested_indicators]
 
-        # 轉換結果格式以匹配前端期望，即使部分失敗也嘗試返回可用數據
+        # 調用分析服務獲取指標數據
+        try:
+            indicator_data = await analysis_service.get_stock_indicators(
+                db_session=db,
+                stock_id=stock_id,
+                indicator_types=indicator_type_strings,
+                days=period + buffer_size
+            )
+            success = True
+            errors = []
+            warnings = []
+        except Exception as e:
+            # 如果獲取失敗，嘗試重新計算
+            try:
+                analysis_result = await analysis_service.calculate_stock_indicators(
+                    db_session=db,
+                    stock_id=stock_id,
+                    indicators=requested_indicators,
+                    days=period + buffer_size,
+                    save_to_db=True  # 保存到資料庫以便下次獲取
+                )
+                # 重新獲取計算後的數據
+                indicator_data = await analysis_service.get_stock_indicators(
+                    db_session=db,
+                    stock_id=stock_id,
+                    indicator_types=indicator_type_strings,
+                    days=period + buffer_size
+                )
+                # 根據成功和失敗的指標數量判斷整體成功與否
+                success = analysis_result.indicators_successful > 0 and analysis_result.indicators_failed == 0
+                errors = analysis_result.errors or []
+                warnings = analysis_result.warnings or []
+            except Exception as calc_error:
+                indicator_data = {}
+                success = False
+                errors = [f"計算指標失敗: {str(calc_error)}"]
+                warnings = []
+
+        # 轉換結果格式以匹配前端期望
         indicators = {}
-        errors = []
-        warnings = []
 
-        # 收集錯誤和警告信息
-        if analysis_result.errors:
-            errors.extend(analysis_result.errors)
-        if analysis_result.warnings:
-            warnings.extend(analysis_result.warnings)
+        # 處理指標數據
+        if indicator_data:
+            for indicator_name, value_list in indicator_data.items():
+                if value_list and len(value_list) > 0:  # 確保有數值
+                    # 獲取最新的指標值
+                    latest_value = value_list[-1] if isinstance(value_list, list) else value_list
 
-        # 處理指標數據，即使 success=False 也檢查是否有部分可用數據
-        if analysis_result.indicators:
-            for indicator_name, values in analysis_result.indicators.items():
-                if values:  # 確保有數值
-                    # 修正：使用更精確的指標類型匹配
+                    # 修正：使用精確的指標類型匹配
                     indicator_upper = indicator_name.upper()
 
-                    if 'RSI' in indicator_upper and len(values) > 0:
-                        indicators["rsi"] = values[-1]  # 取最新值
-                    elif 'SMA' in indicator_upper and len(values) > 0:
-                        # 處理不同週期的 SMA (SMA_20, SMA_50 等)
-                        if 'SMA_20' in indicator_upper:
-                            indicators["sma_20"] = values[-1]
-                        elif 'SMA_50' in indicator_upper:
-                            indicators["sma_50"] = values[-1]
+                    if indicator_upper == 'RSI':
+                        indicators["rsi"] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                    elif indicator_upper == 'SMA_20':
+                        indicators["sma_20"] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                    elif indicator_upper == 'SMA_50':
+                        indicators["sma_50"] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                    elif indicator_upper == 'SMA_5':
+                        indicators["sma_5"] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                    elif indicator_upper == 'SMA_60':
+                        indicators["sma_60"] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                    elif indicator_upper == 'EMA_12':
+                        indicators["ema_12"] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                    elif indicator_upper == 'EMA_26':
+                        indicators["ema_26"] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                    elif indicator_upper == 'MACD':
+                        # MACD 可能返回複雜格式
+                        if isinstance(latest_value, dict):
+                            indicators["macd"] = {
+                                "macd": latest_value.get('macd', 0),
+                                "signal": latest_value.get('signal', 0),
+                                "histogram": latest_value.get('histogram', 0)
+                            }
                         else:
-                            indicators["sma"] = values[-1]  # 通用 SMA
-                    elif 'EMA' in indicator_upper and len(values) > 0:
-                        # 處理不同週期的 EMA
-                        if 'EMA_12' in indicator_upper:
-                            indicators["ema_12"] = values[-1]
-                        elif 'EMA_26' in indicator_upper:
-                            indicators["ema_26"] = values[-1]
+                            indicators["macd"] = latest_value
+                    elif indicator_upper == 'BBANDS':
+                        # 布林帶返回複雜格式
+                        if isinstance(latest_value, dict):
+                            indicators["bollinger"] = {
+                                "upper": latest_value.get('upper', 0),
+                                "middle": latest_value.get('middle', 0),
+                                "lower": latest_value.get('lower', 0)
+                            }
                         else:
-                            indicators["ema"] = values[-1]  # 通用 EMA
-                    elif 'MACD' in indicator_upper and isinstance(values, dict):
-                        # MACD 返回字典格式
-                        indicators["macd"] = {
-                            "macd": values.get('macd', [0])[-1] if values.get('macd') else 0,
-                            "signal": values.get('signal', [0])[-1] if values.get('signal') else 0,
-                            "histogram": values.get('histogram', [0])[-1] if values.get('histogram') else 0
-                        }
-                    elif 'BOLLINGER' in indicator_upper and isinstance(values, dict):
-                        # 布林帶返回字典格式
-                        indicators["bollinger"] = {
-                            "upper": values.get('upper', [0])[-1] if values.get('upper') else 0,
-                            "middle": values.get('middle', [0])[-1] if values.get('middle') else 0,
-                            "lower": values.get('lower', [0])[-1] if values.get('lower') else 0
-                        }
+                            indicators["bollinger"] = latest_value
+                    elif indicator_upper in ['STOCH', 'KD_K']:
+                        # 隨機指標
+                        if isinstance(latest_value, dict):
+                            indicators["stoch"] = {
+                                "k": latest_value.get('k', 0),
+                                "d": latest_value.get('d', 0)
+                            }
+                        else:
+                            indicators["stoch"] = latest_value
+                    else:
+                        # 其他指標使用通用格式
+                        indicators[indicator_name.lower()] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
 
         # 如果沒有任何指標數據且有錯誤，提供詳細錯誤信息
-        if not indicators and not analysis_result.success:
+        if not indicators and not success:
             if not errors:
                 errors.append("無法計算技術指標，可能由於數據不足")
 
@@ -746,7 +808,7 @@ async def calculate_stock_indicators(
             "indicators": indicators,
             "period": period,
             "timestamp": datetime.now().isoformat(),
-            "success": analysis_result.success,
+            "success": success,
             "data_points": len(prices) if prices else 0
         }
 
@@ -818,22 +880,583 @@ async def get_stock_indicators(
         # 計算分頁資訊
         total_pages = (total_count + page_size - 1) // page_size
         
+        # 轉換為標準分頁格式，將指標數據扁平化為陣列
+        items = []
+        for ind_type, data_list in indicators_data.items():
+            for data_point in data_list:
+                items.append({
+                    "indicator_type": ind_type,
+                    "date": data_point["date"],
+                    "value": data_point["value"],
+                    "parameters": data_point["parameters"],
+                    "stock_id": stock_id,
+                    "symbol": stock.symbol
+                })
+
         return {
-            "stock_id": stock_id,
-            "symbol": stock.symbol,
-            "indicators": indicators_data,
-            "pagination": {
-                "total": total_count,
-                "page": page,
-                "page_size": page_size,
-                "total_pages": total_pages
-            }
+            "items": items,
+            "total": total_count,
+            "page": page,
+            "per_page": page_size,
+            "total_pages": total_pages
         }
     
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"取得技術指標失敗: {str(e)}")
+
+
+class IndicatorCalculateRequest(BaseModel):
+    """技術指標計算請求模型"""
+    indicator_type: str = Field(..., description="技術指標類型，可以是單一指標如 'RSI' 或多個指標如 'RSI,SMA_20,MACD'")
+    period: int = Field(default=14, ge=1, le=500, description="計算周期")
+    timeframe: str = Field(default="1d", description="時間框架")
+    parameters: Optional[Dict[str, Any]] = Field(default=None, description="額外參數")
+    start_date: Optional[date] = Field(default=None, description="開始日期")
+    end_date: Optional[date] = Field(default=None, description="結束日期")
+
+
+@router.post("/{stock_id}/indicators/calculate", response_model=Dict[str, Any])
+async def calculate_stock_indicators_post(
+    stock_id: int,
+    request: IndicatorCalculateRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    計算股票技術指標 (POST 版本 - 支援即時計算)
+
+    此端點支援前端的即時指標計算需求，可以指定多個指標類型並返回即時計算結果。
+    與 GET 版本不同，這個端點著重於即時計算而非歷史數據查詢。
+    """
+    try:
+        # 檢查股票是否存在
+        stock = await stock_crud.get(db, stock_id)
+        if not stock:
+            raise HTTPException(status_code=404, detail="股票不存在")
+
+        # 取得價格數據，使用動態 buffer
+        period = request.period
+        # 根據周期動態調整 buffer，最小 20，最大 100
+        buffer_size = max(20, min(100, period * 2))
+
+        prices = await price_history_crud.get_stock_price_range(
+            db, stock_id=stock_id, limit=period + buffer_size
+        )
+
+        if not prices:
+            raise HTTPException(status_code=404, detail="沒有價格數據")
+
+        # 使用技術分析服務進行計算
+        analysis_service = TechnicalAnalysisService()
+
+        # 解析指標類型
+        requested_indicators = []
+        if request.indicator_type:
+            indicator_list = [t.strip().upper() for t in request.indicator_type.split(',')]
+            for indicator_type in indicator_list:
+                try:
+                    requested_indicators.append(IndicatorType(indicator_type))
+                except ValueError:
+                    # 忽略不支援的指標類型
+                    continue
+
+        # 如果沒有指定或無效的指標類型，使用預設指標
+        if not requested_indicators:
+            requested_indicators = [IndicatorType.RSI, IndicatorType.SMA_20, IndicatorType.MACD]
+
+        # 調用分析服務進行即時計算
+        try:
+            analysis_result = await analysis_service.calculate_stock_indicators(
+                db_session=db,
+                stock_id=stock_id,
+                indicators=requested_indicators,
+                days=period + buffer_size,
+                save_to_db=True
+            )
+
+            # 判斷計算是否成功
+            success = analysis_result.indicators_successful > 0 and analysis_result.indicators_failed == 0
+            errors = analysis_result.errors
+            warnings = analysis_result.warnings
+
+            # 獲取指標數據用於格式化
+            indicator_data = {}
+            if hasattr(analysis_result, 'indicator_data') and analysis_result.indicator_data:
+                indicator_data = analysis_result.indicator_data
+            else:
+                # 如果沒有直接數據，嘗試從數據庫獲取最新計算結果
+                indicator_type_strings = [indicator.value for indicator in requested_indicators]
+                try:
+                    indicator_data = await analysis_service.get_stock_indicators(
+                        db_session=db,
+                        stock_id=stock_id,
+                        indicator_types=indicator_type_strings,
+                        days=10  # 只需要最新數據
+                    )
+                except Exception:
+                    indicator_data = {}
+
+        except Exception as e:
+            # 計算失敗
+            success = False
+            errors = [f"指標計算失敗: {str(e)}"]
+            warnings = []
+            indicator_data = {}
+
+        # 格式化指標數據以匹配前端期望的結構
+        indicators = {}
+        if indicator_data:
+            for indicator_name, value_list in indicator_data.items():
+                if value_list and len(value_list) > 0:
+                    latest_value = value_list[-1] if isinstance(value_list, list) else value_list
+                    indicator_upper = indicator_name.upper()
+
+                    if indicator_upper == 'RSI':
+                        indicators["rsi"] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                    elif indicator_upper == 'SMA_20':
+                        indicators["sma_20"] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                    elif indicator_upper == 'SMA_5':
+                        indicators["sma_5"] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                    elif indicator_upper == 'MACD':
+                        if isinstance(latest_value, dict):
+                            indicators["macd"] = {
+                                "macd": latest_value.get('macd', 0),
+                                "signal": latest_value.get('signal', 0),
+                                "histogram": latest_value.get('histogram', 0)
+                            }
+                    elif indicator_upper in ['BBANDS', 'BOLLINGER']:
+                        if isinstance(latest_value, dict):
+                            indicators["bollinger"] = {
+                                "upper": latest_value.get('upper', 0),
+                                "middle": latest_value.get('middle', 0),
+                                "lower": latest_value.get('lower', 0)
+                            }
+                    elif indicator_upper in ['STOCH', 'KD_K']:
+                        if isinstance(latest_value, dict):
+                            indicators["stoch"] = {
+                                "k": latest_value.get('k', 0),
+                                "d": latest_value.get('d', 0)
+                            }
+                    else:
+                        # 其他指標使用通用格式
+                        indicators[indicator_name.lower()] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+
+        # 構建響應，匹配 IndicatorResponse 接口
+        result = {
+            "symbol": stock.symbol,
+            "indicators": indicators,
+            "period": period,
+            "timestamp": datetime.now().isoformat(),
+            "success": success,
+            "data_points": len(prices) if prices else 0
+        }
+
+        # 只在有錯誤或警告時才加入這些欄位
+        if errors:
+            result["errors"] = errors
+        if warnings:
+            result["warnings"] = warnings
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"計算技術指標失敗: {str(e)}")
+
+
+class IndicatorBatchItem(BaseModel):
+    """批次指標計算項目"""
+    type: str = Field(..., description="指標類型")
+    period: Optional[int] = Field(default=14, description="計算週期")
+    parameters: Optional[Dict[str, Any]] = Field(default=None, description="額外參數")
+
+
+class IndicatorBatchCalculateRequest(BaseModel):
+    """批次技術指標計算請求模型"""
+    indicators: List[IndicatorBatchItem] = Field(..., description="指標列表")
+    timeframe: str = Field(default="1d", description="時間框架")
+    start_date: Optional[date] = Field(default=None, description="開始日期")
+    end_date: Optional[date] = Field(default=None, description="結束日期")
+
+
+class IndicatorSummaryResponse(BaseModel):
+    """指標摘要響應模型 - 匹配前端 getIndicators 期望格式"""
+    stock_id: int = Field(..., description="股票ID")
+    symbol: str = Field(..., description="股票代碼")
+    timeframe: str = Field(..., description="時間框架")
+    indicators: Dict[str, Dict[str, Any]] = Field(..., description="指標數據，格式為 Record<string, IndicatorResponse>")
+
+
+@router.post("/{stock_id}/indicators/calculate/batch", response_model=Dict[str, Any])
+async def batch_calculate_stock_indicators(
+    stock_id: int,
+    request: IndicatorBatchCalculateRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    批量計算股票技術指標
+
+    此端點支援前端的批量指標計算需求，可以一次計算多個不同類型和周期的指標。
+    """
+    try:
+        # 檢查股票是否存在
+        stock = await stock_crud.get(db, stock_id)
+        if not stock:
+            raise HTTPException(status_code=404, detail="股票不存在")
+
+        # 初始化服務
+        analysis_service = TechnicalAnalysisService()
+
+        # 處理每個指標請求
+        calculated_indicators = {}
+        calculation_errors = []
+
+        for indicator_item in request.indicators:
+            try:
+                # 解析指標類型
+                try:
+                    indicator_type = IndicatorType(indicator_item.type.upper())
+                except ValueError:
+                    calculation_errors.append(f"不支援的指標類型: {indicator_item.type}")
+                    continue
+
+                # 計算動態 buffer
+                period = indicator_item.period or 14
+                buffer_size = max(20, min(100, period * 2))
+
+                # 獲取價格數據
+                prices = await price_history_crud.get_stock_price_range(
+                    db, stock_id=stock_id, limit=period + buffer_size
+                )
+
+                if not prices:
+                    calculation_errors.append(f"指標 {indicator_item.type}: 沒有價格數據")
+                    continue
+
+                # 計算指標
+                analysis_result = await analysis_service.calculate_stock_indicators(
+                    db_session=db,
+                    stock_id=stock_id,
+                    indicators=[indicator_type],
+                    days=period + buffer_size,
+                    save_to_db=True
+                )
+
+                # 獲取計算結果
+                if analysis_result.indicators_successful > 0:
+                    # 獲取指標數據
+                    indicator_data = await analysis_service.get_stock_indicators(
+                        db_session=db,
+                        stock_id=stock_id,
+                        indicator_types=[indicator_type.value],
+                        days=10  # 只需要最新數據
+                    )
+
+                    if indicator_data and indicator_type.value in indicator_data:
+                        # 格式化數據以匹配前端期望
+                        raw_data = indicator_data[indicator_type.value]
+                        formatted_data = []
+
+                        for item in raw_data:
+                            if isinstance(item, dict):
+                                formatted_data.append({
+                                    "date": item.get("date"),
+                                    "value": item.get("value"),
+                                    **{k: v for k, v in item.items() if k not in ["date", "value"]}
+                                })
+                            else:
+                                formatted_data.append({"value": item})
+
+                        calculated_indicators[indicator_type.value] = {
+                            "data": formatted_data,
+                            "parameters": {
+                                "period": period,
+                                "timeframe": request.timeframe,
+                                **(indicator_item.parameters or {})
+                            }
+                        }
+                else:
+                    calculation_errors.append(f"指標 {indicator_item.type}: 計算失敗")
+                    if analysis_result.errors:
+                        calculation_errors.extend(analysis_result.errors)
+
+            except Exception as e:
+                calculation_errors.append(f"指標 {indicator_item.type}: {str(e)}")
+
+        # 構建響應
+        result = {
+            "stock_id": stock_id,
+            "symbol": stock.symbol,
+            "timeframe": request.timeframe,
+            "indicators": calculated_indicators,
+            "calculated_at": datetime.now().isoformat()
+        }
+
+        # 如果有錯誤，加入錯誤信息
+        if calculation_errors:
+            result["errors"] = calculation_errors
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"批量計算技術指標失敗: {str(e)}")
+
+
+@router.get("/{stock_id}/indicators/{indicator_type}", response_model=Dict[str, Any])
+async def get_specific_stock_indicator(
+    stock_id: int,
+    indicator_type: str,
+    period: int = Query(14, ge=1, le=500, description="計算周期"),
+    timeframe: str = Query("1d", description="時間框架"),
+    start_date: Optional[date] = Query(None, description="開始日期"),
+    end_date: Optional[date] = Query(None, description="結束日期"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    取得特定類型的股票技術指標
+    """
+    try:
+        # 檢查股票是否存在
+        stock = await stock_crud.get(db, stock_id)
+        if not stock:
+            raise HTTPException(status_code=404, detail="股票不存在")
+
+        # 解析指標類型
+        try:
+            indicator_enum = IndicatorType(indicator_type.upper())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"不支援的指標類型: {indicator_type}")
+
+        # 使用技術分析服務
+        analysis_service = TechnicalAnalysisService()
+
+        # 獲取指標數據
+        try:
+            indicator_data = await analysis_service.get_stock_indicators(
+                db_session=db,
+                stock_id=stock_id,
+                indicator_types=[indicator_enum.value],
+                days=period + max(20, min(100, period * 2))  # 動態 buffer
+            )
+
+            if indicator_data and indicator_enum.value in indicator_data:
+                raw_data = indicator_data[indicator_enum.value]
+
+                # 格式化為與單一計算端點一致的結構
+                if raw_data and len(raw_data) > 0:
+                    latest_value = raw_data[-1] if isinstance(raw_data, list) else raw_data
+
+                    # 根據指標類型格式化數據
+                    formatted_indicator = {}
+                    indicator_upper = indicator_enum.value.upper()
+
+                    if indicator_upper == 'RSI':
+                        formatted_indicator["rsi"] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                    elif indicator_upper in ['SMA_5', 'SMA_20', 'SMA_60']:
+                        formatted_indicator[indicator_upper.lower()] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                    elif indicator_upper == 'MACD':
+                        if isinstance(latest_value, dict):
+                            formatted_indicator["macd"] = {
+                                "macd": latest_value.get('macd', 0),
+                                "signal": latest_value.get('signal', 0),
+                                "histogram": latest_value.get('histogram', 0)
+                            }
+                    elif indicator_upper in ['BBANDS', 'BOLLINGER']:
+                        if isinstance(latest_value, dict):
+                            formatted_indicator["bollinger"] = {
+                                "upper": latest_value.get('upper', 0),
+                                "middle": latest_value.get('middle', 0),
+                                "lower": latest_value.get('lower', 0)
+                            }
+                    elif indicator_upper in ['STOCH', 'KD_K']:
+                        if isinstance(latest_value, dict):
+                            formatted_indicator["stoch"] = {
+                                "k": latest_value.get('k', 0),
+                                "d": latest_value.get('d', 0)
+                            }
+                    else:
+                        # 其他指標使用通用格式
+                        formatted_indicator[indicator_type.lower()] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+
+                    return {
+                        "symbol": stock.symbol,
+                        "indicators": formatted_indicator,
+                        "period": period,
+                        "timestamp": datetime.now().isoformat(),
+                        "success": True,
+                        "data_points": len(raw_data) if isinstance(raw_data, list) else 1
+                    }
+                else:
+                    # 沒有數據，嘗試計算
+                    analysis_result = await analysis_service.calculate_stock_indicators(
+                        db_session=db,
+                        stock_id=stock_id,
+                        indicators=[indicator_enum],
+                        days=period + max(20, min(100, period * 2)),
+                        save_to_db=True
+                    )
+
+                    if analysis_result.indicators_successful > 0:
+                        # 重新獲取計算後的數據
+                        return await get_specific_stock_indicator(
+                            stock_id, indicator_type, period, timeframe, start_date, end_date, db
+                        )
+                    else:
+                        return {
+                            "symbol": stock.symbol,
+                            "indicators": {},
+                            "period": period,
+                            "timestamp": datetime.now().isoformat(),
+                            "success": False,
+                            "data_points": 0,
+                            "errors": analysis_result.errors or ["計算指標失敗"]
+                        }
+            else:
+                raise HTTPException(status_code=404, detail=f"找不到指標數據: {indicator_type}")
+
+        except Exception as e:
+            return {
+                "symbol": stock.symbol,
+                "indicators": {},
+                "period": period,
+                "timestamp": datetime.now().isoformat(),
+                "success": False,
+                "data_points": 0,
+                "errors": [f"獲取指標失敗: {str(e)}"]
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"獲取特定指標失敗: {str(e)}")
+
+
+@router.get("/{stock_id}/indicators/summary", response_model=IndicatorSummaryResponse)
+async def get_stock_indicators_summary(
+    stock_id: int,
+    indicator_types: Optional[str] = Query(None, description="指標類型（逗號分隔）"),
+    timeframe: str = Query("1d", description="時間框架"),
+    start_date: Optional[date] = Query(None, description="開始日期"),
+    end_date: Optional[date] = Query(None, description="結束日期"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    取得股票技術指標摘要（前端 getIndicators 專用格式）
+
+    返回格式：
+    {
+      stock_id: number,
+      symbol: string,
+      timeframe: string,
+      indicators: Record<string, IndicatorResponse>
+    }
+    """
+    try:
+        # 注意：start_date 和 end_date 參數暫未實現，保留供未來使用
+        _ = start_date  # 消除未使用警告
+        _ = end_date    # 消除未使用警告
+
+        # 檢查股票是否存在
+        stock = await stock_crud.get(db, stock_id)
+        if not stock:
+            raise HTTPException(status_code=404, detail="股票不存在")
+
+        # 解析要獲取的指標類型
+        requested_indicators = []
+        if indicator_types:
+            indicator_list = [t.strip().upper() for t in indicator_types.split(',')]
+            for indicator_type in indicator_list:
+                try:
+                    requested_indicators.append(IndicatorType(indicator_type))
+                except ValueError:
+                    continue
+
+        # 如果沒有指定指標，使用常用指標
+        if not requested_indicators:
+            requested_indicators = [
+                IndicatorType.RSI,
+                IndicatorType.SMA_20,
+                IndicatorType.MACD,
+                IndicatorType.SMA_5
+            ]
+
+        # 使用技術分析服務
+        analysis_service = TechnicalAnalysisService()
+
+        # 獲取指標數據
+        indicators_summary = {}
+
+        for indicator_type in requested_indicators:
+            try:
+                indicator_data = await analysis_service.get_stock_indicators(
+                    db_session=db,
+                    stock_id=stock_id,
+                    indicator_types=[indicator_type.value],
+                    days=50  # 獲取最近50天的數據
+                )
+
+                if indicator_data and indicator_type.value in indicator_data:
+                    raw_data = indicator_data[indicator_type.value]
+
+                    if raw_data and len(raw_data) > 0:
+                        # 格式化為 IndicatorResponse 格式
+                        latest_value = raw_data[-1] if isinstance(raw_data, list) else raw_data
+
+                        # 創建符合 IndicatorResponse 接口的響應
+                        formatted_response = {
+                            "symbol": stock.symbol,
+                            "indicators": {},
+                            "period": 14,  # 預設周期
+                            "timestamp": datetime.now().isoformat(),
+                            "success": True,
+                            "data_points": len(raw_data) if isinstance(raw_data, list) else 1
+                        }
+
+                        # 根據指標類型格式化數據
+                        indicator_upper = indicator_type.value.upper()
+                        if indicator_upper == 'RSI':
+                            formatted_response["indicators"]["rsi"] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                        elif indicator_upper in ['SMA_5', 'SMA_20', 'SMA_60']:
+                            formatted_response["indicators"][indicator_upper.lower()] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+                        elif indicator_upper == 'MACD':
+                            if isinstance(latest_value, dict):
+                                formatted_response["indicators"]["macd"] = {
+                                    "macd": latest_value.get('macd', 0),
+                                    "signal": latest_value.get('signal', 0),
+                                    "histogram": latest_value.get('histogram', 0)
+                                }
+                        else:
+                            formatted_response["indicators"][indicator_type.value.lower()] = latest_value.get('value') if isinstance(latest_value, dict) else latest_value
+
+                        indicators_summary[indicator_type.value] = formatted_response
+
+            except Exception as e:
+                # 如果單個指標失敗，添加錯誤響應
+                indicators_summary[indicator_type.value] = {
+                    "symbol": stock.symbol,
+                    "indicators": {},
+                    "period": 14,
+                    "timestamp": datetime.now().isoformat(),
+                    "success": False,
+                    "data_points": 0,
+                    "errors": [f"獲取指標失敗: {str(e)}"]
+                }
+
+        return {
+            "stock_id": stock_id,
+            "symbol": stock.symbol,
+            "timeframe": timeframe,
+            "indicators": indicators_summary
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"獲取指標摘要失敗: {str(e)}")
 
 
 @router.post("/{stock_id}/refresh", response_model=DataCollectionResponse)

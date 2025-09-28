@@ -53,12 +53,12 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
   });
 
   // 從響應中提取數據
-  const stocks = stocksResponse?.data || [];
-  const pagination = stocksResponse?.pagination || {
-    page: 1,
-    pageSize: 20,
-    total: 0,
-    totalPages: 0,
+  const stocks = stocksResponse?.items || [];
+  const pagination = {
+    page: stocksResponse?.page || 1,
+    pageSize: stocksResponse?.per_page || 20,
+    total: stocksResponse?.total || 0,
+    totalPages: stocksResponse?.total_pages || 0,
   };
   const loading = isLoading || deleteStockMutation.isPending;
   const error = queryError?.message || null;

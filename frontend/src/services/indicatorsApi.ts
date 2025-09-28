@@ -35,13 +35,14 @@ export interface IndicatorBatchCalculateParams {
 }
 
 export interface IndicatorResponse {
-  stock_id: number;
   symbol: string;
-  indicator_type: string;
-  timeframe: string;
-  data: TechnicalIndicator[];
-  parameters: Record<string, any>;
-  calculated_at: string;
+  indicators: Record<string, any>;  // Can be simple values or complex objects
+  period: number;
+  timestamp: string;
+  success: boolean;
+  data_points: number;
+  errors?: string[];
+  warnings?: string[];
 }
 
 export interface IndicatorBatchResponse {
@@ -83,7 +84,7 @@ export class IndicatorsApiService {
     const timeframe = params.timeframe || '1d';
     queryParams.append('timeframe', timeframe);
 
-    const url = `${API_ENDPOINTS.INDICATORS.LIST(params.stock_id)}?${queryParams.toString()}`;
+    const url = `${API_ENDPOINTS.INDICATORS.SUMMARY(params.stock_id)}?${queryParams.toString()}`;
     return ApiService.get(url);
   }
 
