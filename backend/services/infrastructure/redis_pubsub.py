@@ -7,7 +7,7 @@ import logging
 from typing import Dict, List, Any, Optional, Set
 from datetime import datetime
 import redis.asyncio as redis
-from core.config import settings
+from app.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,11 @@ class RedisWebSocketBroadcaster:
         """連接到Redis"""
         try:
             # 建立Redis連接池
+            auth_part = f":{settings.redis.password}@" if settings.redis.password else ""
+            redis_url = f"redis://{auth_part}{settings.redis.host}:{settings.redis.port}/{settings.redis.db}"
+
             self.redis_pool = redis.ConnectionPool.from_url(
-                settings.REDIS_URL,
+                redis_url,
                 encoding="utf-8",
                 decode_responses=True,
                 max_connections=20

@@ -15,7 +15,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from core.config import settings
+from app.settings import settings
 from services.analysis.technical_analysis import technical_analysis_service, IndicatorType
 from services.analysis.indicator_calculator import advanced_calculator
 from models.repositories.crud_stock import stock_crud
@@ -32,7 +32,7 @@ class TechnicalAnalysisCLI:
     
     def __init__(self):
         self.engine = create_async_engine(
-            settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
+            settings.database.url.replace("postgresql://", "postgresql+asyncpg://"),
             echo=False
         )
         self.async_session_local = sessionmaker(

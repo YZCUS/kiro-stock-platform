@@ -8,7 +8,7 @@ from typing import Any, Optional
 import logging
 from functools import wraps
 
-from core.config import settings
+from app.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +61,13 @@ class RedisClient:
         """建立 Redis 連接"""
         try:
             # 創建連接池
+            redis_url = settings.redis.get("url") if hasattr(settings.redis, "get") else None
+            if not redis_url:
+                auth_part = f":{settings.redis.password}@" if settings.redis.password else ""
+                redis_url = f"redis://{auth_part}{settings.redis.host}:{settings.redis.port}/{settings.redis.db}"
+
             self.connection_pool = redis.ConnectionPool.from_url(
-                settings.REDIS_URL,
+                redis_url,
                 encoding="utf-8",
                 decode_responses=True,
                 max_connections=20,

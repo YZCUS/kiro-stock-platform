@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 import logging
 
-from core.config import settings
+from app.settings import settings
 from services.data.collection import data_collection_service
 from services.data.validation import data_validation_service
 from services.data.cleaning import data_cleaning_service

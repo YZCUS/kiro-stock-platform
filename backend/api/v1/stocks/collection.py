@@ -7,9 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Any
 from datetime import date, timedelta
 
-from core.database import get_db_session
-from services.data.collection import data_collection_service
-from models.repositories.crud_stock import stock_crud
+from app.dependencies import (
+    get_database_session,
+    get_data_collection_service_clean,
+    get_stock_service
+)
+from domain.services.data_collection_service import DataCollectionService
+from domain.services.stock_service import StockService
 from api.schemas.stocks import (
     DataCollectionRequest,
     DataCollectionResponse,
@@ -23,14 +27,16 @@ router = APIRouter()
 async def refresh_stock_data(
     stock_id: int,
     days: int = 30,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    data_collection_service: DataCollectionService = Depends(get_data_collection_service_clean),
+    stock_service: StockService = Depends(get_stock_service)
 ):
     """
     手動更新股票數據
     """
     try:
         # 檢查股票是否存在
-        stock = await stock_crud.get(db, stock_id)
+        stock = await stock_service.get_stock_by_id(db, stock_id)
         if not stock:
             raise HTTPException(status_code=404, detail="股票不存在")
 
@@ -38,16 +44,19 @@ async def refresh_stock_data(
         end_date = date.today()
         start_date = end_date - timedelta(days=days)
 
-        # 執行數據收集
-        result = await data_collection_service.collect_stock_data(
-            db, stock.symbol, stock.market, start_date, end_date
+        # 執行數據收集（domain service）
+        collect_result = await data_collection_service.collect_stock_data(
+            db,
+            stock_id=stock_id,
+            start_date=start_date,
+            end_date=end_date
         )
 
         return DataCollectionResponse(
-            success=result.success,
-            message=result.message,
-            data_points=result.data_points_collected,
-            errors=result.errors
+            success=collect_result.status == collect_result.status.SUCCESS,
+            message="數據刷新完成" if collect_result.status == collect_result.status.SUCCESS else "數據刷新失敗",
+            data_points=collect_result.records_collected,
+            errors=collect_result.errors
         )
 
     except HTTPException:
@@ -59,25 +68,27 @@ async def refresh_stock_data(
 @router.post("/collect", response_model=DataCollectionResponse)
 async def collect_stock_data(
     request: DataCollectionRequest,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    data_collection_service: DataCollectionService = Depends(get_data_collection_service_clean),
+    stock_service: StockService = Depends(get_stock_service)
 ):
     """
     收集指定股票的數據
     """
     try:
-        # 執行數據收集
+        stock = await stock_service.get_stock_by_symbol(db, request.symbol)
+
         result = await data_collection_service.collect_stock_data(
             db,
-            symbol=request.symbol,
-            market=request.market,
+            stock_id=stock.id,
             start_date=request.start_date,
             end_date=request.end_date
         )
 
         return DataCollectionResponse(
-            success=result.success,
-            message=result.message,
-            data_points=result.data_points_collected,
+            success=result.status == result.status.SUCCESS,
+            message="數據收集完成" if result.status == result.status.SUCCESS else "數據收集失敗",
+            data_points=result.records_collected,
             errors=result.errors
         )
 
@@ -88,59 +99,25 @@ async def collect_stock_data(
 @router.post("/collect-all", response_model=Dict[str, Any])
 async def collect_all_stocks_data(
     days: int = 7,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    data_collection_service: DataCollectionService = Depends(get_data_collection_service_clean)
 ):
     """
     收集所有活躍股票的數據
     """
     try:
-        # 獲取所有活躍股票
-        active_stocks = await stock_crud.get_active_stocks(db)
-
-        if not active_stocks:
-            return {
-                "success": True,
-                "message": "沒有活躍股票需要收集數據",
-                "processed": 0,
-                "successful": 0,
-                "failed": 0,
-                "errors": []
-            }
-
-        # 計算日期範圍
-        end_date = date.today()
-        start_date = end_date - timedelta(days=days)
-
-        processed = 0
-        successful = 0
-        failed = 0
-        all_errors = []
-
-        # 逐個處理股票
-        for stock in active_stocks:
-            processed += 1
-            try:
-                result = await data_collection_service.collect_stock_data(
-                    db, stock.symbol, stock.market, start_date, end_date
-                )
-
-                if result.success:
-                    successful += 1
-                else:
-                    failed += 1
-                    all_errors.extend(result.errors)
-
-            except Exception as e:
-                failed += 1
-                all_errors.append(f"{stock.symbol}: {str(e)}")
+        summary = await data_collection_service.collect_active_stocks_data(
+            db,
+            days=days
+        )
 
         return {
-            "success": True,
-            "message": f"批次收集完成，處理了 {processed} 隻股票",
-            "processed": processed,
-            "successful": successful,
-            "failed": failed,
-            "errors": all_errors[:50]  # 限制錯誤數量
+            "success": summary.successful_stocks == summary.total_stocks,
+            "message": f"批次收集完成，處理了 {summary.total_stocks} 隻股票",
+            "processed": summary.total_stocks,
+            "successful": summary.successful_stocks,
+            "failed": summary.failed_stocks,
+            "errors": [error for result in summary.results for error in result.errors][:50]
         }
 
     except Exception as e:
@@ -150,72 +127,33 @@ async def collect_all_stocks_data(
 @router.post("/collect-batch", response_model=Dict[str, Any])
 async def collect_batch_stocks_data(
     request: BatchCollectionRequest,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    data_collection_service: DataCollectionService = Depends(get_data_collection_service_clean)
 ):
     """
     批次收集指定股票的數據
     """
     try:
-        stocks_to_process = []
-
         if request.use_stock_list and request.stocks:
-            # 使用提供的股票列表
-            stocks_to_process = [
-                {"symbol": stock["symbol"], "market": stock["market"]}
-                for stock in request.stocks
-            ]
+            stock_entries = request.stocks
         else:
-            # 使用資料庫中的活躍股票
-            active_stocks = await stock_crud.get_active_stocks(db)
-            stocks_to_process = [
-                {"symbol": stock.symbol, "market": stock.market}
-                for stock in active_stocks
-            ]
+            active_stocks = await data_collection_service.stock_repo.get_active_stocks(db)
+            stock_entries = [{"symbol": stock.symbol, "market": stock.market} for stock in active_stocks]
 
-        if not stocks_to_process:
-            return {
-                "success": True,
-                "message": "沒有股票需要收集數據",
-                "processed": 0,
-                "successful": 0,
-                "failed": 0,
-                "errors": []
-            }
-
-        processed = 0
-        successful = 0
-        failed = 0
-        all_errors = []
-
-        # 逐個處理股票
-        for stock_info in stocks_to_process:
-            processed += 1
-            try:
-                result = await data_collection_service.collect_stock_data(
-                    db,
-                    symbol=stock_info["symbol"],
-                    market=stock_info["market"],
-                    start_date=request.start_date,
-                    end_date=request.end_date
-                )
-
-                if result.success:
-                    successful += 1
-                else:
-                    failed += 1
-                    all_errors.extend(result.errors)
-
-            except Exception as e:
-                failed += 1
-                all_errors.append(f"{stock_info['symbol']}: {str(e)}")
+        summary = await data_collection_service.collect_batch_stocks_data(
+            db,
+            stock_list=stock_entries,
+            start_date=request.start_date,
+            end_date=request.end_date
+        )
 
         return {
-            "success": True,
-            "message": f"批次收集完成，處理了 {processed} 隻股票",
-            "processed": processed,
-            "successful": successful,
-            "failed": failed,
-            "errors": all_errors[:50]  # 限制錯誤數量
+            "success": summary["success"],
+            "message": summary["message"],
+            "processed": summary["total_stocks"],
+            "successful": summary["success_count"],
+            "failed": summary["error_count"],
+            "errors": summary["collection_errors"][:50]
         }
 
     except Exception as e:

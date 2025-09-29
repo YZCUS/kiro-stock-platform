@@ -197,7 +197,7 @@ async def get_indicators_summary(
     period: Optional[int] = Query(None, description="週期參數"),
     db: AsyncSession = Depends(get_database_session),
     stock_repo=Depends(get_stock_repository),
-    analysis_service=Depends(get_technical_analysis_service),
+    analysis_service=Depends(get_technical_analysis_service_clean),
     settings=Depends(get_settings)
 ):
     """取得技術指標摘要"""
@@ -265,7 +265,7 @@ async def refresh_stock_data(
     days: int = Query(30, ge=1, le=365, description="回補天數"),
     db: AsyncSession = Depends(get_database_session),
     stock_repo=Depends(get_stock_repository),
-    collection_service=Depends(get_data_collection_service)
+    collection_service=Depends(get_data_collection_service_clean)
 ):
     """手動更新股票數據"""
     try:

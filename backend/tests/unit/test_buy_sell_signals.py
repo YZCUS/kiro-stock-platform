@@ -1,439 +1,409 @@
 #!/usr/bin/env python3
 """
-買賣點標示功能測試
+Buy/Sell Signals Tests - Clean Architecture
+Testing trading signal generation and buy/sell point detection using domain services
 """
-import asyncio
+import pytest
 import sys
+from unittest.mock import MagicMock, AsyncMock
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 
-# 添加測試配置路徑
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from test_config import setup_test_path
+sys.path.append('/home/opc/projects/kiro-stock-platform/backend')
 
-# 設置測試環境路徑
-setup_test_path()
-
-from core.database import get_db
-from services.trading.buy_sell_generator import (
-    buy_sell_signal_generator,
-    BuySellAction,
-    SignalPriority
+from domain.services.trading_signal_service import (
+    TradingSignalService,
+    SignalType,
+    SignalStrength,
+    SignalSource,
+    TradingSignal,
+    SignalAnalysis
 )
-from services.trading.signal_notification import (
-    signal_notification_service,
-    NotificationType,
-    AlertLevel
-)
-from models.domain.stock import Stock
-from models.domain.trading_signal import TradingSignal
-from models.domain.price_history import PriceHistory
-from models.repositories.crud_stock import stock_crud
-from models.repositories.crud_trading_signal import trading_signal_crud
-from models.repositories.crud_price_history import price_history_crud
+from infrastructure.cache.unified_cache_service import MockCacheService
 
 
-async def create_test_data():
-    """建立測試數據"""
-    print("建立測試數據...")
-    
-    async with get_db() as db_session:
-        # 建立測試股票
-        test_stock = Stock(
-            symbol="BUYSELL_TEST",
-            market="TW",
-            name="買賣點測試股票"
+class TestBuySellSignalGeneration:
+    """Buy/Sell Signal Generation Tests"""
+
+    def setup_method(self):
+        """Setup test environment"""
+        # Mock repositories following Clean Architecture interfaces
+        self.mock_stock_repo = MagicMock()
+        self.mock_price_repo = MagicMock()
+        self.mock_signal_repo = MagicMock()
+        self.cache_service = MockCacheService()
+
+        # Create trading signal service
+        self.trading_service = TradingSignalService(
+            stock_repository=self.mock_stock_repo,
+            price_repository=self.mock_price_repo,
+            cache_service=self.cache_service,
+            signal_repository=self.mock_signal_repo
         )
-        db_session.add(test_stock)
-        await db_session.flush()
-        
-        # 建立價格數據（模擬上升趨勢）
-        base_date = date(2024, 1, 1)
+
+    def create_mock_stock(self, stock_id=1, symbol="TEST", name="Test Stock"):
+        """Create a mock stock object"""
+        stock = MagicMock()
+        stock.id = stock_id
+        stock.symbol = symbol
+        stock.name = name
+        stock.market = "TW"
+        return stock
+
+    def create_mock_price_data(self, stock_id=1, days=30, base_price=100.0, trend="up"):
+        """Create mock price history data"""
+        prices = []
+
+        for i in range(days):
+            price = MagicMock()
+            price.stock_id = stock_id
+            price.date = date.today() - timedelta(days=days-i-1)
+
+            # Create trend-based prices (newest first in list for the service)
+            if trend == "up":
+                # Upward trend - newest price highest
+                price.close_price = base_price + (i * 0.5) + ((i % 3) * 0.3)
+            elif trend == "down":
+                # Downward trend - newest price lowest
+                price.close_price = base_price - (i * 0.5) + ((i % 3) * 0.3)
+            else:
+                # Sideways - fluctuating around base price
+                price.close_price = base_price + ((i % 5 - 2) * 0.5)
+
+            price.open_price = price.close_price * 0.999
+            price.high_price = price.close_price * 1.01
+            price.low_price = price.close_price * 0.99
+            price.volume = 1000000 + (i * 10000)
+
+            prices.append(price)
+
+        # Reverse to have newest first (as expected by service)
+        return list(reversed(prices))
+
+    @pytest.mark.asyncio
+    async def test_generate_buy_signals_uptrend(self):
+        """Test buy signal generation in uptrend market"""
+        # Setup mock data
+        test_stock = self.create_mock_stock(1, "BUY_TEST", "Buy Test Stock")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Create uptrend price data (30 days)
+        mock_prices = self.create_mock_price_data(1, 30, 100.0, "up")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Generate trading signals
+        result = await self.trading_service.generate_trading_signals(
+            db=MagicMock(),
+            stock_id=1,
+            analysis_days=30
+        )
+
+        # Verify results
+        assert result.stock_id == 1
+        assert result.symbol == "BUY_TEST"
+        assert isinstance(result, SignalAnalysis)
+        assert result.signals_generated > 0
+        assert 0 <= result.risk_score <= 1
+
+        # In uptrend, we should get buy signals
+        if result.primary_signal:
+            assert result.primary_signal.signal_type in [SignalType.BUY, SignalType.STRONG_BUY, SignalType.HOLD]
+            assert result.primary_signal.confidence > 0
+            assert result.primary_signal.symbol == "BUY_TEST"
+
+    @pytest.mark.asyncio
+    async def test_generate_sell_signals_downtrend(self):
+        """Test sell signal generation in downtrend market"""
+        # Setup mock data
+        test_stock = self.create_mock_stock(2, "SELL_TEST", "Sell Test Stock")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Create downtrend price data
+        mock_prices = self.create_mock_price_data(2, 30, 100.0, "down")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Generate trading signals
+        result = await self.trading_service.generate_trading_signals(
+            db=MagicMock(),
+            stock_id=2,
+            analysis_days=30
+        )
+
+        # Verify results
+        assert result.stock_id == 2
+        assert result.symbol == "SELL_TEST"
+        assert result.signals_generated > 0
+
+        # In downtrend, we should get sell signals or hold
+        if result.primary_signal:
+            assert result.primary_signal.signal_type in [SignalType.SELL, SignalType.STRONG_SELL, SignalType.HOLD]
+
+    @pytest.mark.asyncio
+    async def test_signal_confidence_levels(self):
+        """Test signal confidence level calculation"""
+        # Setup mock data with strong trend
+        test_stock = self.create_mock_stock(3, "CONF_TEST", "Confidence Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Create strong uptrend data
+        mock_prices = self.create_mock_price_data(3, 30, 100.0, "up")
+        # Make trend stronger by increasing price differences
+        for i, price in enumerate(mock_prices):
+            price.close_price = 100.0 + (i * 2.0)  # Strong uptrend
+
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Generate signals
+        result = await self.trading_service.generate_trading_signals(
+            db=MagicMock(),
+            stock_id=3,
+            analysis_days=30
+        )
+
+        # Check confidence levels
+        if result.primary_signal:
+            assert 0 <= result.primary_signal.confidence <= 1
+
+        # All supporting signals should have valid confidence
+        for signal in result.supporting_signals:
+            assert 0 <= signal.confidence <= 1
+
+    @pytest.mark.asyncio
+    async def test_risk_assessment_calculation(self):
+        """Test risk score calculation for different market conditions"""
+        test_stock = self.create_mock_stock(4, "RISK_TEST", "Risk Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Test high volatility scenario
+        mock_prices = []
         base_price = 100.0
-        
         for i in range(30):
-            current_date = base_date + timedelta(days=i)
-            
-            # 模擬價格趨勢（整體上升，有波動）
-            trend = i * 0.5  # 上升趨勢
-            noise = (i % 3 - 1) * 2  # 波動
-            current_price = base_price + trend + noise
-            
-            price_history = PriceHistory(
-                stock_id=test_stock.id,
-                date=current_date,
-                open_price=Decimal(str(current_price * 0.99)),
-                high_price=Decimal(str(current_price * 1.02)),
-                low_price=Decimal(str(current_price * 0.98)),
-                close_price=Decimal(str(current_price)),
-                volume=1000000 + i * 50000,
-                adjusted_close=Decimal(str(current_price))
-            )
-            db_session.add(price_history)
-        
-        # 建立交易信號（模擬各種信號情況）
-        signal_data = [
-            # 買入信號
-            (5, "golden_cross", 0.8, "黃金交叉信號"),
-            (8, "rsi_oversold", 0.7, "RSI超賣信號"),
-            (12, "macd_bullish", 0.75, "MACD看漲信號"),
-            (15, "kd_golden_cross", 0.65, "KD黃金交叉"),
-            
-            # 賣出信號
-            (20, "death_cross", 0.85, "死亡交叉信號"),
-            (23, "rsi_overbought", 0.72, "RSI超買信號"),
-            (26, "macd_bearish", 0.68, "MACD看跌信號"),
-            (28, "kd_death_cross", 0.63, "KD死亡交叉"),
+            price = MagicMock()
+            price.stock_id = 4
+            price.date = date.today() - timedelta(days=30-i-1)
+            # High volatility: large price swings
+            price.close_price = base_price + ((i % 2) * 10 - 5) + (i * 0.1)
+            mock_prices.append(price)
+
+        mock_prices = list(reversed(mock_prices))  # Newest first
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        result = await self.trading_service.generate_trading_signals(
+            db=MagicMock(),
+            stock_id=4,
+            analysis_days=30
+        )
+
+        # High volatility should result in higher risk score
+        assert 0 <= result.risk_score <= 1
+        # With high volatility, risk score should be meaningful
+        assert result.risk_score > 0
+
+    @pytest.mark.asyncio
+    async def test_signal_source_detection(self):
+        """Test detection of different signal sources"""
+        test_stock = self.create_mock_stock(5, "SOURCE_TEST", "Signal Source Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Create data that should trigger golden cross
+        mock_prices = self.create_mock_price_data(5, 30, 100.0, "up")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        result = await self.trading_service.generate_trading_signals(
+            db=MagicMock(),
+            stock_id=5,
+            analysis_days=30
+        )
+
+        # Check if signal sources are properly identified
+        all_signals = [result.primary_signal] + result.supporting_signals
+        signal_sources = [s.signal_source for s in all_signals if s]
+
+        # Verify the service can generate signals (may or may not have sources based on data)
+        assert result.signals_generated >= 0
+        for source in signal_sources:
+            assert isinstance(source, SignalSource)
+
+    @pytest.mark.asyncio
+    async def test_buy_sell_recommendation_logic(self):
+        """Test buy/sell recommendation generation logic"""
+        test_stock = self.create_mock_stock(6, "REC_TEST", "Recommendation Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Test different scenarios
+        scenarios = [
+            ("up", "uptrend should generate positive recommendation"),
+            ("down", "downtrend should generate negative recommendation"),
+            ("sideways", "sideways should generate hold recommendation")
         ]
-        
-        for day_offset, signal_type, confidence, description in signal_data:
-            signal_date = base_date + timedelta(days=day_offset)
-            signal_price = base_price + day_offset * 0.5
-            
-            trading_signal = TradingSignal(
-                stock_id=test_stock.id,
-                signal_type=signal_type,
-                date=signal_date,
-                price=Decimal(str(signal_price)),
-                confidence=confidence,
-                description=description
+
+        for trend, description in scenarios:
+            mock_prices = self.create_mock_price_data(6, 30, 100.0, trend)
+            self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+            result = await self.trading_service.generate_trading_signals(
+                db=MagicMock(),
+                stock_id=6,
+                analysis_days=30
             )
-            db_session.add(trading_signal)
-        
-        await db_session.commit()
-        print(f"✓ 建立測試股票和數據: {test_stock.symbol} (ID: {test_stock.id})")
-        return test_stock.id
 
+            # Verify recommendation is generated
+            assert result.recommendation in ["持有", "建議買入", "謹慎買入", "建議賣出"]
+            assert len(result.reasoning) > 0
 
-async def test_buy_sell_point_generation(stock_id: int):
-    """測試買賣點生成功能"""
-    print(f"\n=== 測試買賣點生成功能 (股票ID: {stock_id}) ===")
-    
-    async with get_db() as db_session:
-        # 測試生成買賣點
-        print("生成買賣點標示...")
-        
-        result = await buy_sell_signal_generator.generate_buy_sell_points(
-            db_session,
-            stock_id=stock_id,
-            days=35,
-            min_confidence=0.6
+            # Verify reasoning contains meaningful content
+            reasoning_text = " ".join(result.reasoning)
+            assert len(reasoning_text) > 5  # Should have some reasoning text
+
+    @pytest.mark.asyncio
+    async def test_signal_strength_classification(self):
+        """Test signal strength classification"""
+        test_stock = self.create_mock_stock(7, "STRENGTH_TEST", "Signal Strength Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Create strong trend data
+        mock_prices = []
+        for i in range(30):
+            price = MagicMock()
+            price.stock_id = 7
+            price.date = date.today() - timedelta(days=30-i-1)
+            price.close_price = 100.0 + (i * 1.5)  # Strong consistent uptrend
+            mock_prices.append(price)
+
+        mock_prices = list(reversed(mock_prices))
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        result = await self.trading_service.generate_trading_signals(
+            db=MagicMock(),
+            stock_id=7,
+            analysis_days=30
         )
-        
-        if result.success:
-            print(f"✓ 買賣點生成成功")
-            print(f"  股票代號: {result.stock_symbol}")
-            print(f"  市場趨勢: {result.market_trend}")
-            print(f"  整體建議: {result.overall_recommendation.value}")
-            print(f"  信心度: {result.confidence_score:.3f}")
-            print(f"  風險評估: {result.risk_assessment}")
-            print(f"  買賣點數量: {len(result.buy_sell_points)}")
-            print(f"  執行時間: {result.execution_time_seconds:.3f} 秒")
-            
-            if result.errors:
-                print(f"  錯誤: {len(result.errors)} 個")
-                for error in result.errors[:3]:
-                    print(f"    - {error}")
-            
-            # 顯示買賣點詳情
-            if result.buy_sell_points:
-                print(f"\n  買賣點詳情:")
-                for i, point in enumerate(result.buy_sell_points[:10]):  # 只顯示前10個
-                    action_text = "買入" if point.action == BuySellAction.BUY else "賣出"
-                    print(f"    {i+1}. {point.date} | {action_text} | 優先級: {point.priority.value}")
-                    print(f"       價格: {point.price:.2f} | 信心度: {point.confidence:.3f}")
-                    print(f"       風險: {point.risk_level} | 理由: {point.reason}")
-                    
-                    if point.stop_loss:
-                        print(f"       止損: {point.stop_loss:.2f}")
-                    if point.take_profit:
-                        print(f"       止盈: {point.take_profit:.2f}")
-                    print()
-            
-            return True
-        else:
-            print(f"✗ 買賣點生成失敗: {result.errors}")
-            return False
 
+        # Check signal strength classification
+        if result.primary_signal:
+            assert isinstance(result.primary_signal.signal_strength, SignalStrength)
 
-async def test_signal_priority_sorting():
-    """測試信號優先級排序"""
-    print("\n=== 測試信號優先級排序 ===")
-    
-    async with get_db() as db_session:
-        # 獲取測試股票
-        test_stock = await stock_crud.get_by_symbol(db_session, "BUYSELL_TEST")
-        if not test_stock:
-            print("✗ 找不到測試股票")
-            return False
-        
-        # 生成買賣點
-        result = await buy_sell_signal_generator.generate_buy_sell_points(
-            db_session,
-            stock_id=test_stock.id,
-            days=35,
-            min_confidence=0.5  # 降低閾值以獲得更多信號
+        for signal in result.supporting_signals:
+            assert isinstance(signal.signal_strength, SignalStrength)
+
+    @pytest.mark.asyncio
+    async def test_multiple_signal_integration(self):
+        """Test integration of multiple trading signals"""
+        test_stock = self.create_mock_stock(8, "MULTI_TEST", "Multiple Signal Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Create complex price pattern that should generate multiple signals
+        mock_prices = []
+        base_price = 100.0
+
+        for i in range(30):
+            price = MagicMock()
+            price.stock_id = 8
+            price.date = date.today() - timedelta(days=30-i-1)
+
+            # Create pattern: dip then recovery (should trigger multiple signals)
+            if i < 10:
+                price.close_price = base_price - (i * 0.5)  # Decline
+            elif i < 15:
+                price.close_price = base_price - 5 + ((i-10) * 0.3)  # Consolidation
+            else:
+                price.close_price = base_price - 3 + ((i-15) * 1.0)  # Recovery
+
+            mock_prices.append(price)
+
+        mock_prices = list(reversed(mock_prices))
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        result = await self.trading_service.generate_trading_signals(
+            db=MagicMock(),
+            stock_id=8,
+            analysis_days=30
         )
-        
-        if result.success and result.buy_sell_points:
-            print(f"✓ 獲得 {len(result.buy_sell_points)} 個買賣點")
-            
-            # 按優先級分組
-            priority_groups = {}
-            for point in result.buy_sell_points:
-                priority = point.priority.value
-                if priority not in priority_groups:
-                    priority_groups[priority] = []
-                priority_groups[priority].append(point)
-            
-            print("按優先級分組:")
-            for priority in ['critical', 'high', 'medium', 'low']:
-                if priority in priority_groups:
-                    points = priority_groups[priority]
-                    print(f"  {priority.upper()}: {len(points)} 個")
-                    
-                    # 顯示該優先級的信號
-                    for point in points[:3]:  # 只顯示前3個
-                        action_text = "買入" if point.action == BuySellAction.BUY else "賣出"
-                        print(f"    {point.date} | {action_text} | {point.confidence:.3f}")
-            
-            # 測試高優先級信號過濾
-            high_priority_points = [
-                p for p in result.buy_sell_points 
-                if p.priority in [SignalPriority.HIGH, SignalPriority.CRITICAL]
-            ]
-            
-            print(f"\n高優先級信號: {len(high_priority_points)} 個")
-            for point in high_priority_points:
-                action_text = "買入" if point.action == BuySellAction.BUY else "賣出"
-                print(f"  {point.date} | {action_text} | {point.priority.value} | {point.confidence:.3f}")
-            
-            return True
-        else:
-            print("✗ 沒有獲得買賣點數據")
-            return False
 
+        # Should generate at least one signal
+        assert result.signals_generated >= 1
 
-async def test_notification_system():
-    """測試通知系統"""
-    print("\n=== 測試通知系統 ===")
-    
-    try:
-        # 測試添加通知規則
-        print("1. 測試添加通知規則...")
-        
-        rule_id = signal_notification_service.add_notification_rule(
-            user_id=1,
-            stock_symbols=["BUYSELL_TEST"],
-            signal_types=["golden_cross", "death_cross"],
-            min_confidence=0.7,
-            min_priority=SignalPriority.MEDIUM,
-            notification_types=[NotificationType.IN_APP, NotificationType.EMAIL]
-        )
-        
-        print(f"✓ 添加通知規則: {rule_id}")
-        
-        # 測試獲取用戶規則
-        user_rules = signal_notification_service.get_user_notification_rules(1)
-        print(f"✓ 用戶規則數量: {len(user_rules)}")
-        
-        # 測試處理交易信號通知
-        print("\n2. 測試交易信號通知...")
-        
-        async with get_db() as db_session:
-            test_stock = await stock_crud.get_by_symbol(db_session, "BUYSELL_TEST")
-            if test_stock:
-                # 建立測試信號
-                test_signal = TradingSignal(
-                    stock_id=test_stock.id,
-                    signal_type="golden_cross",
-                    date=date.today(),
-                    price=Decimal("120.50"),
-                    confidence=0.85,
-                    description="測試黃金交叉信號"
-                )
-                
-                await signal_notification_service.process_trading_signal(
-                    db_session, test_stock.id, test_signal
-                )
-                
-                print("✓ 處理交易信號通知")
-        
-        # 測試處理通知隊列
-        print("\n3. 測試處理通知隊列...")
-        
-        await signal_notification_service.process_notification_queue()
-        
-        # 獲取通知統計
-        stats = signal_notification_service.get_notification_statistics()
-        print(f"✓ 通知統計:")
-        print(f"  總訊息數: {stats.get('total_messages', 0)}")
-        print(f"  已發送: {stats.get('sent_messages', 0)}")
-        print(f"  失敗: {stats.get('failed_messages', 0)}")
-        print(f"  待發送: {stats.get('pending_messages', 0)}")
-        print(f"  成功率: {stats.get('success_rate', 0):.2%}")
-        
-        # 獲取用戶訊息
-        user_messages = signal_notification_service.get_user_messages(1, limit=10)
-        print(f"✓ 用戶訊息數量: {len(user_messages)}")
-        
-        for msg in user_messages[:3]:  # 顯示前3個
-            print(f"  {msg.created_at.strftime('%H:%M:%S')} | {msg.title} | {msg.status}")
-        
-        return True
-        
-    except Exception as e:
-        print(f"✗ 通知系統測試失敗: {str(e)}")
-        return False
+        # Should have analysis results
+        assert result is not None
+        assert result.stock_id == 8
 
+        # May have supporting signals
+        assert isinstance(result.supporting_signals, list)
 
-async def test_risk_assessment():
-    """測試風險評估功能"""
-    print("\n=== 測試風險評估功能 ===")
-    
-    async with get_db() as db_session:
-        # 獲取測試股票
-        test_stock = await stock_crud.get_by_symbol(db_session, "BUYSELL_TEST")
-        if not test_stock:
-            print("✗ 找不到測試股票")
-            return False
-        
-        # 生成買賣點並分析風險
-        result = await buy_sell_signal_generator.generate_buy_sell_points(
-            db_session,
-            stock_id=test_stock.id,
-            days=35,
-            min_confidence=0.5
-        )
-        
-        if result.success:
-            print(f"✓ 風險評估結果:")
-            print(f"  整體風險: {result.risk_assessment}")
-            print(f"  市場趨勢: {result.market_trend}")
-            
-            # 按風險等級分組買賣點
-            risk_groups = {}
-            for point in result.buy_sell_points:
-                risk = point.risk_level
-                if risk not in risk_groups:
-                    risk_groups[risk] = []
-                risk_groups[risk].append(point)
-            
-            print("\n按風險等級分組:")
-            for risk_level in ['low', 'medium', 'high', 'very_high']:
-                if risk_level in risk_groups:
-                    points = risk_groups[risk_level]
-                    print(f"  {risk_level.upper()}: {len(points)} 個買賣點")
-                    
-                    # 顯示該風險等級的信號
-                    for point in points[:2]:  # 只顯示前2個
-                        action_text = "買入" if point.action == BuySellAction.BUY else "賣出"
-                        print(f"    {point.date} | {action_text} | 信心度: {point.confidence:.3f}")
-            
-            # 分析止損止盈設定
-            points_with_stops = [p for p in result.buy_sell_points if p.stop_loss and p.take_profit]
-            if points_with_stops:
-                print(f"\n止損止盈分析 ({len(points_with_stops)} 個點):")
-                
-                for point in points_with_stops[:3]:
-                    action_text = "買入" if point.action == BuySellAction.BUY else "賣出"
-                    stop_loss_pct = abs(point.stop_loss - point.price) / point.price * 100
-                    take_profit_pct = abs(point.take_profit - point.price) / point.price * 100
-                    
-                    print(f"  {action_text} @ {point.price:.2f}")
-                    print(f"    止損: {point.stop_loss:.2f} ({stop_loss_pct:.1f}%)")
-                    print(f"    止盈: {point.take_profit:.2f} ({take_profit_pct:.1f}%)")
-            
-            return True
-        else:
-            print(f"✗ 風險評估失敗: {result.errors}")
-            return False
+        # Reasoning should be provided
+        assert len(result.reasoning) >= 1
 
+    def test_signal_enum_values(self):
+        """Test signal enum values are properly defined"""
+        # Test SignalType enum
+        assert SignalType.BUY == "buy"
+        assert SignalType.SELL == "sell"
+        assert SignalType.HOLD == "hold"
+        assert SignalType.STRONG_BUY == "strong_buy"
+        assert SignalType.STRONG_SELL == "strong_sell"
 
-async def cleanup_test_data():
-    """清理測試數據"""
-    print("\n清理測試數據...")
-    
-    async with get_db() as db_session:
-        # 刪除測試股票和相關數據
-        test_stock = await stock_crud.get_by_symbol(db_session, "BUYSELL_TEST")
-        
-        if test_stock:
-            # 刪除交易信號
-            await db_session.execute(
-                f"DELETE FROM trading_signals WHERE stock_id = {test_stock.id}"
+        # Test SignalStrength enum
+        assert SignalStrength.WEAK == "weak"
+        assert SignalStrength.MODERATE == "moderate"
+        assert SignalStrength.STRONG == "strong"
+        assert SignalStrength.VERY_STRONG == "very_strong"
+
+        # Test SignalSource enum
+        assert SignalSource.GOLDEN_CROSS == "golden_cross"
+        assert SignalSource.DEATH_CROSS == "death_cross"
+        assert SignalSource.RSI_OVERSOLD == "rsi_oversold"
+        assert SignalSource.RSI_OVERBOUGHT == "rsi_overbought"
+
+    @pytest.mark.asyncio
+    async def test_insufficient_data_handling(self):
+        """Test handling of insufficient price data"""
+        test_stock = self.create_mock_stock(9, "INSUFFICIENT_TEST", "Insufficient Data Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Provide insufficient data (less than 20 days)
+        mock_prices = self.create_mock_price_data(9, 10, 100.0, "up")  # Only 10 days
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Should raise ValueError for insufficient data
+        with pytest.raises(ValueError, match="價格數據不足，無法生成交易信號"):
+            await self.trading_service.generate_trading_signals(
+                db=MagicMock(),
+                stock_id=9,
+                analysis_days=30
             )
-            
-            # 刪除價格歷史
-            await db_session.execute(
-                f"DELETE FROM price_history WHERE stock_id = {test_stock.id}"
-            )
-            
-            # 刪除股票
-            await db_session.delete(test_stock)
-            await db_session.commit()
-            
-            print("✓ 測試數據清理完成")
 
+    @pytest.mark.asyncio
+    async def test_cache_integration(self):
+        """Test cache integration in signal generation"""
+        test_stock = self.create_mock_stock(10, "CACHE_TEST", "Cache Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
 
-async def run_all_tests():
-    """執行所有測試"""
-    print("開始執行買賣點標示功能測試...")
-    print("=" * 60)
-    
-    try:
-        # 1. 建立測試數據
-        stock_id = await create_test_data()
-        
-        # 2. 測試買賣點生成
-        generation_success = await test_buy_sell_point_generation(stock_id)
-        
-        # 3. 測試信號優先級排序
-        priority_success = await test_signal_priority_sorting()
-        
-        # 4. 測試通知系統
-        notification_success = await test_notification_system()
-        
-        # 5. 測試風險評估
-        risk_success = await test_risk_assessment()
-        
-        # 6. 清理測試數據
-        await cleanup_test_data()
-        
-        print("\n" + "=" * 60)
-        
-        all_success = all([
-            generation_success, priority_success, 
-            notification_success, risk_success
-        ])
-        
-        if all_success:
-            print("🎉 所有測試都通過了！")
-            print("\n買賣點標示系統已成功實作，包含以下功能：")
-            print("✓ 智能買賣點生成")
-            print("✓ 信號優先級排序")
-            print("✓ 風險評估和止損止盈計算")
-            print("✓ 市場趨勢分析")
-            print("✓ 通知和警報系統")
-            print("✓ 多種通知類型支援")
-            return True
-        else:
-            print("❌ 部分測試失敗")
-            return False
-            
-    except Exception as e:
-        print(f"\n❌ 測試過程中發生異常: {str(e)}")
-        
-        # 嘗試清理
-        try:
-            await cleanup_test_data()
-        except:
-            pass
-        
-        return False
+        mock_prices = self.create_mock_price_data(10, 30, 100.0, "up")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
 
+        # First call - should compute and cache
+        result1 = await self.trading_service.generate_trading_signals(
+            db=MagicMock(),
+            stock_id=10,
+            analysis_days=30
+        )
 
-if __name__ == "__main__":
-    success = asyncio.run(run_all_tests())
-    sys.exit(0 if success else 1)
+        # Second call - should use cache
+        result2 = await self.trading_service.generate_trading_signals(
+            db=MagicMock(),
+            stock_id=10,
+            analysis_days=30
+        )
+
+        # Results should be consistent
+        assert result1.stock_id == result2.stock_id
+        assert result1.symbol == result2.symbol
+
+        # Verify cache was used (mock cache should have the data)
+        cache_key = self.cache_service.get_cache_key(
+            "trading_signals",
+            stock_id=10,
+            analysis_days=30
+        )
+        cached_data = await self.cache_service.get(cache_key)
+        assert cached_data is not None

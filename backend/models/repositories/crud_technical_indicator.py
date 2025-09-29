@@ -43,6 +43,7 @@ class CRUDTechnicalIndicator(CRUDBase[TechnicalIndicator, Dict[str, Any], Dict[s
         indicator_type: str,
         start_date: date = None,
         end_date: date = None,
+        offset: int = 0,
         limit: int = 100
     ) -> List[TechnicalIndicator]:
         """取得股票指定類型的指標數據"""
@@ -58,7 +59,7 @@ class CRUDTechnicalIndicator(CRUDBase[TechnicalIndicator, Dict[str, Any], Dict[s
         if end_date:
             query = query.where(TechnicalIndicator.date <= end_date)
         
-        query = query.order_by(desc(TechnicalIndicator.date)).limit(limit)
+        query = query.order_by(desc(TechnicalIndicator.date)).offset(offset).limit(limit)
         
         result = await db.execute(query)
         return result.scalars().all()
@@ -68,26 +69,74 @@ class CRUDTechnicalIndicator(CRUDBase[TechnicalIndicator, Dict[str, Any], Dict[s
         db: AsyncSession, 
         *, 
         stock_id: int,
-        start_date: date,
-        end_date: date,
-        indicator_types: List[str] = None
+        start_date: date = None,
+        end_date: date = None,
+        indicator_types: List[str] = None,
+        offset: int = 0,
+        limit: int = 100
     ) -> List[TechnicalIndicator]:
         """取得股票指定日期範圍的指標數據"""
         query = select(TechnicalIndicator).where(
-            and_(
-                TechnicalIndicator.stock_id == stock_id,
-                TechnicalIndicator.date >= start_date,
-                TechnicalIndicator.date <= end_date
-            )
+            TechnicalIndicator.stock_id == stock_id
         )
+        
+        if start_date:
+            query = query.where(TechnicalIndicator.date >= start_date)
+        if end_date:
+            query = query.where(TechnicalIndicator.date <= end_date)
         
         if indicator_types:
             query = query.where(TechnicalIndicator.indicator_type.in_(indicator_types))
         
-        query = query.order_by(TechnicalIndicator.date.desc(), TechnicalIndicator.indicator_type)
+        query = query.order_by(desc(TechnicalIndicator.date), TechnicalIndicator.indicator_type)
+        query = query.offset(offset).limit(limit)
         
         result = await db.execute(query)
         return result.scalars().all()
+
+    async def count_by_stock_and_type(
+        self,
+        db: AsyncSession,
+        *,
+        stock_id: int,
+        indicator_type: str,
+        start_date: date = None,
+        end_date: date = None
+    ) -> int:
+        query = select(func.count(TechnicalIndicator.id)).where(
+            and_(
+                TechnicalIndicator.stock_id == stock_id,
+                TechnicalIndicator.indicator_type == indicator_type
+            )
+        )
+
+        if start_date:
+            query = query.where(TechnicalIndicator.date >= start_date)
+        if end_date:
+            query = query.where(TechnicalIndicator.date <= end_date)
+
+        result = await db.execute(query)
+        return result.scalar() or 0
+
+    async def count_by_stock(
+        self,
+        db: AsyncSession,
+        *,
+        stock_id: int,
+        start_date: date = None,
+        end_date: date = None
+    ) -> int:
+        query = select(func.count(TechnicalIndicator.id)).where(
+            TechnicalIndicator.stock_id == stock_id
+        )
+
+        if start_date:
+            query = query.where(TechnicalIndicator.date >= start_date)
+        if end_date:
+            query = query.where(TechnicalIndicator.date <= end_date)
+
+        result = await db.execute(query)
+        return result.scalar() or 0
     
     async def get_latest_indicators(
         self, 

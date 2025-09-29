@@ -1,33 +1,30 @@
 #!/usr/bin/env python3
 """
-模型庫 CRUD 操作單元測試
+模型庫 Repository 操作單元測試 - Updated for Clean Architecture
 """
 import asyncio
 import pytest
 import sys
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from datetime import date, datetime, timedelta
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
+from pathlib import Path
 
 # 添加項目根目錄到 Python 路徑
-sys.path.append('/Users/zhengchy/Documents/projects/kiro-stock-platform/backend')
+sys.path.append(str(Path(__file__).parent.parent))
 
-from models.repositories.crud_stock import CRUDStock
-from models.repositories.crud_price_history import CRUDPriceHistory
-from models.repositories.crud_technical_indicator import CRUDTechnicalIndicator
-from models.domain.stock import Stock
-from models.domain.price_history import PriceHistory
-from models.domain.technical_indicator import TechnicalIndicator
+from infrastructure.persistence.stock_repository import StockRepository
+from infrastructure.persistence.price_history_repository import PriceHistoryRepository
+from domain.models.stock import Stock
+from domain.models.price_history import PriceHistory
 
 
-class TestCRUDStock:
-    """股票 CRUD 測試類"""
+class TestStockRepository:
+    """股票 Repository 測試類"""
 
     def setup_method(self):
         """測試前設置"""
-        self.crud_stock = CRUDStock(Stock)
-        self.mock_session = AsyncMock(spec=AsyncSession)
+        self.mock_session = AsyncMock()
+        self.stock_repo = StockRepository(self.mock_session)
 
     async def test_get_by_symbol_success(self):
         """測試成功根據代號取得股票"""
@@ -216,13 +213,13 @@ class TestCRUDStock:
         assert len(result.price_history) > 0
 
 
-class TestCRUDPriceHistory:
+class TestPriceHistoryRepository:
     """價格歷史 CRUD 測試類"""
 
     def setup_method(self):
         """測試前設置"""
-        self.crud_price = CRUDPriceHistory(PriceHistory)
-        self.mock_session = AsyncMock(spec=AsyncSession)
+        self.mock_session = AsyncMock()
+        self.price_repo = PriceHistoryRepository(self.mock_session)
 
     async def test_get_by_stock_and_date_range_success(self):
         """測試成功取得指定期間的價格數據"""
@@ -386,13 +383,14 @@ class TestCRUDPriceHistory:
         assert date(2024, 1, 2) in result
 
 
-class TestCRUDTechnicalIndicator:
-    """技術指標 CRUD 測試類"""
+class TestRepositoryIntegration:
+    """Repository 整合測試類"""
 
     def setup_method(self):
         """測試前設置"""
-        self.crud_indicator = CRUDTechnicalIndicator(TechnicalIndicator)
-        self.mock_session = AsyncMock(spec=AsyncSession)
+        self.mock_session = AsyncMock()
+        self.stock_repo = StockRepository(self.mock_session)
+        self.price_repo = PriceHistoryRepository(self.mock_session)
 
     async def test_get_by_stock_and_indicator_type_success(self):
         """測試成功取得股票特定指標"""

@@ -18,7 +18,7 @@ hiredis==2.2.3
 # 數據處理
 pandas>=2.2.0
 numpy>=1.26.0
-yfinance>=0.2.28
+yfinance==0.2.28
 requests>=2.31.0
 python-dateutil>=2.8.0
 
@@ -46,4 +46,4 @@ structlog==23.2.0
 prometheus-client==0.19.0
 
 # WebSocket
-websockets==12.0
+websockets==10.4

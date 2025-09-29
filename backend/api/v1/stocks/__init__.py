@@ -19,6 +19,8 @@
 """
 from fastapi import APIRouter
 
+from api.schemas.stocks import IndicatorCalculateRequest, IndicatorBatchCalculateRequest
+
 # 導入所有子模組的路由
 from . import listing
 from . import details
@@ -46,4 +48,8 @@ router.include_router(collection.router, tags=["數據收集"])
 router.include_router(validation.router, tags=["數據驗證"])
 
 # 導出主路由器供上級模組使用
-__all__ = ["router"]
+__all__ = [
+    "router",
+    "IndicatorCalculateRequest",
+    "IndicatorBatchCalculateRequest",
+]

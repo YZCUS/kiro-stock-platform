@@ -14,7 +14,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from core.config import settings
+from app.settings import settings
 from services.data.backfill import data_backfill_service, BackfillStrategy, BackfillPriority
 from models.repositories.crud_stock import stock_crud
 import json
@@ -28,7 +28,7 @@ class BackfillCLI:
     
     def __init__(self):
         self.engine = create_async_engine(
-            settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
+            settings.database.url.replace("postgresql://", "postgresql+asyncpg://"),
             echo=False
         )
         self.async_session_local = sessionmaker(

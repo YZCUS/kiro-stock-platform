@@ -4,18 +4,11 @@
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional, Dict, Any
-from datetime import date
+from typing import Optional
 
 from app.dependencies import (
     get_database_session,
     get_technical_analysis_service_clean,
-    get_cache_service
-)
-
-from api.schemas.common import (
-    SuccessResponse,
-    ErrorResponse
 )
 
 router = APIRouter()
@@ -39,13 +32,13 @@ async def get_technical_analysis(
         return {
             "stock_id": analysis.stock_id,
             "symbol": analysis.symbol,
-            "analysis_date": analysis.analysis_date.isoformat(),
+            "analysis_date": analysis.analysis_date,
             "indicators_calculated": analysis.indicators_calculated,
             "indicators_successful": analysis.indicators_successful,
             "indicators_failed": analysis.indicators_failed,
             "execution_time_seconds": analysis.execution_time_seconds,
             "errors": analysis.errors,
-            "warnings": analysis.warnings
+            "warnings": analysis.warnings,
         }
 
     except ValueError as e:
@@ -57,6 +50,7 @@ async def get_technical_analysis(
 @router.get("/summary/{stock_id}")
 async def get_technical_summary(
     stock_id: int,
+    timeframe: Optional[str] = Query(None, description="時間框架"),
     db: AsyncSession = Depends(get_database_session),
     technical_service=Depends(get_technical_analysis_service_clean)
 ):
@@ -64,7 +58,8 @@ async def get_technical_summary(
     try:
         summary = await technical_service.get_stock_technical_summary(
             db=db,
-            stock_id=stock_id
+            stock_id=stock_id,
+            timeframe=timeframe,
         )
 
         return summary

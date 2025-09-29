@@ -107,13 +107,6 @@ class DataCollectionService:
             start_date = end_date - timedelta(days=30)
 
         # 檢查快取和現有數據
-        cache_key = self.cache.get_cache_key(
-            "data_collection_status",
-            stock_id=stock_id,
-            start_date=start_date.isoformat(),
-            end_date=end_date.isoformat()
-        )
-
         # 檢查是否需要收集
         needs_collection = await self._check_data_freshness(
             db, stock_id, start_date, end_date
@@ -168,9 +161,6 @@ class DataCollectionService:
             warnings=[],
             execution_time_seconds=execution_time
         )
-
-        # 快取收集狀態
-        await self.cache.set(cache_key, result.__dict__, ttl=3600)
 
         return result
 

@@ -13,7 +13,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from core.config import settings
+from app.settings import settings
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -248,7 +248,7 @@ async def main():
     
     # 建立資料庫引擎和會話
     engine = create_async_engine(
-        settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
+        settings.database.url.replace("postgresql://", "postgresql+asyncpg://"),
         echo=False
     )
     

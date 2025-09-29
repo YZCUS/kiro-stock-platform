@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.repositories.stock_repository_interface import IStockRepository
 from domain.repositories.price_history_repository_interface import IPriceHistoryRepository
+from domain.repositories.trading_signal_repository_interface import ITradingSignalRepository
 from infrastructure.cache.redis_cache_service import ICacheService
 
 
@@ -92,11 +93,13 @@ class TradingSignalService:
         self,
         stock_repository: IStockRepository,
         price_repository: IPriceHistoryRepository,
-        cache_service: ICacheService
+        cache_service: ICacheService,
+        signal_repository: ITradingSignalRepository
     ):
         self.stock_repo = stock_repository
         self.price_repo = price_repository
         self.cache = cache_service
+        self.signal_repo = signal_repository
 
         # 業務配置
         self.confidence_threshold = 0.7
@@ -279,6 +282,73 @@ class TradingSignalService:
             market_sentiment=market_sentiment
         )
 
+    async def get_recent_signals(
+        self,
+        db: AsyncSession,
+        stock_id: int,
+        limit: int = 10,
+        signal_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        return await self.signal_repo.get_recent_signals(
+            db,
+            stock_id=stock_id,
+            limit=limit,
+            signal_type=signal_type
+        )
+
+    async def list_signals(
+        self,
+        db: AsyncSession,
+        filters: Optional[Dict[str, Any]] = None,
+        market: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        return await self.signal_repo.list_signals(
+            db,
+            filters=filters,
+            market=market,
+            offset=offset,
+            limit=limit
+        )
+
+    async def count_signals(
+        self,
+        db: AsyncSession,
+        filters: Optional[Dict[str, Any]] = None,
+        market: Optional[str] = None
+    ) -> int:
+        return await self.signal_repo.count_signals(db, filters=filters, market=market)
+
+    async def get_signal_stats(
+        self,
+        db: AsyncSession,
+        filters: Optional[Dict[str, Any]] = None,
+        market: Optional[str] = None
+    ) -> Dict[str, Any]:
+        return await self.signal_repo.get_signal_stats(db, filters=filters, market=market)
+
+    async def get_detailed_signal_stats(
+        self,
+        db: AsyncSession,
+        filters: Optional[Dict[str, Any]] = None,
+        market: Optional[str] = None
+    ) -> Dict[str, Any]:
+        return await self.signal_repo.get_detailed_signal_stats(db, filters=filters, market=market)
+
+    async def create_signal(
+        self,
+        db: AsyncSession,
+        signal_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return await self.signal_repo.create_signal(db, signal_data)
+
+    async def delete_signal(self, db: AsyncSession, signal_id: int) -> None:
+        await self.signal_repo.delete_signal(db, signal_id)
+
+    async def get_signal(self, db: AsyncSession, signal_id: int) -> Optional[Dict[str, Any]]:
+        return await self.signal_repo.get_signal(db, signal_id)
+
     async def get_signal_performance(
         self,
         db: AsyncSession,
@@ -313,6 +383,61 @@ class TradingSignalService:
             "sharpe_ratio": 1.45,
             "max_drawdown": 0.08
         }
+
+    async def get_price_history(
+        self,
+        db: AsyncSession,
+        stock_id: int,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        prices = await self.price_repo.get_by_stock(db, stock_id, limit=limit)
+
+        return [
+            {
+                "date": price.date.isoformat(),
+                "open": float(price.open_price),
+                "high": float(price.high_price),
+                "low": float(price.low_price),
+                "close": float(price.close_price),
+                "volume": price.volume,
+            }
+            for price in prices
+        ]
+
+    async def get_indicator_history(
+        self,
+        db: AsyncSession,
+        stock_id: int,
+        limit: int = 50
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        cache_key = self.cache.get_cache_key(
+            "indicator_history",
+            stock_id=stock_id,
+            limit=limit,
+        )
+
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        indicators: Dict[str, List[Dict[str, Any]]] = {}
+
+        await self.cache.set(cache_key, indicators, ttl=60)
+        return indicators
+
+    async def get_signal_history(
+        self,
+        db: AsyncSession,
+        stock_id: int,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        signals = await self.signal_repo.list_signals(
+            db,
+            filters={"stock_id": stock_id},
+            limit=limit,
+        )
+
+        return signals
 
     async def _detect_golden_death_cross(self, prices: List) -> List[TradingSignal]:
         """檢測黃金交叉和死亡交叉信號"""

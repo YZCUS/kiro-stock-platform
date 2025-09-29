@@ -6,9 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Any
 
-from core.database import get_db_session
-from services.data.validation import data_validation_service
-from models.repositories.crud_stock import stock_crud
+from app.dependencies import (
+    get_database_session,
+    get_stock_service,
+    get_data_validation_service_clean
+)
+from domain.services.data_validation_service import DataValidationService
+from domain.services.stock_service import StockService
 
 router = APIRouter()
 
@@ -16,29 +20,31 @@ router = APIRouter()
 @router.get("/{stock_id}/validate", response_model=Dict[str, Any])
 async def validate_stock_data(
     stock_id: int,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    validation_service: DataValidationService = Depends(get_data_validation_service_clean)
 ):
     """
     驗證股票數據完整性和質量
     """
     try:
         # 檢查股票是否存在
-        stock = await stock_crud.get(db, stock_id)
-        if not stock:
-            raise HTTPException(status_code=404, detail="股票不存在")
+        stock = await stock_service.get_stock_by_id(db, stock_id)
 
-        # 執行數據驗證
-        validation_result = await data_validation_service.validate_stock_data(
-            db, stock_id=stock_id
-        )
+        report = await validation_service.validate_stock_data(db, stock_id)
 
         return {
-            "stock_id": stock_id,
-            "symbol": stock.symbol,
-            "validation_result": validation_result,
-            "is_valid": validation_result.get("is_valid", False),
-            "issues_found": len(validation_result.get("issues", [])),
-            "recommendations": validation_result.get("recommendations", [])
+            "stock_id": report.stock_id,
+            "symbol": report.symbol,
+            "market": report.market,
+            "quality_score": report.quality_score,
+            "is_valid": report.is_valid,
+            "total_records": report.total_records,
+            "issues": [
+                {"message": issue.message, "context": issue.context}
+                for issue in report.issues
+            ],
+            "recommendations": report.recommendations
         }
 
     except HTTPException:

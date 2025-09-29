@@ -4,17 +4,18 @@ Redis 快取工具
 import redis
 import json
 from typing import Optional, List, Dict, Any
-from core.config import settings
+from app.settings import settings
 
 
 # Redis 連接配置
 try:
     redis_client = redis.Redis(
-        host=getattr(settings, 'REDIS_HOST', 'localhost'),
-        port=getattr(settings, 'REDIS_PORT', 6379),
-        db=getattr(settings, 'REDIS_DB', 0),
+        host=settings.redis.host,
+        port=settings.redis.port,
+        db=settings.redis.db,
+        password=settings.redis.password,
         decode_responses=True,
-        socket_timeout=5
+        socket_timeout=settings.redis.socket_timeout
     )
     # 測試連接
     redis_client.ping()

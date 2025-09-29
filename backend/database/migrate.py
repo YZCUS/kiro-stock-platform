@@ -13,7 +13,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from alembic.config import Config
 from alembic import command
 from sqlalchemy.ext.asyncio import create_async_engine
-from core.config import settings
+from app.settings import settings
 from core.database import Base
 import logging
 
@@ -27,7 +27,7 @@ class DatabaseManager:
     def __init__(self):
         self.alembic_cfg = Config("alembic.ini")
         self.engine = create_async_engine(
-            settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
+            settings.database.url.replace("postgresql://", "postgresql+asyncpg://"),
             echo=True
         )
     

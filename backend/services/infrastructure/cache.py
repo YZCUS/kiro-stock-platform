@@ -9,7 +9,7 @@ from dataclasses import dataclass, asdict
 import logging
 
 from core.redis import redis_client
-from core.config import settings
+from app.settings import settings
 from models.domain.technical_indicator import TechnicalIndicator
 from models.repositories.crud_technical_indicator import technical_indicator_crud
 
@@ -45,7 +45,7 @@ class IndicatorCacheService:
     
     def __init__(self):
         self.cache_prefix = "indicator"
-        self.default_expire = settings.CACHE_EXPIRE_SECONDS
+        self.default_expire = settings.redis.default_ttl
         self.hit_count = 0
         self.miss_count = 0
     

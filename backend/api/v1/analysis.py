@@ -1,35 +1,41 @@
 """
 分析相關API端點
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional, Dict, Any
-from datetime import date, datetime
-from pydantic import BaseModel
+from datetime import datetime, date
 from enum import Enum
 
-from core.database import get_db_session
-from services.analysis.technical_analysis import technical_analysis_service, IndicatorType
-from services.analysis.signal_detector import trading_signal_detector, SignalType, SignalStrength
-from models.repositories.crud_stock import stock_crud
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
+
+from app.dependencies import (
+    get_database_session,
+    get_stock_service,
+    get_technical_analysis_service_clean,
+    get_trading_signal_service_clean,
+)
+from domain.services.technical_analysis_service import IndicatorType
+from domain.services.trading_signal_service import SignalType, TradingSignalService
+from domain.services.technical_analysis_service import TechnicalAnalysisService
+from domain.services.stock_service import StockService
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 
 
-# Pydantic模型
 class IndicatorTypeEnum(str, Enum):
-    SMA = "SMA"
-    EMA = "EMA"
     RSI = "RSI"
+    SMA = "SMA_20"
+    EMA = "EMA_12"
     MACD = "MACD"
-    BOLLINGER = "BOLLINGER"
-    STOCHASTIC = "STOCHASTIC"
+    BOLLINGER = "BB_UPPER"
+    STOCHASTIC = "KD_K"
 
 
 class SignalTypeEnum(str, Enum):
-    BUY = "BUY"
-    SELL = "SELL"
-    HOLD = "HOLD"
+    BUY = "buy"
+    SELL = "sell"
+    HOLD = "hold"
 
 
 class TechnicalAnalysisRequest(BaseModel):
@@ -56,7 +62,7 @@ class SignalResponse(BaseModel):
     symbol: str
     signal_type: str
     strength: str
-    price: float
+    price: Optional[float]
     timestamp: datetime
     indicators: Dict[str, Any]
 
@@ -64,36 +70,36 @@ class SignalResponse(BaseModel):
 @router.post("/technical-analysis", response_model=TechnicalAnalysisResponse)
 async def calculate_technical_indicator(
     request: TechnicalAnalysisRequest,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    technical_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean),
 ):
-    """
-    計算技術指標
-    """
     try:
-        # 檢查股票是否存在
-        stock = await stock_crud.get(db, request.stock_id)
-        if not stock:
-            raise HTTPException(status_code=404, detail="股票不存在")
-        
-        # 計算技術指標
-        indicator_type = IndicatorType(request.indicator.value)
-        result = await technical_analysis_service.calculate_indicator(
-            db, request.stock_id, indicator_type, request.days
+        await stock_service.get_stock_by_id(db, request.stock_id)
+
+        indicator = IndicatorType(request.indicator.value)
+        result = await technical_service.calculate_indicator(
+            db,
+            stock_id=request.stock_id,
+            indicator=indicator,
+            days=request.days,
         )
-        
-        if not result:
-            raise HTTPException(status_code=404, detail="無法計算技術指標，可能缺少足夠的數據")
-        
+
+        values = [
+            {"date": date, "value": value}
+            for date, value in zip(result["dates"], result["values"])
+        ]
+
         return TechnicalAnalysisResponse(
             stock_id=request.stock_id,
             indicator=request.indicator.value,
-            values=result.values,
-            summary=result.summary,
-            timestamp=datetime.now()
+            values=values,
+            summary=result["summary"],
+            timestamp=datetime.now(),
         )
-    
-    except HTTPException:
-        raise
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"技術分析計算失敗: {str(e)}")
 
@@ -102,43 +108,49 @@ async def calculate_technical_indicator(
 async def get_all_technical_indicators(
     stock_id: int,
     days: int = Query(30, description="計算天數"),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    technical_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean),
 ):
-    """
-    取得股票的所有技術指標
-    """
     try:
-        # 檢查股票是否存在
-        stock = await stock_crud.get(db, stock_id)
-        if not stock:
-            raise HTTPException(status_code=404, detail="股票不存在")
-        
-        # 計算所有指標
-        indicators = [IndicatorType.SMA, IndicatorType.EMA, IndicatorType.RSI, IndicatorType.MACD]
-        results = []
-        
-        for indicator_type in indicators:
+        await stock_service.get_stock_by_id(db, stock_id)
+
+        indicators = [
+            IndicatorType.RSI,
+            IndicatorType.SMA_20,
+            IndicatorType.EMA_12,
+            IndicatorType.MACD,
+        ]
+
+        responses: List[TechnicalAnalysisResponse] = []
+        for indicator in indicators:
             try:
-                result = await technical_analysis_service.calculate_indicator(
-                    db, stock_id, indicator_type, days
+                result = await technical_service.calculate_indicator(
+                    db,
+                    stock_id=stock_id,
+                    indicator=indicator,
+                    days=days,
                 )
-                
-                if result:
-                    results.append(TechnicalAnalysisResponse(
+                values = [
+                    {"date": date, "value": value}
+                    for date, value in zip(result["dates"], result["values"])
+                ]
+                responses.append(
+                    TechnicalAnalysisResponse(
                         stock_id=stock_id,
-                        indicator=indicator_type.value,
-                        values=result.values,
-                        summary=result.summary,
-                        timestamp=datetime.now()
-                    ))
-            except Exception as e:
-                # 記錄錯誤但繼續處理其他指標
-                print(f"計算 {indicator_type.value} 指標時發生錯誤: {str(e)}")
-        
-        return results
-    
-    except HTTPException:
-        raise
+                        indicator=indicator.value,
+                        values=values,
+                        summary=result["summary"],
+                        timestamp=datetime.now(),
+                    )
+                )
+            except Exception:
+                continue
+
+        return responses
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"取得技術指標失敗: {str(e)}")
 
@@ -146,40 +158,42 @@ async def get_all_technical_indicators(
 @router.post("/signals", response_model=List[SignalResponse])
 async def detect_trading_signals(
     request: SignalDetectionRequest,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    signal_service: TradingSignalService = Depends(get_trading_signal_service_clean),
 ):
-    """
-    偵測交易信號
-    """
     try:
-        # 檢查股票是否存在
-        stock = await stock_crud.get(db, request.stock_id)
-        if not stock:
-            raise HTTPException(status_code=404, detail="股票不存在")
-        
-        # 偵測信號
-        all_signals = []
+        stock = await stock_service.get_stock_by_id(db, request.stock_id)
+
+        signals = []
         for signal_type_enum in request.signal_types:
             signal_type = SignalType(signal_type_enum.value)
-            signals = await trading_signal_detector.detect_signals(
-                db, request.stock_id, signal_type
+            signal_analysis = await signal_service.generate_trading_signals(
+                db,
+                stock_id=request.stock_id,
             )
-            
-            for signal in signals:
-                all_signals.append(SignalResponse(
+            if signal_analysis.primary_signal:
+                signals.append(signal_analysis.primary_signal)
+            signals.extend(signal_analysis.supporting_signals)
+
+        responses: List[SignalResponse] = []
+        for signal in signals:
+            responses.append(
+                SignalResponse(
                     stock_id=request.stock_id,
                     symbol=stock.symbol,
                     signal_type=signal.signal_type.value,
-                    strength=signal.strength.value,
-                    price=float(signal.price),
-                    timestamp=signal.timestamp,
-                    indicators=signal.indicators
-                ))
-        
-        return all_signals
-    
-    except HTTPException:
-        raise
+                    strength=signal.signal_strength.value,
+                    price=float(signal.metadata.get("price", 0)) if signal.metadata else None,
+                    timestamp=signal.signal_date,
+                    indicators=signal.metadata or {},
+                )
+            )
+
+        return responses
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"信號偵測失敗: {str(e)}")
 
@@ -189,45 +203,37 @@ async def get_stock_signals(
     stock_id: int,
     signal_type: Optional[SignalTypeEnum] = Query(None, description="信號類型"),
     limit: int = Query(10, description="返回數量限制"),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    signal_service: TradingSignalService = Depends(get_trading_signal_service_clean),
 ):
-    """
-    取得股票的交易信號
-    """
     try:
-        # 檢查股票是否存在
-        stock = await stock_crud.get(db, stock_id)
-        if not stock:
-            raise HTTPException(status_code=404, detail="股票不存在")
-        
-        # 取得信號
-        if signal_type:
-            signal_types = [SignalType(signal_type.value)]
-        else:
-            signal_types = [SignalType.BUY, SignalType.SELL, SignalType.HOLD]
-        
-        all_signals = []
-        for st in signal_types:
-            signals = await trading_signal_detector.detect_signals(db, stock_id, st)
-            
-            for signal in signals[:limit]:  # 限制每種類型的數量
-                all_signals.append(SignalResponse(
-                    stock_id=stock_id,
-                    symbol=stock.symbol,
-                    signal_type=signal.signal_type.value,
-                    strength=signal.strength.value,
-                    price=float(signal.price),
-                    timestamp=signal.timestamp,
-                    indicators=signal.indicators
-                ))
-        
-        # 按時間排序
-        all_signals.sort(key=lambda x: x.timestamp, reverse=True)
-        
-        return all_signals[:limit]
-    
-    except HTTPException:
-        raise
+        stock = await stock_service.get_stock_by_id(db, stock_id)
+
+        recent_signals = await signal_service.get_recent_signals(
+            db,
+            stock_id=stock_id,
+            limit=limit,
+            signal_type=signal_type.value if signal_type else None,
+        )
+
+        responses = [
+            SignalResponse(
+                stock_id=stock_id,
+                symbol=stock.symbol,
+                signal_type=signal.get("signal_type", ""),
+                strength=signal.get("signal_strength", ""),
+                price=signal.get("price"),
+                timestamp=signal.get("created_at", datetime.now()),
+                indicators=signal.get("metadata", {}),
+            )
+            for signal in recent_signals
+        ]
+
+        return responses
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"取得交易信號失敗: {str(e)}")
 
@@ -238,47 +244,50 @@ async def batch_technical_analysis(
     indicator: IndicatorTypeEnum = Query(IndicatorTypeEnum.RSI, description="技術指標"),
     days: int = Query(30, description="計算天數"),
     limit: int = Query(20, description="股票數量限制"),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    technical_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean),
 ):
-    """
-    批次技術分析
-    """
     try:
-        # 取得股票清單
-        stocks = await stock_crud.get_multi(db, limit=limit)
-        if market:
-            stocks = [stock for stock in stocks if stock.market == market]
-        
-        # 批次計算指標
+        stock_list = await stock_service.get_stock_list(
+            db,
+            market=market,
+            is_active=True,
+            page=1,
+            per_page=limit,
+        )
+
         results = []
         indicator_type = IndicatorType(indicator.value)
-        
-        for stock in stocks:
+
+        for item in stock_list["items"]:
             try:
-                result = await technical_analysis_service.calculate_indicator(
-                    db, stock.id, indicator_type, days
+                result = await technical_service.calculate_indicator(
+                    db,
+                    stock_id=item["id"],
+                    indicator=indicator_type,
+                    days=days,
                 )
-                
-                if result:
-                    results.append({
-                        'stock_id': stock.id,
-                        'symbol': stock.symbol,
-                        'market': stock.market,
-                        'indicator': indicator.value,
-                        'current_value': result.summary.get('current_value'),
-                        'trend': result.summary.get('trend'),
-                        'signal': result.summary.get('signal')
-                    })
-            except Exception as e:
-                print(f"分析股票 {stock.symbol} 時發生錯誤: {str(e)}")
-        
+                results.append(
+                    {
+                        "stock_id": item["id"],
+                        "symbol": item["symbol"],
+                        "market": item["market"],
+                        "indicator": indicator.value,
+                        "current_value": result["summary"].get("current_value"),
+                        "trend": result["summary"].get("trend"),
+                    }
+                )
+            except Exception:
+                continue
+
         return {
-            'indicator': indicator.value,
-            'total_analyzed': len(results),
-            'results': results,
-            'timestamp': datetime.now().isoformat()
+            "indicator": indicator.value,
+            "total_analyzed": len(results),
+            "results": results,
+            "timestamp": datetime.now().isoformat(),
         }
-    
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"批次技術分析失敗: {str(e)}")
 
@@ -286,50 +295,47 @@ async def batch_technical_analysis(
 @router.get("/market-overview", response_model=Dict[str, Any])
 async def get_market_overview(
     market: Optional[str] = Query(None, description="市場代碼"),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    signal_service: TradingSignalService = Depends(get_trading_signal_service_clean),
 ):
-    """
-    取得市場概覽
-    """
     try:
-        # 取得股票清單
-        stocks = await stock_crud.get_multi(db, limit=50)
-        if market:
-            stocks = [stock for stock in stocks if stock.market == market]
-        
-        # 統計信號分佈
-        signal_stats = {'BUY': 0, 'SELL': 0, 'HOLD': 0}
+        stocks = await stock_service.get_stock_list(
+            db,
+            market=market,
+            is_active=True,
+            page=1,
+            per_page=50,
+        )
+
+        signal_stats = {"BUY": 0, "SELL": 0, "HOLD": 0}
         analyzed_stocks = 0
-        
-        for stock in stocks[:20]:  # 限制分析數量
+
+        for item in stocks["items"][:20]:
             try:
-                # 快速信號檢測
-                buy_signals = await trading_signal_detector.detect_signals(
-                    db, stock.id, SignalType.BUY
-                )
-                sell_signals = await trading_signal_detector.detect_signals(
-                    db, stock.id, SignalType.SELL
-                )
-                
-                if buy_signals:
-                    signal_stats['BUY'] += 1
-                elif sell_signals:
-                    signal_stats['SELL'] += 1
-                else:
-                    signal_stats['HOLD'] += 1
-                
-                analyzed_stocks += 1
-                
-            except Exception as e:
-                print(f"分析股票 {stock.symbol} 信號時發生錯誤: {str(e)}")
-        
+                analysis = await signal_service.generate_trading_signals(db, item["id"]) 
+                if analysis.primary_signal:
+                    signal_type = analysis.primary_signal.signal_type.value.upper()
+                    signal_stats[signal_type] = signal_stats.get(signal_type, 0) + 1
+                    analyzed_stocks += 1
+            except Exception:
+                continue
+
+        total_signal = signal_stats["BUY"] + signal_stats["SELL"]
+        if total_signal == 0:
+            sentiment = "neutral"
+        else:
+            buy_ratio = signal_stats["BUY"] / total_signal
+            sentiment = "bullish" if buy_ratio > 0.6 else "bearish" if buy_ratio < 0.4 else "neutral"
+
         return {
-            'market': market or 'ALL',
-            'total_stocks': len(stocks),
-            'analyzed_stocks': analyzed_stocks,
-            'signal_distribution': signal_stats,
-            'timestamp': datetime.now().isoformat()
+            "market": market or "ALL",
+            "total_stocks": stocks["total"],
+            "analyzed_stocks": analyzed_stocks,
+            "signal_distribution": signal_stats,
+            "market_sentiment": sentiment,
+            "timestamp": datetime.now().isoformat(),
         }
-    
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"取得市場概覽失敗: {str(e)}")

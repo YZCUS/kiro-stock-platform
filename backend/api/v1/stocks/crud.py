@@ -2,18 +2,19 @@
 股票CRUD操作相關API端點
 負責: POST /, PUT /{stock_id}, DELETE /{stock_id}, /batch
 """
+from typing import Dict, Any, List
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Dict, Any
 
-from core.database import get_db_session
-from models.repositories.crud_stock import stock_crud
+from app.dependencies import get_database_session, get_stock_service
 from api.schemas.stocks import (
     StockResponse,
     StockCreateRequest,
     StockUpdateRequest,
     StockBatchCreateRequest
 )
+from domain.services.stock_service import StockService
 
 router = APIRouter()
 
@@ -21,22 +22,14 @@ router = APIRouter()
 @router.post("/", response_model=StockResponse)
 async def create_stock(
     stock: StockCreateRequest,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service)
 ):
     """
     創建新股票
     """
     try:
-        # 檢查股票是否已存在
-        existing_stock = await stock_crud.get_by_symbol(db, symbol=stock.symbol)
-        if existing_stock:
-            raise HTTPException(
-                status_code=400,
-                detail=f"股票代號 {stock.symbol} 已存在"
-            )
-
-        # 創建股票
-        created_stock = await stock_crud.create(db, obj_in=stock)
+        created_stock = await stock_service.create_stock(db, stock)
         return StockResponse.model_validate(created_stock)
 
     except HTTPException:
@@ -49,19 +42,14 @@ async def create_stock(
 async def update_stock(
     stock_id: int,
     stock_update: StockUpdateRequest,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service)
 ):
     """
     更新股票資訊
     """
     try:
-        # 檢查股票是否存在
-        stock = await stock_crud.get(db, stock_id)
-        if not stock:
-            raise HTTPException(status_code=404, detail="股票不存在")
-
-        # 更新股票
-        updated_stock = await stock_crud.update(db, db_obj=stock, obj_in=stock_update)
+        updated_stock = await stock_service.update_stock(db, stock_id, stock_update)
         return StockResponse.model_validate(updated_stock)
 
     except HTTPException:
@@ -73,21 +61,14 @@ async def update_stock(
 @router.delete("/{stock_id}")
 async def delete_stock(
     stock_id: int,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service)
 ):
     """
     刪除股票
     """
     try:
-        # 檢查股票是否存在
-        stock = await stock_crud.get(db, stock_id)
-        if not stock:
-            raise HTTPException(status_code=404, detail="股票不存在")
-
-        # 刪除股票
-        await stock_crud.remove(db, id=stock_id)
-
-        return {"message": f"股票 {stock.symbol} 已刪除"}
+        return await stock_service.delete_stock(db, stock_id)
 
     except HTTPException:
         raise
@@ -98,49 +79,19 @@ async def delete_stock(
 @router.post("/batch", response_model=Dict[str, Any])
 async def create_stocks_batch(
     request: StockBatchCreateRequest,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service)
 ):
     """
     批次創建股票
     """
     try:
-        created_stocks = []
-        failed_stocks = []
-        skipped_stocks = []
+        result = await stock_service.create_stocks_batch(db, request.stocks)
 
-        for stock_data in request.stocks:
-            try:
-                # 檢查股票是否已存在
-                existing_stock = await stock_crud.get_by_symbol(
-                    db, symbol=stock_data.symbol
-                )
-                if existing_stock:
-                    skipped_stocks.append({
-                        "symbol": stock_data.symbol,
-                        "reason": "股票已存在"
-                    })
-                    continue
+        created_items = [StockResponse.model_validate(item) for item in result["created_stocks"]]
+        result["created_stocks"] = [item.model_dump() for item in created_items]
 
-                # 創建股票
-                created_stock = await stock_crud.create(db, obj_in=stock_data)
-                created_stocks.append(StockResponse.model_validate(created_stock))
-
-            except Exception as e:
-                failed_stocks.append({
-                    "symbol": stock_data.symbol,
-                    "error": str(e)
-                })
-
-        return {
-            "success": True,
-            "created": len(created_stocks),
-            "skipped": len(skipped_stocks),
-            "failed": len(failed_stocks),
-            "created_stocks": created_stocks,
-            "skipped_stocks": skipped_stocks,
-            "failed_stocks": failed_stocks,
-            "message": f"批次處理完成：創建 {len(created_stocks)} 隻，跳過 {len(skipped_stocks)} 隻，失敗 {len(failed_stocks)} 隻"
-        }
+        return result
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"批次創建失敗: {str(e)}")

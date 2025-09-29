@@ -73,32 +73,22 @@ class PriceHistoryRepository(IPriceHistoryRepository):
         self,
         db: AsyncSession,
         stock_id: int,
-        days: int = 30
-    ) -> Tuple[float, float]:
-        """取得指定天數內的股票價格範圍 (最高價, 最低價)"""
-        from datetime import datetime, timedelta
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        limit: int = 1000
+    ) -> List[PriceHistory]:
+        """取得指定日期範圍內的價格數據"""
+        query = select(PriceHistory).where(PriceHistory.stock_id == stock_id)
 
-        end_date = datetime.now().date()
-        start_date = end_date - timedelta(days=days)
+        if start_date:
+            query = query.where(PriceHistory.date >= start_date)
+        if end_date:
+            query = query.where(PriceHistory.date <= end_date)
 
-        result = await db.execute(
-            select(
-                func.max(PriceHistory.high_price).label('max_high'),
-                func.min(PriceHistory.low_price).label('min_low')
-            )
-            .where(
-                and_(
-                    PriceHistory.stock_id == stock_id,
-                    PriceHistory.date >= start_date,
-                    PriceHistory.date <= end_date
-                )
-            )
-        )
+        query = query.order_by(desc(PriceHistory.date)).limit(limit)
 
-        row = result.first()
-        if row and row.max_high and row.min_low:
-            return float(row.max_high), float(row.min_low)
-        return 0.0, 0.0
+        result = await db.execute(query)
+        return result.scalars().all()
 
     async def create_batch(
         self,

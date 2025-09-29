@@ -4,18 +4,11 @@
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional, Dict, Any
-from datetime import date
+from typing import Optional
 
 from app.dependencies import (
     get_database_session,
     get_trading_signal_service_clean,
-    get_cache_service
-)
-
-from api.schemas.common import (
-    SuccessResponse,
-    ErrorResponse
 )
 
 router = APIRouter()
@@ -36,20 +29,18 @@ async def generate_trading_signals(
             analysis_days=analysis_days
         )
 
-        # 轉換為API回應格式
         response = {
             "stock_id": analysis.stock_id,
             "symbol": analysis.symbol,
-            "analysis_date": analysis.analysis_date.isoformat(),
+            "analysis_date": analysis.analysis_date,
             "signals_generated": analysis.signals_generated,
             "primary_signal": None,
             "supporting_signals": [],
             "risk_score": analysis.risk_score,
             "recommendation": analysis.recommendation,
-            "reasoning": analysis.reasoning
+            "reasoning": analysis.reasoning,
         }
 
-        # 處理主要信號
         if analysis.primary_signal:
             response["primary_signal"] = {
                 "signal_type": analysis.primary_signal.signal_type.value,
@@ -58,18 +49,19 @@ async def generate_trading_signals(
                 "confidence": analysis.primary_signal.confidence,
                 "target_price": analysis.primary_signal.target_price,
                 "stop_loss": analysis.primary_signal.stop_loss,
-                "description": analysis.primary_signal.description
+                "description": analysis.primary_signal.description,
             }
 
-        # 處理支持信號
-        for signal in analysis.supporting_signals:
-            response["supporting_signals"].append({
+        response["supporting_signals"] = [
+            {
                 "signal_type": signal.signal_type.value,
                 "signal_strength": signal.signal_strength.value,
                 "signal_source": signal.signal_source.value,
                 "confidence": signal.confidence,
-                "description": signal.description
-            })
+                "description": signal.description,
+            }
+            for signal in analysis.supporting_signals
+        ]
 
         return response
 
@@ -94,10 +86,8 @@ async def scan_market_signals(
             min_confidence=min_confidence
         )
 
-        # 轉換高信心信號為API格式
-        high_confidence_signals = []
-        for signal in portfolio_signals.high_confidence_signals:
-            high_confidence_signals.append({
+        high_confidence_signals = [
+            {
                 "stock_id": signal.stock_id,
                 "symbol": signal.symbol,
                 "signal_type": signal.signal_type.value,
@@ -106,18 +96,20 @@ async def scan_market_signals(
                 "confidence": signal.confidence,
                 "target_price": signal.target_price,
                 "stop_loss": signal.stop_loss,
-                "description": signal.description
-            })
+                "description": signal.description,
+            }
+            for signal in portfolio_signals.high_confidence_signals
+        ]
 
         return {
-            "analysis_date": portfolio_signals.analysis_date.isoformat(),
+            "analysis_date": portfolio_signals.analysis_date,
             "total_stocks_analyzed": portfolio_signals.total_stocks_analyzed,
             "buy_signals": portfolio_signals.buy_signals,
             "sell_signals": portfolio_signals.sell_signals,
             "hold_signals": portfolio_signals.hold_signals,
             "high_confidence_signals": high_confidence_signals,
             "risk_alerts": portfolio_signals.risk_alerts,
-            "market_sentiment": portfolio_signals.market_sentiment
+            "market_sentiment": portfolio_signals.market_sentiment,
         }
 
     except Exception as e:

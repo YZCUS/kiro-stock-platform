@@ -6,17 +6,17 @@ try:
     from pydantic_settings import BaseSettings
 except ImportError:
     from pydantic import BaseSettings
-from pydantic import Field
+from pydantic import Field, model_validator
+from urllib.parse import urlparse
 from typing import Optional
-import os
 
 
 class DatabaseSettings(BaseSettings):
     """資料庫設定"""
-    url: str = Field(..., env="DATABASE_URL")
-    echo: bool = Field(False, env="DATABASE_ECHO")
-    pool_size: int = Field(10, env="DATABASE_POOL_SIZE")
-    max_overflow: int = Field(20, env="DATABASE_MAX_OVERFLOW")
+    url: str = Field(..., env="URL")
+    echo: bool = Field(False, env="ECHO")
+    pool_size: int = Field(10, env="POOL_SIZE")
+    max_overflow: int = Field(20, env="MAX_OVERFLOW")
 
     class Config:
         env_prefix = "DATABASE_"
@@ -24,16 +24,16 @@ class DatabaseSettings(BaseSettings):
 
 class RedisSettings(BaseSettings):
     """Redis 設定"""
-    host: str = Field("localhost", env="REDIS_HOST")
-    port: int = Field(6379, env="REDIS_PORT")
-    db: int = Field(0, env="REDIS_DB")
-    password: Optional[str] = Field(None, env="REDIS_PASSWORD")
-    socket_timeout: int = Field(5, env="REDIS_SOCKET_TIMEOUT")
+    host: str = Field("localhost", env="HOST")
+    port: int = Field(6379, env="PORT")
+    db: int = Field(0, env="DB")
+    password: Optional[str] = Field(None, env="PASSWORD")
+    socket_timeout: int = Field(5, env="SOCKET_TIMEOUT")
 
     # Cache TTL 設定
-    default_ttl: int = Field(300, env="REDIS_DEFAULT_TTL")  # 5分鐘
-    stock_list_ttl: int = Field(1800, env="REDIS_STOCK_LIST_TTL")  # 30分鐘
-    price_data_ttl: int = Field(600, env="REDIS_PRICE_DATA_TTL")  # 10分鐘
+    default_ttl: int = Field(300, env="DEFAULT_TTL")  # 5分鐘
+    stock_list_ttl: int = Field(1800, env="STOCK_LIST_TTL")  # 30分鐘
+    price_data_ttl: int = Field(600, env="PRICE_DATA_TTL")  # 10分鐘
 
     class Config:
         env_prefix = "REDIS_"
@@ -66,14 +66,14 @@ class SecuritySettings(BaseSettings):
 
 class LoggingSettings(BaseSettings):
     """日誌設定"""
-    level: str = Field("INFO", env="LOG_LEVEL")
+    level: str = Field("INFO", env="LEVEL")
     format: str = Field(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        env="LOG_FORMAT"
+        env="FORMAT"
     )
-    file_path: Optional[str] = Field(None, env="LOG_FILE_PATH")
-    max_file_size: int = Field(10485760, env="LOG_MAX_FILE_SIZE")  # 10MB
-    backup_count: int = Field(5, env="LOG_BACKUP_COUNT")
+    file_path: Optional[str] = Field(None, env="FILE_PATH")
+    max_file_size: int = Field(10485760, env="MAX_FILE_SIZE")  # 10MB
+    backup_count: int = Field(5, env="BACKUP_COUNT")
 
     class Config:
         env_prefix = "LOG_"
@@ -81,8 +81,8 @@ class LoggingSettings(BaseSettings):
 
 class ApplicationSettings(BaseSettings):
     """主應用程式設定"""
-    app_name: str = Field("Kiro Stock Platform", env="APP_NAME")
-    app_version: str = Field("1.0.0", env="APP_VERSION")
+    app_name: str = Field("Kiro Stock Platform", env="NAME")
+    app_version: str = Field("1.0.0", env="VERSION")
     debug: bool = Field(False, env="DEBUG")
     environment: str = Field("development", env="ENVIRONMENT")
 
@@ -109,6 +109,118 @@ class Settings(BaseSettings):
     security: SecuritySettings = SecuritySettings()
     logging: LoggingSettings = LoggingSettings()
     app: ApplicationSettings = ApplicationSettings()
+
+    # Legacy flat keys for backward compatibility
+    DATABASE_URL: Optional[str] = Field(None, alias="DATABASE_URL")
+    DATABASE_ECHO: Optional[bool] = Field(None, alias="DATABASE_ECHO")
+    DATABASE_POOL_SIZE: Optional[int] = Field(None, alias="DATABASE_POOL_SIZE")
+    DATABASE_MAX_OVERFLOW: Optional[int] = Field(None, alias="DATABASE_MAX_OVERFLOW")
+
+    REDIS_URL: Optional[str] = Field(None, alias="REDIS_URL")
+    REDIS_HOST: Optional[str] = Field(None, alias="REDIS_HOST")
+    REDIS_PORT: Optional[int] = Field(None, alias="REDIS_PORT")
+    REDIS_DB: Optional[int] = Field(None, alias="REDIS_DB")
+    REDIS_PASSWORD: Optional[str] = Field(None, alias="REDIS_PASSWORD")
+    REDIS_SOCKET_TIMEOUT: Optional[int] = Field(None, alias="REDIS_SOCKET_TIMEOUT")
+    REDIS_DEFAULT_TTL: Optional[int] = Field(None, alias="REDIS_DEFAULT_TTL")
+    REDIS_STOCK_LIST_TTL: Optional[int] = Field(None, alias="REDIS_STOCK_LIST_TTL")
+    REDIS_PRICE_DATA_TTL: Optional[int] = Field(None, alias="REDIS_PRICE_DATA_TTL")
+
+    SECRET_KEY: Optional[str] = Field(None, alias="SECRET_KEY")
+    JWT_ALGORITHM: Optional[str] = Field(None, alias="JWT_ALGORITHM")
+    ACCESS_TOKEN_EXPIRE_MINUTES: Optional[int] = Field(None, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    CACHE_EXPIRE_SECONDS: Optional[int] = Field(None, alias="CACHE_EXPIRE_SECONDS")
+
+    APP_NAME: Optional[str] = Field(None, alias="APP_NAME")
+    APP_VERSION: Optional[str] = Field(None, alias="APP_VERSION")
+    APP_DEBUG: Optional[bool] = Field(None, alias="APP_DEBUG")
+    APP_ENVIRONMENT: Optional[str] = Field(None, alias="APP_ENVIRONMENT")
+
+    LOG_LEVEL: Optional[str] = Field(None, alias="LOG_LEVEL")
+    LOG_FORMAT: Optional[str] = Field(None, alias="LOG_FORMAT")
+    LOG_FILE_PATH: Optional[str] = Field(None, alias="LOG_FILE_PATH")
+    LOG_MAX_FILE_SIZE: Optional[int] = Field(None, alias="LOG_MAX_FILE_SIZE")
+    LOG_BACKUP_COUNT: Optional[int] = Field(None, alias="LOG_BACKUP_COUNT")
+    ALLOWED_HOSTS: Optional[str] = Field(None, alias="ALLOWED_HOSTS")
+
+    @model_validator(mode="after")
+    def apply_legacy_overrides(cls, settings: "Settings") -> "Settings":
+        if settings.DATABASE_URL:
+            settings.database.url = settings.DATABASE_URL
+        if settings.DATABASE_ECHO is not None:
+            settings.database.echo = settings.DATABASE_ECHO
+        if settings.DATABASE_POOL_SIZE is not None:
+            settings.database.pool_size = settings.DATABASE_POOL_SIZE
+        if settings.DATABASE_MAX_OVERFLOW is not None:
+            settings.database.max_overflow = settings.DATABASE_MAX_OVERFLOW
+
+        if settings.REDIS_URL:
+            parsed = urlparse(settings.REDIS_URL)
+            settings.redis.host = parsed.hostname or settings.redis.host
+            if parsed.port:
+                settings.redis.port = parsed.port
+            if parsed.path and parsed.path.strip("/"):
+                try:
+                    settings.redis.db = int(parsed.path.strip("/"))
+                except ValueError:
+                    pass
+            if parsed.password:
+                settings.redis.password = parsed.password
+        if settings.REDIS_HOST:
+            settings.redis.host = settings.REDIS_HOST
+        if settings.REDIS_PORT is not None:
+            settings.redis.port = settings.REDIS_PORT
+        if settings.REDIS_DB is not None:
+            settings.redis.db = settings.REDIS_DB
+        if settings.REDIS_PASSWORD is not None:
+            settings.redis.password = settings.REDIS_PASSWORD
+        if settings.REDIS_SOCKET_TIMEOUT is not None:
+            settings.redis.socket_timeout = settings.REDIS_SOCKET_TIMEOUT
+        if settings.REDIS_DEFAULT_TTL is not None:
+            settings.redis.default_ttl = settings.REDIS_DEFAULT_TTL
+        if settings.REDIS_STOCK_LIST_TTL is not None:
+            settings.redis.stock_list_ttl = settings.REDIS_STOCK_LIST_TTL
+        if settings.REDIS_PRICE_DATA_TTL is not None:
+            settings.redis.price_data_ttl = settings.REDIS_PRICE_DATA_TTL
+
+        if settings.SECRET_KEY:
+            settings.security.secret_key = settings.SECRET_KEY
+        if settings.JWT_ALGORITHM:
+            settings.security.algorithm = settings.JWT_ALGORITHM
+        if settings.ACCESS_TOKEN_EXPIRE_MINUTES is not None:
+            settings.security.access_token_expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+        if settings.CACHE_EXPIRE_SECONDS is not None:
+            settings.redis.default_ttl = settings.CACHE_EXPIRE_SECONDS
+
+        if settings.APP_NAME:
+            settings.app.app_name = settings.APP_NAME
+        if settings.APP_VERSION:
+            settings.app.app_version = settings.APP_VERSION
+        if settings.APP_DEBUG is not None:
+            settings.app.debug = settings.APP_DEBUG
+        if settings.APP_ENVIRONMENT:
+            settings.app.environment = settings.APP_ENVIRONMENT
+
+        if settings.LOG_LEVEL:
+            settings.logging.level = settings.LOG_LEVEL
+        if settings.LOG_FORMAT:
+            settings.logging.format = settings.LOG_FORMAT
+        if settings.LOG_FILE_PATH is not None:
+            settings.logging.file_path = settings.LOG_FILE_PATH
+        if settings.LOG_MAX_FILE_SIZE is not None:
+            settings.logging.max_file_size = settings.LOG_MAX_FILE_SIZE
+        if settings.LOG_BACKUP_COUNT is not None:
+            settings.logging.backup_count = settings.LOG_BACKUP_COUNT
+
+        if settings.ALLOWED_HOSTS:
+            if ',' in settings.ALLOWED_HOSTS:
+                settings.ALLOWED_HOSTS = [host.strip() for host in settings.ALLOWED_HOSTS.split(',') if host.strip()]
+            else:
+                settings.ALLOWED_HOSTS = [settings.ALLOWED_HOSTS.strip()]
+        else:
+            settings.ALLOWED_HOSTS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+        return settings
 
     class Config:
         # 支援從 .env 檔案載入

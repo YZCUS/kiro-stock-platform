@@ -8,6 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends
 
 from app.settings import Settings, get_settings
+from infrastructure.cache.redis_cache_service import RedisCacheService, ICacheService
+from infrastructure.realtime.websocket_manager import (
+    IWebSocketManager,
+    RedisBackedWebSocketManager,
+    SimpleWebSocketManager,
+)
+from services.infrastructure.redis_pubsub import redis_broadcaster
 
 
 # =============================================================================
@@ -45,119 +52,43 @@ def get_redis_client(settings: Settings = Depends(get_settings)):
 
 
 # =============================================================================
-# 快取服務
+# 快取服務 (Clean Architecture)
 # =============================================================================
-
-class SimpleCacheService:
-    """簡化的快取服務 (過渡期使用)"""
-
-    def __init__(self, redis_client, redis_settings):
-        self.redis_client = redis_client
-        self.settings = redis_settings
-
-    def get_cache_key(self, prefix: str, **kwargs) -> str:
-        """生成快取鍵"""
-        key_parts = [prefix]
-        for key, value in kwargs.items():
-            if value is not None:
-                key_parts.append(f"{key}:{value}")
-        return ":".join(key_parts)
-
-    async def get(self, key: str):
-        """取得快取數據"""
-        if not self.redis_client:
-            return None
-        try:
-            import json
-            data = self.redis_client.get(key)
-            return json.loads(data) if data else None
-        except Exception:
-            return None
-
-    async def set(self, key: str, value, ttl: int = None):
-        """設置快取數據"""
-        if not self.redis_client:
-            return
-        try:
-            import json
-            ttl = ttl or self.settings.default_ttl
-            self.redis_client.setex(key, ttl, json.dumps(value, ensure_ascii=False))
-        except Exception:
-            pass
-
 
 def get_cache_service(
     settings: Settings = Depends(get_settings),
     redis_client=Depends(get_redis_client)
-) -> SimpleCacheService:
-    """取得快取服務"""
-    return SimpleCacheService(redis_client, settings.redis)
+) -> ICacheService:
+    """取得統一快取服務"""
+    return RedisCacheService(redis_client, settings.redis)
 
 
-# =============================================================================
-# Domain Services 依賴 (Clean Architecture實現)
-# =============================================================================
-
-def get_stock_service(
-    stock_repo: 'IStockRepository' = Depends(get_stock_repository),
-    price_repo: 'IPriceHistoryRepository' = Depends(get_price_history_repository_clean),
-    cache_service: SimpleCacheService = Depends(get_cache_service)
-) -> 'StockService':
-    """取得股票業務服務 (Clean Architecture版本)"""
-    from domain.services.stock_service import StockService
-
-    return StockService(stock_repo, price_repo, cache_service)
-
-def get_technical_analysis_service_clean(
-    stock_repo: 'IStockRepository' = Depends(get_stock_repository),
-    price_repo: 'IPriceHistoryRepository' = Depends(get_price_history_repository_clean),
-    cache_service: SimpleCacheService = Depends(get_cache_service)
-) -> 'TechnicalAnalysisService':
-    """取得技術分析服務 (Clean Architecture版本)"""
-    from domain.services.technical_analysis_service import TechnicalAnalysisService
-
-    return TechnicalAnalysisService(stock_repo, price_repo, cache_service)
-
-def get_data_collection_service_clean(
-    stock_repo: 'IStockRepository' = Depends(get_stock_repository),
-    price_repo: 'IPriceHistoryRepository' = Depends(get_price_history_repository_clean),
-    cache_service: SimpleCacheService = Depends(get_cache_service)
-) -> 'DataCollectionService':
-    """取得數據收集服務 (Clean Architecture版本)"""
-    from domain.services.data_collection_service import DataCollectionService
-
-    return DataCollectionService(stock_repo, price_repo, cache_service)
-
-def get_trading_signal_service_clean(
-    stock_repo: 'IStockRepository' = Depends(get_stock_repository),
-    price_repo: 'IPriceHistoryRepository' = Depends(get_price_history_repository_clean),
-    cache_service: SimpleCacheService = Depends(get_cache_service)
-) -> 'TradingSignalService':
-    """取得交易信號服務 (Clean Architecture版本)"""
-    from domain.services.trading_signal_service import TradingSignalService
-
-    return TradingSignalService(stock_repo, price_repo, cache_service)
-
-# =============================================================================
-# 現有服務的依賴 (逐步重構)
-# =============================================================================
-
-def get_technical_analysis_service():
-    """取得技術分析服務 (暫時保持現有實現)"""
-    from services.analysis.technical_analysis import TechnicalAnalysisService
-    return TechnicalAnalysisService()
+_websocket_manager_singleton: IWebSocketManager | None = None
 
 
-def get_data_collection_service():
-    """取得數據收集服務 (暫時保持現有實現)"""
-    from services.data.collection import data_collection_service
-    return data_collection_service
+def get_websocket_manager(settings: Settings | None = None) -> IWebSocketManager:
+    """取得全域 WebSocket 管理器實例，支援 DI 與外部呼叫"""
+    global _websocket_manager_singleton
+
+    if _websocket_manager_singleton is not None:
+        return _websocket_manager_singleton
+
+    if settings is None:
+        settings = get_settings()
+
+    if settings.app.debug:
+        _websocket_manager_singleton = SimpleWebSocketManager()
+    else:
+        _websocket_manager_singleton = RedisBackedWebSocketManager(redis_broadcaster)
+
+    return _websocket_manager_singleton
 
 
-def get_data_validation_service():
-    """取得數據驗證服務 (暫時保持現有實現)"""
-    from services.data.validation import data_validation_service
-    return data_validation_service
+def provide_websocket_manager(
+    settings: Settings = Depends(get_settings),
+) -> IWebSocketManager:
+    """FastAPI 專用的 WebSocket 管理器依賴提供函式"""
+    return get_websocket_manager(settings)
 
 
 # =============================================================================
@@ -204,3 +135,95 @@ def get_trading_signal_repository():
     """取得交易信號儲存庫"""
     from models.repositories.crud_trading_signal import trading_signal_crud
     return trading_signal_crud
+
+
+def get_trading_signal_repository_clean(
+    db: AsyncSession = Depends(get_database_session)
+) -> 'ITradingSignalRepository':
+    """取得交易信號儲存庫 (Clean Architecture版本)"""
+    from domain.repositories.trading_signal_repository_interface import ITradingSignalRepository
+    from infrastructure.persistence.trading_signal_repository import TradingSignalRepository
+
+    return TradingSignalRepository(db)
+
+
+# =============================================================================
+# 現有服務的依賴 (逐步重構)
+# =============================================================================
+
+def get_technical_analysis_service():
+    """取得技術分析服務 (暫時保持現有實現)"""
+    from services.analysis.technical_analysis import TechnicalAnalysisService
+    return TechnicalAnalysisService()
+
+
+def get_data_collection_service():
+    """取得數據收集服務 (暫時保持現有實現)"""
+    from services.data.collection import data_collection_service
+    return data_collection_service
+
+
+def get_data_validation_service():
+    """取得數據驗證服務 (暫時保持現有實現)"""
+    from services.data.validation import data_validation_service
+    return data_validation_service
+
+
+# =============================================================================
+# Domain Services 依賴 (Clean Architecture實現)
+# =============================================================================
+
+def get_stock_service(
+    stock_repo: 'IStockRepository' = Depends(get_stock_repository),
+    price_repo: 'IPriceHistoryRepository' = Depends(get_price_history_repository_clean),
+    cache_service: ICacheService = Depends(get_cache_service)
+) -> 'StockService':
+    """取得股票業務服務 (Clean Architecture版本)"""
+    from domain.services.stock_service import StockService
+
+    return StockService(stock_repo, price_repo, cache_service)
+
+
+def get_technical_analysis_service_clean(
+    stock_repo: 'IStockRepository' = Depends(get_stock_repository),
+    price_repo: 'IPriceHistoryRepository' = Depends(get_price_history_repository_clean),
+    cache_service: ICacheService = Depends(get_cache_service)
+) -> 'TechnicalAnalysisService':
+    """取得技術分析服務 (Clean Architecture版本)"""
+    from domain.services.technical_analysis_service import TechnicalAnalysisService
+
+    return TechnicalAnalysisService(stock_repo, price_repo, cache_service)
+
+
+def get_data_collection_service_clean(
+    stock_repo: 'IStockRepository' = Depends(get_stock_repository),
+    price_repo: 'IPriceHistoryRepository' = Depends(get_price_history_repository_clean),
+    cache_service: ICacheService = Depends(get_cache_service)
+) -> 'DataCollectionService':
+    """取得數據收集服務 (Clean Architecture版本)"""
+    from domain.services.data_collection_service import DataCollectionService
+
+    return DataCollectionService(stock_repo, price_repo, cache_service)
+
+
+def get_trading_signal_service_clean(
+    stock_repo: 'IStockRepository' = Depends(get_stock_repository),
+    price_repo: 'IPriceHistoryRepository' = Depends(get_price_history_repository_clean),
+    cache_service: ICacheService = Depends(get_cache_service),
+    signal_repo: 'ITradingSignalRepository' = Depends(get_trading_signal_repository_clean)
+) -> 'TradingSignalService':
+    """取得交易信號服務 (Clean Architecture版本)"""
+    from domain.services.trading_signal_service import TradingSignalService
+
+    return TradingSignalService(stock_repo, price_repo, cache_service, signal_repo)
+
+
+def get_data_validation_service_clean(
+    stock_repo: 'IStockRepository' = Depends(get_stock_repository),
+    price_repo: 'IPriceHistoryRepository' = Depends(get_price_history_repository_clean),
+    cache_service: ICacheService = Depends(get_cache_service)
+) -> 'DataValidationService':
+    """取得數據驗證服務 (Clean Architecture版本)"""
+    from domain.services.data_validation_service import DataValidationService
+
+    return DataValidationService(stock_repo, price_repo, cache_service)

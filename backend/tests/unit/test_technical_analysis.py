@@ -1,468 +1,510 @@
 #!/usr/bin/env python3
 """
-技術分析功能測試腳本
+Technical Analysis Tests - Clean Architecture
+Testing technical analysis domain services and business logic
 """
-import asyncio
+import pytest
 import sys
-from pathlib import Path
-from datetime import date, timedelta
-import logging
+from unittest.mock import MagicMock, AsyncMock
+from datetime import datetime, date, timedelta
+import random
 
-# 將專案根目錄加入 Python 路徑
-sys.path.append(str(Path(__file__).parent))
+sys.path.append('/home/opc/projects/kiro-stock-platform/backend')
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from core.config import settings
-from services.analysis.technical_analysis import technical_analysis_service, IndicatorType
-from services.analysis.indicator_calculator import advanced_calculator
-from models.repositories.crud_stock import stock_crud
-from models.repositories.crud_price_history import price_history_crud
-import pandas as pd
-import numpy as np
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from domain.services.technical_analysis_service import (
+    TechnicalAnalysisService,
+    IndicatorType,
+    IndicatorResult,
+    AnalysisResult
+)
+from infrastructure.cache.unified_cache_service import MockCacheService
 
 
-async def test_basic_indicator_calculation():
-    """測試基本指標計算"""
-    logger.info("測試基本指標計算...")
-    
-    engine = create_async_engine(
-        settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
-        echo=False
-    )
-    
-    AsyncSessionLocal = sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    
-    try:
-        async with AsyncSessionLocal() as session:
-            # 獲取測試股票
-            stocks = await stock_crud.get_multi(session, limit=3)
-            
-            if not stocks:
-                logger.error("沒有找到測試股票")
-                return False
-            
-            test_stock = stocks[0]
-            logger.info(f"使用測試股票: {test_stock.symbol} ({test_stock.market})")
-            
-            # 測試單一指標計算
-            indicators_to_test = [
-                IndicatorType.RSI,
-                IndicatorType.SMA_20,
-                IndicatorType.EMA_12,
-                IndicatorType.MACD
-            ]
-            
-            result = await technical_analysis_service.calculate_stock_indicators(
-                session,
-                stock_id=test_stock.id,
-                indicators=indicators_to_test,
-                days=60,
-                save_to_db=True
-            )
-            
-            logger.info(f"計算結果: 成功 {result.indicators_successful}/{result.indicators_calculated}")
-            logger.info(f"執行時間: {result.execution_time_seconds:.2f} 秒")
-            
-            if result.errors:
-                logger.warning(f"錯誤: {result.errors}")
-            
-            return result.indicators_successful > 0
-            
-    except Exception as e:
-        logger.error(f"測試基本指標計算時發生錯誤: {str(e)}")
-        return False
-    
-    finally:
-        await engine.dispose()
+class TestTechnicalAnalysisService:
+    """Technical Analysis Service Tests"""
 
+    def setup_method(self):
+        """Setup test environment"""
+        # Mock repositories following Clean Architecture interfaces
+        self.mock_stock_repo = MagicMock()
+        self.mock_price_repo = MagicMock()
+        self.cache_service = MockCacheService()
 
-async def test_batch_indicator_calculation():
-    """測試批次指標計算"""
-    logger.info("測試批次指標計算...")
-    
-    engine = create_async_engine(
-        settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
-        echo=False
-    )
-    
-    AsyncSessionLocal = sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    
-    try:
-        async with AsyncSessionLocal() as session:
-            stocks = await stock_crud.get_multi(session, limit=3)
-            
-            if len(stocks) < 3:
-                logger.error("需要至少3支股票進行批次測試")
-                return False
-            
-            stock_ids = [stock.id for stock in stocks]
-            logger.info(f"批次計算 {len(stock_ids)} 支股票的技術指標")
-            
-            # 測試批次計算
-            results = await technical_analysis_service.batch_calculate_indicators(
-                session,
-                stock_ids=stock_ids,
-                indicators=[IndicatorType.RSI, IndicatorType.SMA_20, IndicatorType.EMA_12],
-                days=30,
-                max_concurrent=2
-            )
-            
-            successful = sum(1 for r in results if r.indicators_successful > 0)
-            total_indicators = sum(r.indicators_successful for r in results)
-            
-            logger.info(f"批次計算結果: {successful}/{len(results)} 支股票成功")
-            logger.info(f"總計算指標數: {total_indicators}")
-            
-            for i, result in enumerate(results):
-                stock_symbol = stocks[i].symbol
-                status = "✓" if result.indicators_successful > 0 else "✗"
-                logger.info(f"  {status} {stock_symbol}: {result.indicators_successful} 個指標")
-            
-            return successful > 0
-            
-    except Exception as e:
-        logger.error(f"測試批次指標計算時發生錯誤: {str(e)}")
-        return False
-    
-    finally:
-        await engine.dispose()
+        # Create technical analysis service
+        self.analysis_service = TechnicalAnalysisService(
+            stock_repository=self.mock_stock_repo,
+            price_repository=self.mock_price_repo,
+            cache_service=self.cache_service
+        )
 
+    def create_mock_stock(self, stock_id=1, symbol="TEST", name="Test Stock"):
+        """Create a mock stock object"""
+        stock = MagicMock()
+        stock.id = stock_id
+        stock.symbol = symbol
+        stock.name = name
+        stock.market = "TW"
+        return stock
 
-async def test_advanced_indicator_calculation():
-    """測試進階指標計算"""
-    logger.info("測試進階指標計算...")
-    
-    engine = create_async_engine(
-        settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
-        echo=False
-    )
-    
-    AsyncSessionLocal = sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    
-    try:
-        async with AsyncSessionLocal() as session:
-            stocks = await stock_crud.get_multi(session, limit=1)
-            
-            if not stocks:
-                logger.error("沒有找到測試股票")
-                return False
-            
-            test_stock = stocks[0]
-            
-            # 獲取價格數據
-            end_date = date.today()
-            start_date = end_date - timedelta(days=100)
-            
-            price_data = await price_history_crud.get_stock_price_range(
-                session,
-                stock_id=test_stock.id,
-                start_date=start_date,
-                end_date=end_date
-            )
-            
-            if len(price_data) < 50:
-                logger.error("價格數據不足")
-                return False
-            
-            # 轉換為 DataFrame
-            data = []
-            for price in reversed(price_data):
-                data.append({
-                    'date': price.date,
-                    'open': float(price.open_price) if price.open_price else np.nan,
-                    'high': float(price.high_price) if price.high_price else np.nan,
-                    'low': float(price.low_price) if price.low_price else np.nan,
-                    'close': float(price.close_price) if price.close_price else np.nan,
-                    'volume': float(price.volume) if price.volume else 0
-                })
-            
-            df = pd.DataFrame(data)
-            df.set_index('date', inplace=True)
-            df.fillna(method='ffill', inplace=True)
-            
-            # 測試進階指標計算
-            tests_passed = 0
-            total_tests = 0
-            
-            # 測試 MACD 組件
-            total_tests += 1
-            try:
-                macd_components = advanced_calculator.calculate_complete_macd(df)
-                if macd_components.macd_line and len(macd_components.macd_line) > 0:
-                    tests_passed += 1
-                    logger.info(f"✓ MACD 計算成功: {len(macd_components.macd_line)} 個數據點")
-                else:
-                    logger.warning("✗ MACD 計算失敗")
-            except Exception as e:
-                logger.error(f"✗ MACD 計算異常: {str(e)}")
-            
-            # 測試布林通道
-            total_tests += 1
-            try:
-                bb_components = advanced_calculator.calculate_complete_bollinger_bands(df)
-                if bb_components.upper_band and len(bb_components.upper_band) > 0:
-                    tests_passed += 1
-                    logger.info(f"✓ 布林通道計算成功: {len(bb_components.upper_band)} 個數據點")
-                else:
-                    logger.warning("✗ 布林通道計算失敗")
-            except Exception as e:
-                logger.error(f"✗ 布林通道計算異常: {str(e)}")
-            
-            # 測試 KD 指標
-            total_tests += 1
-            try:
-                kd_components = advanced_calculator.calculate_complete_stochastic(df)
-                if kd_components.k_values and len(kd_components.k_values) > 0:
-                    tests_passed += 1
-                    logger.info(f"✓ KD 指標計算成功: {len(kd_components.k_values)} 個數據點")
-                else:
-                    logger.warning("✗ KD 指標計算失敗")
-            except Exception as e:
-                logger.error(f"✗ KD 指標計算異常: {str(e)}")
-            
-            # 測試動量指標
-            total_tests += 1
-            try:
-                momentum_indicators = advanced_calculator.calculate_momentum_indicators(df)
-                if momentum_indicators and len(momentum_indicators) > 0:
-                    tests_passed += 1
-                    logger.info(f"✓ 動量指標計算成功: {len(momentum_indicators)} 個指標")
-                else:
-                    logger.warning("✗ 動量指標計算失敗")
-            except Exception as e:
-                logger.error(f"✗ 動量指標計算異常: {str(e)}")
-            
-            # 測試成交量指標
-            total_tests += 1
-            try:
-                volume_indicators = advanced_calculator.calculate_volume_indicators(df)
-                if volume_indicators and len(volume_indicators) > 0:
-                    tests_passed += 1
-                    logger.info(f"✓ 成交量指標計算成功: {len(volume_indicators)} 個指標")
-                else:
-                    logger.warning("✗ 成交量指標計算失敗")
-            except Exception as e:
-                logger.error(f"✗ 成交量指標計算異常: {str(e)}")
-            
-            logger.info(f"進階指標測試結果: {tests_passed}/{total_tests} 通過")
-            return tests_passed >= total_tests * 0.8  # 80% 通過率
-            
-    except Exception as e:
-        logger.error(f"測試進階指標計算時發生錯誤: {str(e)}")
-        return False
-    
-    finally:
-        await engine.dispose()
+    def create_mock_price_data(self, stock_id=1, days=60, base_price=100.0, trend="upward"):
+        """Create mock price history data"""
+        prices = []
+        random.seed(42)
 
+        for i in range(days):
+            price = MagicMock()
+            price.stock_id = stock_id
+            price.date = date.today() - timedelta(days=days-i-1)
 
-async def test_indicator_data_retrieval():
-    """測試指標數據檢索"""
-    logger.info("測試指標數據檢索...")
-    
-    engine = create_async_engine(
-        settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
-        echo=False
-    )
-    
-    AsyncSessionLocal = sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    
-    try:
-        async with AsyncSessionLocal() as session:
-            stocks = await stock_crud.get_multi(session, limit=1)
-            
-            if not stocks:
-                logger.error("沒有找到測試股票")
-                return False
-            
-            test_stock = stocks[0]
-            
-            # 先計算一些指標
-            await technical_analysis_service.calculate_stock_indicators(
-                session,
-                stock_id=test_stock.id,
-                indicators=[IndicatorType.RSI, IndicatorType.SMA_20],
-                days=30,
-                save_to_db=True
-            )
-            
-            # 檢索指標數據
-            indicators_data = await technical_analysis_service.get_stock_indicators(
-                session,
-                stock_id=test_stock.id,
-                indicator_types=['RSI', 'SMA_20'],
-                days=30
-            )
-            
-            logger.info(f"檢索到的指標類型: {list(indicators_data.keys())}")
-            
-            for indicator_type, data in indicators_data.items():
-                logger.info(f"{indicator_type}: {len(data)} 個數據點")
-                if data:
-                    latest = data[0]  # 最新數據
-                    logger.info(f"  最新值: {latest['value']} (日期: {latest['date']})")
-            
-            return len(indicators_data) > 0
-            
-    except Exception as e:
-        logger.error(f"測試指標數據檢索時發生錯誤: {str(e)}")
-        return False
-    
-    finally:
-        await engine.dispose()
-
-
-async def test_pattern_recognition():
-    """測試型態識別"""
-    logger.info("測試型態識別...")
-    
-    engine = create_async_engine(
-        settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
-        echo=False
-    )
-    
-    AsyncSessionLocal = sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    
-    try:
-        async with AsyncSessionLocal() as session:
-            stocks = await stock_crud.get_multi(session, limit=1)
-            
-            if not stocks:
-                logger.error("沒有找到測試股票")
-                return False
-            
-            test_stock = stocks[0]
-            
-            # 獲取價格數據
-            end_date = date.today()
-            start_date = end_date - timedelta(days=60)
-            
-            price_data = await price_history_crud.get_stock_price_range(
-                session,
-                stock_id=test_stock.id,
-                start_date=start_date,
-                end_date=end_date
-            )
-            
-            if len(price_data) < 30:
-                logger.error("價格數據不足")
-                return False
-            
-            # 轉換為 DataFrame
-            data = []
-            for price in reversed(price_data):
-                data.append({
-                    'date': price.date,
-                    'open': float(price.open_price) if price.open_price else np.nan,
-                    'high': float(price.high_price) if price.high_price else np.nan,
-                    'low': float(price.low_price) if price.low_price else np.nan,
-                    'close': float(price.close_price) if price.close_price else np.nan,
-                    'volume': float(price.volume) if price.volume else 0
-                })
-            
-            df = pd.DataFrame(data)
-            df.set_index('date', inplace=True)
-            df.fillna(method='ffill', inplace=True)
-            
-            # 測試型態識別
-            pattern_signals = advanced_calculator.detect_pattern_signals(df)
-            
-            total_patterns = (
-                len(pattern_signals['bullish_patterns']) +
-                len(pattern_signals['bearish_patterns']) +
-                len(pattern_signals['reversal_patterns'])
-            )
-            
-            logger.info(f"偵測到的型態數量:")
-            logger.info(f"  看漲型態: {len(pattern_signals['bullish_patterns'])}")
-            logger.info(f"  看跌型態: {len(pattern_signals['bearish_patterns'])}")
-            logger.info(f"  反轉型態: {len(pattern_signals['reversal_patterns'])}")
-            logger.info(f"  總計: {total_patterns}")
-            
-            # 顯示一些型態詳情
-            for pattern in pattern_signals['bullish_patterns'][:3]:
-                logger.info(f"  看漲型態: {pattern['pattern']} 於 {pattern['date']}")
-            
-            for pattern in pattern_signals['bearish_patterns'][:3]:
-                logger.info(f"  看跌型態: {pattern['pattern']} 於 {pattern['date']}")
-            
-            return True  # 型態識別功能正常運行即為成功
-            
-    except Exception as e:
-        logger.error(f"測試型態識別時發生錯誤: {str(e)}")
-        return False
-    
-    finally:
-        await engine.dispose()
-
-
-async def main():
-    """主測試函數"""
-    logger.info("開始技術分析功能測試...")
-    
-    tests = [
-        ("基本指標計算", test_basic_indicator_calculation),
-        ("批次指標計算", test_batch_indicator_calculation),
-        ("進階指標計算", test_advanced_indicator_calculation),
-        ("指標數據檢索", test_indicator_data_retrieval),
-        ("型態識別", test_pattern_recognition),
-    ]
-    
-    results = {}
-    
-    for test_name, test_func in tests:
-        try:
-            logger.info(f"\n{'='*50}")
-            logger.info(f"執行：{test_name}")
-            logger.info(f"{'='*50}")
-            
-            result = await test_func()
-            results[test_name] = result
-            
-            if result:
-                logger.info(f"✅ {test_name} - 通過")
+            # Generate price based on trend type
+            if trend == "upward":
+                # Upward trend with some volatility
+                trend_value = base_price + (i * 0.5) + random.uniform(-2, 2)
+            elif trend == "downward":
+                # Downward trend
+                trend_value = base_price - (i * 0.3) + random.uniform(-1.5, 1.5)
+            elif trend == "sideways":
+                # Sideways movement
+                trend_value = base_price + random.uniform(-1, 1)
             else:
-                logger.error(f"❌ {test_name} - 失敗")
-                
-        except Exception as e:
-            logger.error(f"❌ {test_name} - 異常：{str(e)}")
-            results[test_name] = False
-    
-    # 總結
-    logger.info(f"\n{'='*50}")
-    logger.info("測試結果總結")
-    logger.info(f"{'='*50}")
-    
-    passed = sum(1 for result in results.values() if result)
-    total = len(results)
-    
-    for test_name, result in results.items():
-        status = "✅ 通過" if result else "❌ 失敗"
-        logger.info(f"{test_name}: {status}")
-    
-    logger.info(f"\n總計：{passed}/{total} 個測試通過")
-    
-    if passed == total:
-        logger.info("🎉 所有技術分析測試都通過了！")
-        return 0
-    else:
-        logger.error("⚠️  部分技術分析測試失敗，請檢查實現")
-        return 1
+                # Volatile movement
+                trend_value = base_price + random.uniform(-5, 5)
 
+            price.close_price = max(1.0, trend_value)  # Ensure positive price
+            price.open_price = price.close_price * (1 + random.uniform(-0.01, 0.01))
+            price.high_price = max(price.open_price, price.close_price) * (1 + abs(random.uniform(0, 0.02)))
+            price.low_price = min(price.open_price, price.close_price) * (1 - abs(random.uniform(0, 0.02)))
+            price.volume = int(1000000 + random.uniform(-200000, 200000))
 
-if __name__ == "__main__":
-    exit_code = asyncio.run(main())
-    sys.exit(exit_code)
+            prices.append(price)
+
+        # Return newest first (as expected by service)
+        return list(reversed(prices))
+
+    @pytest.mark.asyncio
+    async def test_calculate_stock_indicators_success(self):
+        """Test successful stock indicators calculation"""
+        # Setup mock data
+        test_stock = self.create_mock_stock(1, "TECH_TEST", "Technical Test Stock")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Create sufficient price data for technical analysis
+        mock_prices = self.create_mock_price_data(1, 60, 100.0, "upward")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Calculate indicators
+        result = await self.analysis_service.calculate_stock_indicators(
+            db=MagicMock(),
+            stock_id=1,
+            days=60
+        )
+
+        # Verify results
+        assert result.stock_id == 1
+        assert result.stock_symbol == "TECH_TEST"
+        assert result.indicators_calculated > 0
+        assert result.indicators_successful >= 0
+        assert result.execution_time_seconds > 0
+        assert isinstance(result.errors, list)
+
+    @pytest.mark.asyncio
+    async def test_calculate_specific_indicators(self):
+        """Test calculation of specific indicators"""
+        test_stock = self.create_mock_stock(2, "SPECIFIC_TEST", "Specific Indicator Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        mock_prices = self.create_mock_price_data(2, 50, 100.0, "upward")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Test with specific indicators
+        specific_indicators = [IndicatorType.RSI, IndicatorType.SMA_20, IndicatorType.MACD]
+
+        result = await self.analysis_service.calculate_stock_indicators(
+            db=MagicMock(),
+            stock_id=2,
+            indicators=specific_indicators,
+            days=50
+        )
+
+        # Verify results
+        assert result.indicators_calculated == len(specific_indicators)
+        assert result.stock_symbol == "SPECIFIC_TEST"
+
+    @pytest.mark.asyncio
+    async def test_calculate_indicator_single(self):
+        """Test single indicator calculation"""
+        test_stock = self.create_mock_stock(3, "SINGLE_TEST", "Single Indicator Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        mock_prices = self.create_mock_price_data(3, 30, 100.0, "upward")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Calculate single indicator
+        result = await self.analysis_service.calculate_indicator(
+            db=MagicMock(),
+            stock_id=3,
+            indicator=IndicatorType.RSI,
+            days=30
+        )
+
+        # Verify results
+        assert result["stock_id"] == 3
+        assert result["symbol"] == "SINGLE_TEST"
+        assert result["indicator"] == IndicatorType.RSI.value
+        assert "values" in result
+        assert "dates" in result
+        assert "summary" in result
+
+    @pytest.mark.asyncio
+    async def test_get_stock_technical_summary(self):
+        """Test getting technical analysis summary"""
+        test_stock = self.create_mock_stock(4, "SUMMARY_TEST", "Technical Summary Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Create price data with clear trend
+        mock_prices = self.create_mock_price_data(4, 40, 100.0, "upward")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Get technical summary
+        summary = await self.analysis_service.get_stock_technical_summary(
+            db=MagicMock(),
+            stock_id=4
+        )
+
+        # Verify summary structure
+        assert "stock_id" in summary
+        assert "symbol" in summary
+        assert "current_price" in summary
+        assert "analysis_date" in summary
+        assert "technical_signals" in summary
+        assert "trend_analysis" in summary
+        assert "support_resistance" in summary
+
+        # Verify data types and values
+        assert summary["stock_id"] == 4
+        assert summary["symbol"] == "SUMMARY_TEST"
+        assert isinstance(summary["current_price"], (int, float))
+        assert isinstance(summary["technical_signals"], list)
+        assert isinstance(summary["trend_analysis"], str)
+        assert isinstance(summary["support_resistance"], dict)
+
+    @pytest.mark.asyncio
+    async def test_calculate_price_momentum(self):
+        """Test price momentum calculation"""
+        test_stock = self.create_mock_stock(5, "MOMENTUM_TEST", "Momentum Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Create price data with upward momentum
+        mock_prices = []
+        for i in range(25):
+            price = MagicMock()
+            price.close_price = 100.0 + (i * 1.0)  # Steady upward trend
+            mock_prices.append(price)
+
+        mock_prices = list(reversed(mock_prices))  # Newest first
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Calculate momentum
+        momentum = await self.analysis_service.calculate_price_momentum(
+            db=MagicMock(),
+            stock_id=5,
+            periods=[1, 5, 20]
+        )
+
+        # Verify momentum structure
+        assert "momentum_1d" in momentum
+        assert "momentum_5d" in momentum
+        assert "momentum_20d" in momentum
+
+        # Verify momentum values are numeric
+        for key, value in momentum.items():
+            assert isinstance(value, (int, float))
+
+    @pytest.mark.asyncio
+    async def test_insufficient_data_handling(self):
+        """Test handling of insufficient price data"""
+        test_stock = self.create_mock_stock(6, "INSUFFICIENT_TEST", "Insufficient Data Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Provide insufficient data (less than 30 days)
+        mock_prices = self.create_mock_price_data(6, 15, 100.0, "upward")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Should raise ValueError for insufficient data
+        with pytest.raises(ValueError, match="價格數據不足，無法進行技術分析"):
+            await self.analysis_service.calculate_stock_indicators(
+                db=MagicMock(),
+                stock_id=6,
+                days=60
+            )
+
+    @pytest.mark.asyncio
+    async def test_stock_not_found_error(self):
+        """Test error when stock is not found"""
+        # Mock stock not found
+        self.mock_stock_repo.get = AsyncMock(return_value=None)
+
+        # Should raise ValueError for non-existent stock
+        with pytest.raises(ValueError, match="股票 ID 999 不存在"):
+            await self.analysis_service.calculate_stock_indicators(
+                db=MagicMock(),
+                stock_id=999,
+                days=60
+            )
+
+    @pytest.mark.asyncio
+    async def test_cache_integration(self):
+        """Test cache integration in technical analysis"""
+        test_stock = self.create_mock_stock(7, "CACHE_TEST", "Cache Test Stock")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        mock_prices = self.create_mock_price_data(7, 40, 100.0, "upward")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # First call - should compute and cache
+        result1 = await self.analysis_service.calculate_stock_indicators(
+            db=MagicMock(),
+            stock_id=7,
+            days=40
+        )
+
+        # Second call - should use cache
+        result2 = await self.analysis_service.calculate_stock_indicators(
+            db=MagicMock(),
+            stock_id=7,
+            days=40
+        )
+
+        # Results should be consistent
+        assert result1.stock_id == result2.stock_id
+        assert result1.indicators_calculated == result2.indicators_calculated
+
+        # Verify cache was used
+        cache_key = self.cache_service.get_cache_key(
+            "technical_analysis",
+            stock_id=7,
+            indicators="all",
+            days=40
+        )
+        cached_data = await self.cache_service.get(cache_key)
+        assert cached_data is not None
+
+    @pytest.mark.asyncio
+    async def test_technical_summary_cache(self):
+        """Test cache integration for technical summary"""
+        test_stock = self.create_mock_stock(8, "SUMMARY_CACHE_TEST", "Summary Cache Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        mock_prices = self.create_mock_price_data(8, 30, 100.0, "upward")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # First call - should compute and cache
+        summary1 = await self.analysis_service.get_stock_technical_summary(
+            db=MagicMock(),
+            stock_id=8
+        )
+
+        # Second call - should use cache
+        summary2 = await self.analysis_service.get_stock_technical_summary(
+            db=MagicMock(),
+            stock_id=8
+        )
+
+        # Results should be consistent
+        assert summary1["stock_id"] == summary2["stock_id"]
+        assert summary1["symbol"] == summary2["symbol"]
+
+    def test_indicator_result_dataclass(self):
+        """Test IndicatorResult dataclass"""
+        result = IndicatorResult(
+            indicator_type="RSI",
+            values=[30.5, 32.1, 35.8],
+            dates=[date.today(), date.today() - timedelta(days=1), date.today() - timedelta(days=2)],
+            parameters={"period": 14},
+            success=True
+        )
+
+        assert result.indicator_type == "RSI"
+        assert len(result.values) == 3
+        assert len(result.dates) == 3
+        assert result.parameters["period"] == 14
+        assert result.success is True
+        assert result.error_message is None
+
+    def test_analysis_result_dataclass(self):
+        """Test AnalysisResult dataclass"""
+        analysis_result = AnalysisResult(
+            stock_id=1,
+            stock_symbol="TEST",
+            analysis_date=date.today(),
+            indicators_calculated=5,
+            indicators_successful=4,
+            indicators_failed=1,
+            execution_time_seconds=2.5,
+            errors=["Error calculating MACD"],
+            warnings=["Low volume data"]
+        )
+
+        assert analysis_result.stock_id == 1
+        assert analysis_result.stock_symbol == "TEST"
+        assert analysis_result.indicators_calculated == 5
+        assert analysis_result.indicators_successful == 4
+        assert analysis_result.indicators_failed == 1
+        assert analysis_result.execution_time_seconds == 2.5
+        assert len(analysis_result.errors) == 1
+        assert len(analysis_result.warnings) == 1
+
+    def test_indicator_type_enum(self):
+        """Test IndicatorType enum values"""
+        # Test basic indicators
+        assert IndicatorType.RSI == "RSI"
+        assert IndicatorType.SMA_5 == "SMA_5"
+        assert IndicatorType.SMA_20 == "SMA_20"
+        assert IndicatorType.SMA_60 == "SMA_60"
+        assert IndicatorType.EMA_12 == "EMA_12"
+        assert IndicatorType.EMA_26 == "EMA_26"
+
+        # Test MACD indicators
+        assert IndicatorType.MACD == "MACD"
+        assert IndicatorType.MACD_SIGNAL == "MACD_SIGNAL"
+        assert IndicatorType.MACD_HISTOGRAM == "MACD_HISTOGRAM"
+
+        # Test Bollinger Bands
+        assert IndicatorType.BB_UPPER == "BB_UPPER"
+        assert IndicatorType.BB_MIDDLE == "BB_MIDDLE"
+        assert IndicatorType.BB_LOWER == "BB_LOWER"
+
+        # Test other indicators
+        assert IndicatorType.KD_K == "KD_K"
+        assert IndicatorType.KD_D == "KD_D"
+        assert IndicatorType.ATR == "ATR"
+        assert IndicatorType.CCI == "CCI"
+        assert IndicatorType.WILLIAMS_R == "WILLIAMS_R"
+        assert IndicatorType.VOLUME_SMA == "VOLUME_SMA"
+
+    @pytest.mark.asyncio
+    async def test_different_trend_analysis(self):
+        """Test trend analysis for different market conditions"""
+        scenarios = [
+            ("upward", "上升趨勢"),
+            ("downward", "下降趨勢"),
+            ("sideways", "震盪趨勢")
+        ]
+
+        for trend_type, expected_trend_keyword in scenarios:
+            test_stock = self.create_mock_stock(9, f"TREND_{trend_type.upper()}", f"{trend_type} Trend Test")
+            self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+            # Create price data with specific trend
+            mock_prices = self.create_mock_price_data(9, 30, 100.0, trend_type)
+            self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+            # Get technical summary
+            summary = await self.analysis_service.get_stock_technical_summary(
+                db=MagicMock(),
+                stock_id=9
+            )
+
+            # Verify trend analysis contains relevant information
+            assert summary["trend_analysis"] is not None
+            assert len(summary["trend_analysis"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_technical_signals_generation(self):
+        """Test technical signals generation"""
+        test_stock = self.create_mock_stock(10, "SIGNALS_TEST", "Signals Test Stock")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Create price data that should generate signals
+        mock_prices = self.create_mock_price_data(10, 35, 100.0, "upward")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Get technical summary
+        summary = await self.analysis_service.get_stock_technical_summary(
+            db=MagicMock(),
+            stock_id=10
+        )
+
+        # Should have technical signals
+        assert "technical_signals" in summary
+        assert isinstance(summary["technical_signals"], list)
+
+        # Each signal should have meaningful content
+        for signal in summary["technical_signals"]:
+            assert isinstance(signal, str)
+            assert len(signal) > 0
+
+    @pytest.mark.asyncio
+    async def test_support_resistance_calculation(self):
+        """Test support and resistance level calculation"""
+        test_stock = self.create_mock_stock(11, "SR_TEST", "Support Resistance Test")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Create price data with clear highs and lows
+        mock_prices = self.create_mock_price_data(11, 30, 100.0, "volatile")
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Get technical summary
+        summary = await self.analysis_service.get_stock_technical_summary(
+            db=MagicMock(),
+            stock_id=11
+        )
+
+        # Should have support/resistance levels
+        assert "support_resistance" in summary
+        sr_data = summary["support_resistance"]
+
+        assert "support" in sr_data
+        assert "resistance" in sr_data
+
+        # Values should be numeric and logical
+        assert isinstance(sr_data["support"], (int, float))
+        assert isinstance(sr_data["resistance"], (int, float))
+        assert sr_data["support"] < sr_data["resistance"]
+
+    def test_service_initialization(self):
+        """Test service initialization and dependencies"""
+        # Verify service was initialized with correct dependencies
+        assert self.analysis_service.stock_repo == self.mock_stock_repo
+        assert self.analysis_service.price_repo == self.mock_price_repo
+        assert self.analysis_service.cache == self.cache_service
+
+    @pytest.mark.asyncio
+    async def test_error_handling_in_calculations(self):
+        """Test error handling during calculations"""
+        test_stock = self.create_mock_stock(12, "ERROR_TEST", "Error Test Stock")
+        self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
+
+        # Create price data with some unusual values (enough data for analysis)
+        mock_prices = []
+        for i in range(35):
+            price = MagicMock()
+            price.stock_id = 12
+            price.date = date.today() - timedelta(days=35-i-1)
+
+            # Some extreme values that might cause calculation issues
+            if i < 5:
+                price.close_price = 0.01  # Very low price
+            else:
+                price.close_price = 100.0 + i
+
+            price.open_price = price.close_price
+            price.high_price = price.close_price
+            price.low_price = price.close_price
+            price.volume = 1000000
+
+            mock_prices.append(price)
+
+        mock_prices = list(reversed(mock_prices))
+        self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+
+        # Should handle errors gracefully
+        result = await self.analysis_service.calculate_stock_indicators(
+            db=MagicMock(),
+            stock_id=12,
+            days=35
+        )
+
+        # Should not crash and should report any errors
+        assert result is not None
+        assert isinstance(result.errors, list)

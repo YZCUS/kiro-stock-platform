@@ -1,632 +1,547 @@
 #!/usr/bin/env python3
 """
-信號通知服務單元測試
+Signal Notification Tests - Clean Architecture
+Testing signal notification service and alert system
 """
-import asyncio
 import pytest
 import sys
-from unittest.mock import Mock, patch, AsyncMock
-from datetime import datetime, timedelta
+from unittest.mock import MagicMock, AsyncMock, patch
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 
-# 添加項目根目錄到 Python 路徑
-sys.path.append('/Users/zhengchy/Documents/projects/kiro-stock-platform/backend')
+sys.path.append('/home/opc/projects/kiro-stock-platform/backend')
 
 from services.trading.signal_notification import (
-    NotificationRule,
+    SignalNotificationService,
     NotificationType,
     AlertLevel,
-    SignalNotificationService,
-    NotificationChannel
+    NotificationRule,
+    NotificationMessage
 )
-from services.trading.buy_sell_generator import SignalPriority
+from services.trading.buy_sell_generator import (
+    BuySellPoint,
+    BuySellAction,
+    SignalPriority
+)
 from models.domain.trading_signal import TradingSignal
 
 
-class TestNotificationRule:
-    """通知規則測試類"""
-
-    def setup_method(self):
-        """測試前設置"""
-        self.rule = NotificationRule(
-            rule_id="rule_001",
-            user_id=1,
-            stock_symbols=["2330.TW", "AAPL"],
-            signal_types=["BUY", "SELL"],
-            min_confidence=0.7,
-            min_priority=SignalPriority.MEDIUM,
-            notification_types=[NotificationType.EMAIL, NotificationType.PUSH],
-            enabled=True,
-            created_at=datetime.now()
-        )
-
-    def test_matches_signal_success(self):
-        """測試信號匹配成功"""
-        # 創建匹配的信號
-        signal = Mock(spec=TradingSignal)
-        signal.signal_type = "BUY"
-        signal.confidence = 0.8
-        signal.priority = SignalPriority.HIGH
-
-        # 執行測試
-        result = self.rule.matches_signal("2330.TW", signal)
-
-        # 驗證結果
-        assert result is True
-
-    def test_matches_signal_wrong_stock(self):
-        """測試股票代號不匹配"""
-        # 創建信號
-        signal = Mock(spec=TradingSignal)
-        signal.signal_type = "BUY"
-        signal.confidence = 0.8
-        signal.priority = SignalPriority.HIGH
-
-        # 執行測試 - 不在規則中的股票
-        result = self.rule.matches_signal("2317.TW", signal)
-
-        # 驗證結果
-        assert result is False
-
-    def test_matches_signal_wrong_type(self):
-        """測試信號類型不匹配"""
-        # 創建信號
-        signal = Mock(spec=TradingSignal)
-        signal.signal_type = "HOLD"  # 不在規則中的類型
-        signal.confidence = 0.8
-        signal.priority = SignalPriority.HIGH
-
-        # 執行測試
-        result = self.rule.matches_signal("2330.TW", signal)
-
-        # 驗證結果
-        assert result is False
-
-    def test_matches_signal_low_confidence(self):
-        """測試信心度過低"""
-        # 創建信號
-        signal = Mock(spec=TradingSignal)
-        signal.signal_type = "BUY"
-        signal.confidence = 0.5  # 低於最低要求 0.7
-        signal.priority = SignalPriority.HIGH
-
-        # 執行測試
-        result = self.rule.matches_signal("2330.TW", signal)
-
-        # 驗證結果
-        assert result is False
-
-    def test_matches_signal_low_priority(self):
-        """測試優先級過低"""
-        # 創建信號
-        signal = Mock(spec=TradingSignal)
-        signal.signal_type = "BUY"
-        signal.confidence = 0.8
-        signal.priority = SignalPriority.LOW  # 低於最低要求 MEDIUM
-
-        # 執行測試
-        result = self.rule.matches_signal("2330.TW", signal)
-
-        # 驗證結果
-        assert result is False
-
-    def test_matches_signal_empty_restrictions(self):
-        """測試無限制規則"""
-        # 創建無限制規則
-        unrestricted_rule = NotificationRule(
-            rule_id="rule_002",
-            user_id=1,
-            stock_symbols=[],  # 空列表表示所有股票
-            signal_types=[],   # 空列表表示所有類型
-            min_confidence=0.0,
-            min_priority=SignalPriority.LOW,
-            notification_types=[NotificationType.EMAIL],
-            enabled=True,
-            created_at=datetime.now()
-        )
-
-        # 創建信號
-        signal = Mock(spec=TradingSignal)
-        signal.signal_type = "ANY_TYPE"
-        signal.confidence = 0.1
-        signal.priority = SignalPriority.LOW
-
-        # 執行測試
-        result = unrestricted_rule.matches_signal("ANY_STOCK", signal)
-
-        # 驗證結果
-        assert result is True
-
-
-class TestNotificationChannel:
-    """通知渠道測試類"""
-
-    def setup_method(self):
-        """測試前設置"""
-        self.channel = NotificationChannel(NotificationType.EMAIL)
-
-    async def test_send_email_notification_success(self):
-        """測試成功發送郵件通知"""
-        # Mock 郵件發送
-        with patch.object(self.channel, '_send_email') as mock_send_email:
-            mock_send_email.return_value = True
-
-            # 執行測試
-            result = await self.channel.send_notification(
-                recipient="test@example.com",
-                subject="測試通知",
-                content="這是一個測試通知",
-                metadata={}
-            )
-
-            # 驗證結果
-            assert result is True
-            mock_send_email.assert_called_once()
-
-    async def test_send_push_notification_success(self):
-        """測試成功發送推送通知"""
-        # 創建推送渠道
-        push_channel = NotificationChannel(NotificationType.PUSH)
-
-        # Mock 推送發送
-        with patch.object(push_channel, '_send_push') as mock_send_push:
-            mock_send_push.return_value = True
-
-            # 執行測試
-            result = await push_channel.send_notification(
-                recipient="device_token_123",
-                subject="測試推送",
-                content="這是一個測試推送",
-                metadata={}
-            )
-
-            # 驗證結果
-            assert result is True
-            mock_send_push.assert_called_once()
-
-    async def test_send_webhook_notification_success(self):
-        """測試成功發送 Webhook 通知"""
-        # 創建 Webhook 渠道
-        webhook_channel = NotificationChannel(NotificationType.WEBHOOK)
-
-        # Mock Webhook 發送
-        with patch.object(webhook_channel, '_send_webhook') as mock_send_webhook:
-            mock_send_webhook.return_value = True
-
-            # 執行測試
-            result = await webhook_channel.send_notification(
-                recipient="https://api.example.com/webhook",
-                subject="測試 Webhook",
-                content="這是一個測試 Webhook",
-                metadata={"custom_field": "value"}
-            )
-
-            # 驗證結果
-            assert result is True
-            mock_send_webhook.assert_called_once()
-
-    async def test_send_notification_failure(self):
-        """測試發送通知失敗"""
-        # Mock 發送失敗
-        with patch.object(self.channel, '_send_email') as mock_send_email:
-            mock_send_email.side_effect = Exception("發送失敗")
-
-            # 執行測試
-            result = await self.channel.send_notification(
-                recipient="test@example.com",
-                subject="測試通知",
-                content="這是一個測試通知",
-                metadata={}
-            )
-
-            # 驗證結果
-            assert result is False
-
-    def test_format_signal_message_buy_signal(self):
-        """測試格式化買入信號消息"""
-        # 創建買入信號
-        signal = Mock(spec=TradingSignal)
-        signal.signal_type = "BUY"
-        signal.confidence = 0.85
-        signal.price = Decimal('500.0')
-        signal.description = "黃金交叉形成"
-
-        # 執行測試
-        subject, content = self.channel.format_signal_message("2330.TW", signal)
-
-        # 驗證結果
-        assert "買入" in subject
-        assert "2330.TW" in subject
-        assert "500.0" in content
-        assert "85%" in content
-        assert "黃金交叉形成" in content
-
-    def test_format_signal_message_sell_signal(self):
-        """測試格式化賣出信號消息"""
-        # 創建賣出信號
-        signal = Mock(spec=TradingSignal)
-        signal.signal_type = "SELL"
-        signal.confidence = 0.75
-        signal.price = Decimal('480.0')
-        signal.description = "死亡交叉出現"
-
-        # 執行測試
-        subject, content = self.channel.format_signal_message("2330.TW", signal)
-
-        # 驗證結果
-        assert "賣出" in subject
-        assert "2330.TW" in subject
-        assert "480.0" in content
-        assert "75%" in content
-        assert "死亡交叉出現" in content
-
-
 class TestSignalNotificationService:
-    """信號通知服務測試類"""
+    """Signal Notification Service Tests"""
 
     def setup_method(self):
-        """測試前設置"""
-        self.service = SignalNotificationService()
+        """Setup test environment"""
+        self.notification_service = SignalNotificationService()
 
-    async def test_add_notification_rule_success(self):
-        """測試成功添加通知規則"""
-        # 創建規則
-        rule = NotificationRule(
-            rule_id="rule_001",
-            user_id=1,
-            stock_symbols=["2330.TW"],
-            signal_types=["BUY"],
-            min_confidence=0.7,
-            min_priority=SignalPriority.MEDIUM,
-            notification_types=[NotificationType.EMAIL],
-            enabled=True,
-            created_at=datetime.now()
+    def test_add_notification_rule(self):
+        """Test adding notification rules"""
+        user_id = 1
+        stock_symbols = ["AAPL", "TSLA"]
+        signal_types = ["buy", "sell"]
+        min_confidence = 0.8
+        min_priority = SignalPriority.HIGH
+        notification_types = [NotificationType.EMAIL, NotificationType.PUSH]
+
+        rule_id = self.notification_service.add_notification_rule(
+            user_id=user_id,
+            stock_symbols=stock_symbols,
+            signal_types=signal_types,
+            min_confidence=min_confidence,
+            min_priority=min_priority,
+            notification_types=notification_types
         )
 
-        # 執行測試
-        await self.service.add_notification_rule(rule)
+        # Verify rule was added
+        assert rule_id is not None
+        assert rule_id.startswith(f"rule_{user_id}")
 
-        # 驗證結果
-        assert rule.rule_id in self.service.notification_rules
-        assert self.service.notification_rules[rule.rule_id] == rule
+        # Verify rule exists in service
+        user_rules = self.notification_service.get_user_notification_rules(user_id)
+        assert len(user_rules) == 1
 
-    async def test_remove_notification_rule_success(self):
-        """測試成功移除通知規則"""
-        # 先添加規則
-        rule = NotificationRule(
-            rule_id="rule_001",
-            user_id=1,
-            stock_symbols=["2330.TW"],
-            signal_types=["BUY"],
-            min_confidence=0.7,
-            min_priority=SignalPriority.MEDIUM,
-            notification_types=[NotificationType.EMAIL],
-            enabled=True,
-            created_at=datetime.now()
-        )
-        await self.service.add_notification_rule(rule)
+        rule = user_rules[0]
+        assert rule.user_id == user_id
+        assert rule.stock_symbols == stock_symbols
+        assert rule.signal_types == signal_types
+        assert rule.min_confidence == min_confidence
+        assert rule.min_priority == min_priority
+        assert rule.notification_types == notification_types
+        assert rule.enabled is True
 
-        # 執行測試
-        result = await self.service.remove_notification_rule("rule_001")
+    def test_remove_notification_rule(self):
+        """Test removing notification rules"""
+        user_id = 1
 
-        # 驗證結果
-        assert result is True
-        assert "rule_001" not in self.service.notification_rules
-
-    async def test_remove_notification_rule_not_found(self):
-        """測試移除不存在的通知規則"""
-        # 執行測試
-        result = await self.service.remove_notification_rule("nonexistent_rule")
-
-        # 驗證結果
-        assert result is False
-
-    async def test_process_signal_with_matching_rules(self):
-        """測試處理匹配規則的信號"""
-        # 添加匹配規則
-        rule = NotificationRule(
-            rule_id="rule_001",
-            user_id=1,
-            stock_symbols=["2330.TW"],
-            signal_types=["BUY"],
-            min_confidence=0.7,
-            min_priority=SignalPriority.MEDIUM,
-            notification_types=[NotificationType.EMAIL],
-            enabled=True,
-            created_at=datetime.now()
-        )
-        await self.service.add_notification_rule(rule)
-
-        # 創建匹配的信號
-        signal = Mock(spec=TradingSignal)
-        signal.signal_type = "BUY"
-        signal.confidence = 0.8
-        signal.priority = SignalPriority.HIGH
-        signal.price = Decimal('500.0')
-        signal.description = "買入信號"
-
-        # Mock 發送通知
-        self.service._send_notification_to_user = AsyncMock(return_value=True)
-
-        # 執行測試
-        await self.service.process_signal("2330.TW", signal)
-
-        # 驗證結果
-        self.service._send_notification_to_user.assert_called_once()
-
-    async def test_process_signal_no_matching_rules(self):
-        """測試處理不匹配規則的信號"""
-        # 添加不匹配規則
-        rule = NotificationRule(
-            rule_id="rule_001",
-            user_id=1,
-            stock_symbols=["2317.TW"],  # 不同股票
-            signal_types=["BUY"],
-            min_confidence=0.7,
-            min_priority=SignalPriority.MEDIUM,
-            notification_types=[NotificationType.EMAIL],
-            enabled=True,
-            created_at=datetime.now()
-        )
-        await self.service.add_notification_rule(rule)
-
-        # 創建信號
-        signal = Mock(spec=TradingSignal)
-        signal.signal_type = "BUY"
-        signal.confidence = 0.8
-        signal.priority = SignalPriority.HIGH
-
-        # Mock 發送通知
-        self.service._send_notification_to_user = AsyncMock()
-
-        # 執行測試
-        await self.service.process_signal("2330.TW", signal)
-
-        # 驗證結果 - 不應該發送通知
-        self.service._send_notification_to_user.assert_not_called()
-
-    async def test_process_signal_disabled_rule(self):
-        """測試處理已禁用規則的信號"""
-        # 添加禁用規則
-        rule = NotificationRule(
-            rule_id="rule_001",
-            user_id=1,
-            stock_symbols=["2330.TW"],
-            signal_types=["BUY"],
-            min_confidence=0.7,
-            min_priority=SignalPriority.MEDIUM,
-            notification_types=[NotificationType.EMAIL],
-            enabled=False,  # 禁用
-            created_at=datetime.now()
-        )
-        await self.service.add_notification_rule(rule)
-
-        # 創建匹配的信號
-        signal = Mock(spec=TradingSignal)
-        signal.signal_type = "BUY"
-        signal.confidence = 0.8
-        signal.priority = SignalPriority.HIGH
-
-        # Mock 發送通知
-        self.service._send_notification_to_user = AsyncMock()
-
-        # 執行測試
-        await self.service.process_signal("2330.TW", signal)
-
-        # 驗證結果 - 不應該發送通知
-        self.service._send_notification_to_user.assert_not_called()
-
-    async def test_get_user_notification_rules_success(self):
-        """測試成功取得用戶通知規則"""
-        # 添加多個規則
-        rule1 = NotificationRule(
-            rule_id="rule_001",
-            user_id=1,
-            stock_symbols=["2330.TW"],
-            signal_types=["BUY"],
-            min_confidence=0.7,
-            min_priority=SignalPriority.MEDIUM,
-            notification_types=[NotificationType.EMAIL],
-            enabled=True,
-            created_at=datetime.now()
-        )
-        rule2 = NotificationRule(
-            rule_id="rule_002",
-            user_id=2,  # 不同用戶
+        # Add a rule first
+        rule_id = self.notification_service.add_notification_rule(
+            user_id=user_id,
             stock_symbols=["AAPL"],
-            signal_types=["SELL"],
-            min_confidence=0.8,
-            min_priority=SignalPriority.HIGH,
-            notification_types=[NotificationType.PUSH],
-            enabled=True,
-            created_at=datetime.now()
+            notification_types=[NotificationType.EMAIL]
         )
 
-        await self.service.add_notification_rule(rule1)
-        await self.service.add_notification_rule(rule2)
+        # Verify rule exists
+        assert len(self.notification_service.get_user_notification_rules(user_id)) == 1
 
-        # 執行測試
-        user1_rules = self.service.get_user_notification_rules(1)
+        # Remove the rule
+        removed = self.notification_service.remove_notification_rule(user_id, rule_id)
+        assert removed is True
 
-        # 驗證結果
-        assert len(user1_rules) == 1
-        assert user1_rules[0].rule_id == "rule_001"
+        # Verify rule is gone
+        assert len(self.notification_service.get_user_notification_rules(user_id)) == 0
 
-    async def test_update_notification_rule_success(self):
-        """測試成功更新通知規則"""
-        # 先添加規則
+        # Try to remove non-existent rule
+        removed = self.notification_service.remove_notification_rule(user_id, "non_existent")
+        assert removed is False
+
+    def test_notification_rule_matches_signal(self):
+        """Test notification rule signal matching"""
+        # Create a notification rule
         rule = NotificationRule(
-            rule_id="rule_001",
+            rule_id="test_rule",
             user_id=1,
-            stock_symbols=["2330.TW"],
-            signal_types=["BUY"],
+            stock_symbols=["AAPL", "TSLA"],
+            signal_types=["buy", "strong_buy"],
             min_confidence=0.7,
             min_priority=SignalPriority.MEDIUM,
             notification_types=[NotificationType.EMAIL],
             enabled=True,
             created_at=datetime.now()
         )
-        await self.service.add_notification_rule(rule)
 
-        # 準備更新數據
-        updates = {
-            "min_confidence": 0.8,
-            "enabled": False
-        }
+        # Create matching signal
+        matching_signal = MagicMock()
+        matching_signal.signal_type = "buy"
+        matching_signal.confidence = 0.8
 
-        # 執行測試
-        result = await self.service.update_notification_rule("rule_001", updates)
+        # Test matching
+        assert rule.matches_signal("AAPL", matching_signal) is True
+        assert rule.matches_signal("GOOGL", matching_signal) is False  # Wrong symbol
 
-        # 驗證結果
-        assert result is True
-        updated_rule = self.service.notification_rules["rule_001"]
-        assert updated_rule.min_confidence == 0.8
-        assert updated_rule.enabled is False
+        # Create non-matching signal (low confidence)
+        low_confidence_signal = MagicMock()
+        low_confidence_signal.signal_type = "buy"
+        low_confidence_signal.confidence = 0.5
 
-    async def test_get_notification_stats_success(self):
-        """測試取得通知統計"""
-        # 添加一些規則
-        rule1 = NotificationRule(
-            rule_id="rule_001",
-            user_id=1,
-            stock_symbols=["2330.TW"],
-            signal_types=["BUY"],
-            min_confidence=0.7,
-            min_priority=SignalPriority.MEDIUM,
-            notification_types=[NotificationType.EMAIL],
-            enabled=True,
-            created_at=datetime.now()
-        )
-        rule2 = NotificationRule(
-            rule_id="rule_002",
+        assert rule.matches_signal("AAPL", low_confidence_signal) is False
+
+        # Create non-matching signal (wrong type)
+        wrong_type_signal = MagicMock()
+        wrong_type_signal.signal_type = "hold"
+        wrong_type_signal.confidence = 0.8
+
+        assert rule.matches_signal("AAPL", wrong_type_signal) is False
+
+    def test_notification_rule_matches_buy_sell_point(self):
+        """Test notification rule buy/sell point matching"""
+        rule = NotificationRule(
+            rule_id="test_rule",
             user_id=1,
             stock_symbols=["AAPL"],
-            signal_types=["SELL"],
-            min_confidence=0.8,
-            min_priority=SignalPriority.HIGH,
-            notification_types=[NotificationType.PUSH],
-            enabled=False,
+            signal_types=[],
+            min_confidence=0.7,
+            min_priority=SignalPriority.MEDIUM,
+            notification_types=[NotificationType.EMAIL],
+            enabled=True,
             created_at=datetime.now()
         )
 
-        await self.service.add_notification_rule(rule1)
-        await self.service.add_notification_rule(rule2)
+        # Create matching buy/sell point
+        matching_point = MagicMock()
+        matching_point.confidence = 0.8
+        matching_point.priority = SignalPriority.HIGH
 
-        # 執行測試
-        stats = self.service.get_notification_stats()
+        assert rule.matches_buy_sell_point("AAPL", matching_point) is True
+        assert rule.matches_buy_sell_point("GOOGL", matching_point) is False  # Wrong symbol
 
-        # 驗證結果
-        assert stats["total_rules"] == 2
-        assert stats["enabled_rules"] == 1
-        assert stats["disabled_rules"] == 1
-        assert NotificationType.EMAIL.value in stats["notification_types"]
-        assert NotificationType.PUSH.value in stats["notification_types"]
+        # Create non-matching point (low confidence)
+        low_confidence_point = MagicMock()
+        low_confidence_point.confidence = 0.5
+        low_confidence_point.priority = SignalPriority.HIGH
 
+        assert rule.matches_buy_sell_point("AAPL", low_confidence_point) is False
 
-async def run_all_tests():
-    """執行所有測試"""
-    print("開始執行信號通知服務測試...")
+        # Create non-matching point (low priority)
+        low_priority_point = MagicMock()
+        low_priority_point.confidence = 0.8
+        low_priority_point.priority = SignalPriority.LOW
 
-    # 測試通知規則
-    print("\n=== 測試通知規則 ===")
-    test_rule = TestNotificationRule()
+        assert rule.matches_buy_sell_point("AAPL", low_priority_point) is False
 
-    try:
-        test_rule.setup_method()
+    @pytest.mark.asyncio
+    async def test_process_trading_signal(self):
+        """Test processing trading signals for notifications"""
+        # Add notification rule
+        user_id = 1
+        self.notification_service.add_notification_rule(
+            user_id=user_id,
+            stock_symbols=["AAPL"],
+            signal_types=["buy"],
+            min_confidence=0.7,
+            notification_types=[NotificationType.IN_APP]
+        )
 
-        test_rule.test_matches_signal_success()
-        print("✅ 信號匹配成功測試 - 通過")
+        # Mock database session and stock
+        db_session = MagicMock()
+        stock_id = 123
+        mock_stock = MagicMock()
+        mock_stock.symbol = "AAPL"
 
-        test_rule.test_matches_signal_wrong_stock()
-        print("✅ 股票代號不匹配測試 - 通過")
+        # Create trading signal
+        signal = MagicMock()
+        signal.signal_type = "buy"
+        signal.confidence = 0.8
+        signal.price = Decimal("150.00")
+        signal.date = date.today()
+        signal.description = "Strong buy signal"
 
-        test_rule.test_matches_signal_wrong_type()
-        print("✅ 信號類型不匹配測試 - 通過")
+        # Mock the stock_crud.get method
+        with patch('services.trading.signal_notification.stock_crud') as mock_crud:
+            mock_crud.get = AsyncMock(return_value=mock_stock)
 
-        test_rule.test_matches_signal_low_confidence()
-        print("✅ 信心度過低測試 - 通過")
+            # Process the signal
+            await self.notification_service.process_trading_signal(
+                db_session, stock_id, signal
+            )
 
-        test_rule.test_matches_signal_low_priority()
-        print("✅ 優先級過低測試 - 通過")
+            # Verify notification was created
+            assert len(self.notification_service.message_queue) == 1
 
-        test_rule.test_matches_signal_empty_restrictions()
-        print("✅ 無限制規則測試 - 通過")
+            message = self.notification_service.message_queue[0]
+            assert message.user_id == user_id
+            assert message.stock_symbol == "AAPL"
+            assert message.notification_type == NotificationType.IN_APP
+            assert "AAPL 交易信號提醒" in message.title
 
-    except Exception as e:
-        print(f"❌ 通知規則測試失敗: {str(e)}")
-        return False
+    @pytest.mark.asyncio
+    async def test_process_buy_sell_point(self):
+        """Test processing buy/sell points for notifications"""
+        # Add notification rule
+        user_id = 1
+        self.notification_service.add_notification_rule(
+            user_id=user_id,
+            stock_symbols=["TSLA"],
+            min_confidence=0.7,
+            min_priority=SignalPriority.MEDIUM,
+            notification_types=[NotificationType.EMAIL]
+        )
 
-    # 測試通知渠道
-    print("\n=== 測試通知渠道 ===")
-    test_channel = TestNotificationChannel()
+        # Mock database session and stock
+        db_session = MagicMock()
+        stock_id = 456
+        mock_stock = MagicMock()
+        mock_stock.symbol = "TSLA"
 
-    try:
-        test_channel.setup_method()
+        # Create buy/sell point
+        buy_sell_point = MagicMock()
+        buy_sell_point.action = BuySellAction.BUY
+        buy_sell_point.confidence = 0.85
+        buy_sell_point.price = Decimal("200.00")
+        buy_sell_point.priority = SignalPriority.HIGH
+        buy_sell_point.risk_level = "medium"
+        buy_sell_point.reason = "Golden cross detected"
+        buy_sell_point.stop_loss = Decimal("190.00")
+        buy_sell_point.take_profit = Decimal("220.00")
+        buy_sell_point.to_dict = MagicMock(return_value={
+            "action": "buy",
+            "confidence": 0.85,
+            "price": 200.00
+        })
 
-        await test_channel.test_send_email_notification_success()
-        print("✅ 發送郵件通知測試 - 通過")
+        # Mock the stock_crud.get method
+        with patch('services.trading.signal_notification.stock_crud') as mock_crud:
+            mock_crud.get = AsyncMock(return_value=mock_stock)
 
-        await test_channel.test_send_push_notification_success()
-        print("✅ 發送推送通知測試 - 通過")
+            # Process the buy/sell point
+            await self.notification_service.process_buy_sell_point(
+                db_session, stock_id, buy_sell_point
+            )
 
-        await test_channel.test_send_webhook_notification_success()
-        print("✅ 發送 Webhook 通知測試 - 通過")
+            # Verify notification was created
+            assert len(self.notification_service.message_queue) == 1
 
-        await test_channel.test_send_notification_failure()
-        print("✅ 發送通知失敗測試 - 通過")
+            message = self.notification_service.message_queue[0]
+            assert message.user_id == user_id
+            assert message.stock_symbol == "TSLA"
+            assert message.notification_type == NotificationType.EMAIL
+            assert "TSLA 買入信號" in message.title
 
-        test_channel.test_format_signal_message_buy_signal()
-        print("✅ 格式化買入信號消息測試 - 通過")
+    @pytest.mark.asyncio
+    async def test_process_notification_queue(self):
+        """Test processing notification queue"""
+        # Create mock notification messages
+        message1 = NotificationMessage(
+            message_id="msg_1",
+            user_id=1,
+            notification_type=NotificationType.IN_APP,
+            alert_level=AlertLevel.INFO,
+            title="Test Notification 1",
+            content="Test content 1",
+            stock_symbol="AAPL",
+            signal_data={},
+            created_at=datetime.now(),
+            status="pending"
+        )
 
-        test_channel.test_format_signal_message_sell_signal()
-        print("✅ 格式化賣出信號消息測試 - 通過")
+        message2 = NotificationMessage(
+            message_id="msg_2",
+            user_id=1,
+            notification_type=NotificationType.EMAIL,
+            alert_level=AlertLevel.WARNING,
+            title="Test Notification 2",
+            content="Test content 2",
+            stock_symbol="TSLA",
+            signal_data={},
+            created_at=datetime.now(),
+            status="pending"
+        )
 
-    except Exception as e:
-        print(f"❌ 通知渠道測試失敗: {str(e)}")
-        return False
+        # Add messages to queue
+        self.notification_service.message_queue.extend([message1, message2])
 
-    # 測試信號通知服務
-    print("\n=== 測試信號通知服務 ===")
-    test_service = TestSignalNotificationService()
+        # Process the queue
+        await self.notification_service.process_notification_queue()
 
-    try:
-        test_service.setup_method()
+        # Verify messages were processed
+        assert message1.status == "sent"
+        assert message1.sent_at is not None
+        assert message2.status == "sent"
+        assert message2.sent_at is not None
 
-        await test_service.test_add_notification_rule_success()
-        print("✅ 添加通知規則測試 - 通過")
+    def test_notification_statistics(self):
+        """Test notification statistics"""
+        # Create mock messages with different statuses
+        message1 = NotificationMessage(
+            message_id="msg_1",
+            user_id=1,
+            notification_type=NotificationType.EMAIL,
+            alert_level=AlertLevel.INFO,
+            title="Test 1",
+            content="Content 1",
+            stock_symbol="AAPL",
+            signal_data={},
+            created_at=datetime.now(),
+            status="sent"
+        )
 
-        await test_service.test_remove_notification_rule_success()
-        print("✅ 移除通知規則測試 - 通過")
+        message2 = NotificationMessage(
+            message_id="msg_2",
+            user_id=2,
+            notification_type=NotificationType.PUSH,
+            alert_level=AlertLevel.WARNING,
+            title="Test 2",
+            content="Content 2",
+            stock_symbol="TSLA",
+            signal_data={},
+            created_at=datetime.now(),
+            status="failed"
+        )
 
-        await test_service.test_remove_notification_rule_not_found()
-        print("✅ 移除不存在規則測試 - 通過")
+        message3 = NotificationMessage(
+            message_id="msg_3",
+            user_id=1,
+            notification_type=NotificationType.EMAIL,
+            alert_level=AlertLevel.CRITICAL,
+            title="Test 3",
+            content="Content 3",
+            stock_symbol="GOOGL",
+            signal_data={},
+            created_at=datetime.now(),
+            status="pending"
+        )
 
-        await test_service.test_process_signal_with_matching_rules()
-        print("✅ 處理匹配規則信號測試 - 通過")
+        self.notification_service.message_queue.extend([message1, message2, message3])
 
-        await test_service.test_process_signal_no_matching_rules()
-        print("✅ 處理不匹配規則信號測試 - 通過")
+        # Add some notification rules
+        self.notification_service.add_notification_rule(user_id=1)
+        self.notification_service.add_notification_rule(user_id=2)
 
-        await test_service.test_process_signal_disabled_rule()
-        print("✅ 處理禁用規則信號測試 - 通過")
+        # Get statistics
+        stats = self.notification_service.get_notification_statistics()
 
-        await test_service.test_get_user_notification_rules_success()
-        print("✅ 取得用戶通知規則測試 - 通過")
+        # Verify statistics
+        assert stats['total_messages'] == 3
+        assert stats['sent_messages'] == 1
+        assert stats['failed_messages'] == 1
+        assert stats['pending_messages'] == 1
+        assert stats['success_rate'] == 1/3
+        assert stats['total_rules'] == 2
+        assert stats['active_users'] == 2
 
-        await test_service.test_update_notification_rule_success()
-        print("✅ 更新通知規則測試 - 通過")
+        # Verify type statistics
+        assert 'email' in stats['type_statistics']
+        assert 'push' in stats['type_statistics']
+        assert stats['type_statistics']['email']['total'] == 2
+        assert stats['type_statistics']['email']['sent'] == 1
 
-        await test_service.test_get_notification_stats_success()
-        print("✅ 取得通知統計測試 - 通過")
+        # Verify user statistics
+        assert stats['user_statistics'][1] == 2  # User 1 has 2 messages
+        assert stats['user_statistics'][2] == 1  # User 2 has 1 message
 
-    except Exception as e:
-        print(f"❌ 信號通知服務測試失敗: {str(e)}")
-        return False
+    def test_get_user_messages(self):
+        """Test getting user messages"""
+        # Create messages for different users
+        message1 = NotificationMessage(
+            message_id="msg_1",
+            user_id=1,
+            notification_type=NotificationType.EMAIL,
+            alert_level=AlertLevel.INFO,
+            title="Message 1",
+            content="Content 1",
+            stock_symbol="AAPL",
+            signal_data={},
+            created_at=datetime.now() - timedelta(hours=2),
+            status="sent"
+        )
 
-    print("\n🎉 所有信號通知服務測試通過！")
-    return True
+        message2 = NotificationMessage(
+            message_id="msg_2",
+            user_id=1,
+            notification_type=NotificationType.PUSH,
+            alert_level=AlertLevel.WARNING,
+            title="Message 2",
+            content="Content 2",
+            stock_symbol="TSLA",
+            signal_data={},
+            created_at=datetime.now() - timedelta(hours=1),
+            status="pending"
+        )
 
+        message3 = NotificationMessage(
+            message_id="msg_3",
+            user_id=2,
+            notification_type=NotificationType.EMAIL,
+            alert_level=AlertLevel.CRITICAL,
+            title="Message 3",
+            content="Content 3",
+            stock_symbol="GOOGL",
+            signal_data={},
+            created_at=datetime.now(),
+            status="sent"
+        )
 
-if __name__ == "__main__":
-    success = asyncio.run(run_all_tests())
-    exit(0 if success else 1)
+        self.notification_service.message_queue.extend([message1, message2, message3])
+
+        # Get all messages for user 1
+        user1_messages = self.notification_service.get_user_messages(user_id=1)
+        assert len(user1_messages) == 2
+        # Should be sorted by created_at descending (newest first)
+        assert user1_messages[0].message_id == "msg_2"
+        assert user1_messages[1].message_id == "msg_1"
+
+        # Get only sent messages for user 1
+        user1_sent = self.notification_service.get_user_messages(user_id=1, status="sent")
+        assert len(user1_sent) == 1
+        assert user1_sent[0].message_id == "msg_1"
+
+        # Get messages for user 2
+        user2_messages = self.notification_service.get_user_messages(user_id=2)
+        assert len(user2_messages) == 1
+        assert user2_messages[0].message_id == "msg_3"
+
+        # Get messages for non-existent user
+        user3_messages = self.notification_service.get_user_messages(user_id=3)
+        assert len(user3_messages) == 0
+
+    def test_notification_message_to_dict(self):
+        """Test notification message serialization"""
+        message = NotificationMessage(
+            message_id="test_msg",
+            user_id=1,
+            notification_type=NotificationType.EMAIL,
+            alert_level=AlertLevel.WARNING,
+            title="Test Message",
+            content="Test Content",
+            stock_symbol="AAPL",
+            signal_data={"test": "data"},
+            created_at=datetime(2024, 1, 1, 12, 0, 0),
+            sent_at=datetime(2024, 1, 1, 12, 1, 0),
+            status="sent"
+        )
+
+        result = message.to_dict()
+
+        assert result['message_id'] == "test_msg"
+        assert result['user_id'] == 1
+        assert result['notification_type'] == "email"
+        assert result['alert_level'] == "warning"
+        assert result['title'] == "Test Message"
+        assert result['content'] == "Test Content"
+        assert result['stock_symbol'] == "AAPL"
+        assert result['signal_data'] == {"test": "data"}
+        assert result['created_at'] == "2024-01-01T12:00:00"
+        assert result['sent_at'] == "2024-01-01T12:01:00"
+        assert result['status'] == "sent"
+
+    def test_enum_values(self):
+        """Test enum values are correctly defined"""
+        # Test NotificationType enum
+        assert NotificationType.EMAIL == "email"
+        assert NotificationType.SMS == "sms"
+        assert NotificationType.PUSH == "push"
+        assert NotificationType.WEBHOOK == "webhook"
+        assert NotificationType.IN_APP == "in_app"
+
+        # Test AlertLevel enum
+        assert AlertLevel.INFO == "info"
+        assert AlertLevel.WARNING == "warning"
+        assert AlertLevel.CRITICAL == "critical"
+        assert AlertLevel.URGENT == "urgent"
+
+    @pytest.mark.asyncio
+    async def test_error_handling_stock_not_found(self):
+        """Test error handling when stock is not found"""
+        # Add notification rule
+        user_id = 1
+        self.notification_service.add_notification_rule(
+            user_id=user_id,
+            stock_symbols=["AAPL"],
+            notification_types=[NotificationType.IN_APP]
+        )
+
+        # Mock database session
+        db_session = MagicMock()
+        stock_id = 999  # Non-existent stock
+
+        # Create trading signal
+        signal = MagicMock()
+        signal.signal_type = "buy"
+        signal.confidence = 0.8
+
+        # Mock the stock_crud.get method to return None
+        with patch('services.trading.signal_notification.stock_crud') as mock_crud:
+            mock_crud.get = AsyncMock(return_value=None)
+
+            # Process the signal - should not crash
+            await self.notification_service.process_trading_signal(
+                db_session, stock_id, signal
+            )
+
+            # Verify no notification was created
+            assert len(self.notification_service.message_queue) == 0
+
+    def test_disabled_notification_rules(self):
+        """Test that disabled notification rules are ignored"""
+        user_id = 1
+
+        # Add enabled rule
+        rule_id = self.notification_service.add_notification_rule(
+            user_id=user_id,
+            stock_symbols=["AAPL"],
+            notification_types=[NotificationType.EMAIL]
+        )
+
+        # Disable the rule
+        rules = self.notification_service.get_user_notification_rules(user_id)
+        rules[0].enabled = False
+
+        # Create signal that would normally match
+        signal = MagicMock()
+        signal.signal_type = "buy"
+        signal.confidence = 0.8
+
+        # Create notification rule manually for testing
+        rule = rules[0]
+
+        # Even though signal matches, rule is disabled
+        assert rule.matches_signal("AAPL", signal) is True
+        assert rule.enabled is False

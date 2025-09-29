@@ -11,7 +11,7 @@ import sys
 # 將專案根目錄加入 Python 路徑
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from core.config import settings
+from app.settings import settings
 from core.database import Base
 
 # 匯入所有模型以確保它們被註冊到 Base.metadata
@@ -43,7 +43,7 @@ target_metadata = Base.metadata
 
 def get_url():
     """取得資料庫 URL"""
-    return settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://")
+    return settings.database.url.replace("postgresql://", "postgresql+psycopg2://")
 
 
 def run_migrations_offline() -> None:

@@ -1,7 +1,7 @@
 """
 股票相關API Schema模型
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime
 from .common import PaginatedResponse
@@ -102,11 +102,47 @@ class IndicatorCalculateRequest(BaseModel):
     start_date: Optional[date] = Field(None, description="開始日期")
     end_date: Optional[date] = Field(None, description="結束日期")
 
+    @field_validator("indicator_type")
+    @classmethod
+    def validate_indicator_type(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("指標類型不可為空")
+        return value
+
+    @field_validator("period")
+    @classmethod
+    def validate_period(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return value
+        if value <= 0:
+            raise ValueError("週期必須為正整數")
+        if value > 365:
+            raise ValueError("週期不能超過365")
+        return value
+
 
 class IndicatorBatchItem(BaseModel):
     type: str = Field(..., description="指標類型")
     period: Optional[int] = Field(None, description="週期")
     parameters: Optional[Dict[str, Any]] = Field(None, description="指標參數")
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("指標類型不可為空")
+        return value
+
+    @field_validator("period")
+    @classmethod
+    def validate_period(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return value
+        if value <= 0:
+            raise ValueError("週期必須為正整數")
+        if value > 365:
+            raise ValueError("週期不能超過365")
+        return value
 
 
 class IndicatorBatchCalculateRequest(BaseModel):
@@ -114,6 +150,13 @@ class IndicatorBatchCalculateRequest(BaseModel):
     timeframe: Optional[str] = Field("1d", description="時間框架")
     start_date: Optional[date] = Field(None, description="開始日期")
     end_date: Optional[date] = Field(None, description="結束日期")
+
+    @field_validator("indicators")
+    @classmethod
+    def validate_indicators(cls, value: List[IndicatorBatchItem]) -> List[IndicatorBatchItem]:
+        if not value:
+            raise ValueError("指標列表不可為空")
+        return value
 
 
 class IndicatorSummaryResponse(BaseModel):

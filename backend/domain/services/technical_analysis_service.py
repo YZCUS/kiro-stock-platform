@@ -160,6 +160,36 @@ class TechnicalAnalysisService:
 
         return analysis_result
 
+    async def calculate_indicator(
+        self,
+        db: AsyncSession,
+        stock_id: int,
+        indicator: IndicatorType,
+        days: int = 60
+    ) -> Dict[str, Any]:
+        """計算單一技術指標並返回摘要資料"""
+
+        stock = await self.stock_repo.get(db, stock_id)
+        if not stock:
+            raise ValueError(f"股票 ID {stock_id} 不存在")
+
+        prices = await self.price_repo.get_by_stock(db, stock_id, limit=days + 10)
+        if len(prices) < 5:
+            raise ValueError("價格數據不足，無法計算技術指標")
+
+        result = await self._calculate_single_indicator(prices, indicator, max_points=days)
+
+        summary = self._summarize_indicator(result)
+
+        return {
+            "stock_id": stock_id,
+            "symbol": stock.symbol,
+            "indicator": indicator.value,
+            "values": result.values,
+            "dates": [d.isoformat() if isinstance(d, date) else d for d in result.dates],
+            "summary": summary,
+        }
+
     async def get_stock_technical_summary(
         self,
         db: AsyncSession,
@@ -240,14 +270,17 @@ class TechnicalAnalysisService:
     async def _calculate_single_indicator(
         self,
         prices: List,
-        indicator: IndicatorType
+        indicator: IndicatorType,
+        max_points: int = 30
     ) -> IndicatorResult:
         """計算單一技術指標 (簡化版本)"""
         try:
             # 這裡應該使用實際的技術指標計算庫
             # 暫時返回模擬結果
-            values = [float(p.close_price) for p in prices[:10]]
-            dates = [p.date for p in prices[:10]]
+            limit = min(len(prices), max_points)
+            selected = prices[:limit]
+            values = [float(p.close_price) for p in selected]
+            dates = [p.date for p in selected]
 
             return IndicatorResult(
                 indicator_type=indicator.value,
@@ -265,6 +298,35 @@ class TechnicalAnalysisService:
                 success=False,
                 error_message=str(e)
             )
+
+    def _summarize_indicator(self, result: IndicatorResult) -> Dict[str, Any]:
+        """產生指標摘要資訊"""
+
+        if not result.values:
+            return {
+                "current_value": None,
+                "previous_value": None,
+                "change": None,
+                "trend": "unknown",
+            }
+
+        current = result.values[0]
+        previous = result.values[1] if len(result.values) > 1 else current
+        change = current - previous
+
+        if change > 0:
+            trend = "up"
+        elif change < 0:
+            trend = "down"
+        else:
+            trend = "flat"
+
+        return {
+            "current_value": round(current, 4),
+            "previous_value": round(previous, 4),
+            "change": round(change, 4),
+            "trend": trend,
+        }
 
     async def _generate_technical_signals(self, prices: List) -> List[str]:
         """產生技術信號"""
