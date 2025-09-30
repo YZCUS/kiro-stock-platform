@@ -53,3 +53,14 @@ class IPriceHistoryRepository(ABC):
     async def create_batch(self, db: AsyncSession, price_data: List):
         """批次創建價格數據"""
         pass
+
+    @abstractmethod
+    async def get_missing_dates(
+        self,
+        db: AsyncSession,
+        stock_id: int,
+        start_date: date,
+        end_date: date
+    ) -> List[date]:
+        """取得缺失的交易日期"""
+        pass

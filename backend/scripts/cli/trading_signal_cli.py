@@ -13,11 +13,14 @@ sys.path.append('/app')
 
 from core.database import get_db
 from services.analysis.signal_detector import (
-    trading_signal_detector, 
-    SignalType, 
+    trading_signal_detector,
+    SignalType,
     SignalStrength
 )
-from models.repositories.crud_stock import stock_crud
+# ✅ Clean Architecture: 使用 repository implementations 而非 CRUD
+from infrastructure.persistence.stock_repository import StockRepository
+# Note: trading_signal_crud 目前還沒有遷移到 Clean Architecture
+# 暫時保留使用，需要在之後創建 TradingSignalRepository
 from models.repositories.crud_trading_signal import trading_signal_crud
 
 
@@ -33,10 +36,13 @@ async def detect_signals_command(
     
     try:
         async with get_db() as db_session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(db_session)
+
             # 獲取股票ID
             stock_ids = []
             for symbol in stock_symbols:
-                stock = await stock_crud.get_by_symbol(db_session, symbol)
+                stock = await stock_repo.get_by_symbol(db_session, symbol)
                 if stock:
                     stock_ids.append(stock.id)
                     print(f"找到股票: {symbol} (ID: {stock.id})")
@@ -112,10 +118,13 @@ async def list_signals_command(
     
     try:
         async with get_db() as db_session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(db_session)
+
             if stock_symbols:
                 # 查詢指定股票的信號
                 for symbol in stock_symbols:
-                    stock = await stock_crud.get_by_symbol(db_session, symbol)
+                    stock = await stock_repo.get_by_symbol(db_session, symbol)
                     if not stock:
                         print(f"找不到股票: {symbol}")
                         continue
@@ -162,7 +171,7 @@ async def list_signals_command(
                         signals_by_stock[stock_id].append(signal)
                     
                     for stock_id, stock_signals in signals_by_stock.items():
-                        stock = await stock_crud.get(db_session, stock_id)
+                        stock = await stock_repo.get(db_session, stock_id)
                         stock_symbol = stock.symbol if stock else f"ID:{stock_id}"
                         
                         print(f"\n{stock_symbol}:")
@@ -185,10 +194,13 @@ async def signal_statistics_command(
     
     try:
         async with get_db() as db_session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(db_session)
+
             if stock_symbols:
                 # 統計指定股票的信號
                 for symbol in stock_symbols:
-                    stock = await stock_crud.get_by_symbol(db_session, symbol)
+                    stock = await stock_repo.get_by_symbol(db_session, symbol)
                     if not stock:
                         print(f"找不到股票: {symbol}")
                         continue
@@ -259,7 +271,10 @@ async def signal_analysis_command(
     
     try:
         async with get_db() as db_session:
-            stock = await stock_crud.get_by_symbol(db_session, stock_symbol)
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(db_session)
+
+            stock = await stock_repo.get_by_symbol(db_session, stock_symbol)
             if not stock:
                 print(f"找不到股票: {stock_symbol}")
                 return
@@ -312,10 +327,13 @@ async def cleanup_signals_command(
     
     try:
         async with get_db() as db_session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(db_session)
+
             if stock_symbols:
                 total_deleted = 0
                 for symbol in stock_symbols:
-                    stock = await stock_crud.get_by_symbol(db_session, symbol)
+                    stock = await stock_repo.get_by_symbol(db_session, symbol)
                     if stock:
                         deleted = await trading_signal_crud.delete_old_signals(
                             db_session,

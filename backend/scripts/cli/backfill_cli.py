@@ -16,7 +16,9 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.settings import settings
 from services.data.backfill import data_backfill_service, BackfillStrategy, BackfillPriority
-from models.repositories.crud_stock import stock_crud
+# ✅ Clean Architecture: 使用 repository implementation 而非 CRUD
+from infrastructure.persistence.stock_repository import StockRepository
+from infrastructure.persistence.price_history_repository import PriceHistoryRepository
 import json
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -42,10 +44,13 @@ class BackfillCLI:
     async def list_stocks(self, market: str = None, limit: int = 50):
         """列出股票"""
         async with self.async_session_local() as session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(session)
+
             if market:
-                stocks = await stock_crud.get_by_market(session, market=market, limit=limit)
+                stocks, _ = await stock_repo.get_multi_with_filter(session, market=market, limit=limit)
             else:
-                stocks = await stock_crud.get_multi(session, limit=limit)
+                stocks, _ = await stock_repo.get_multi_with_filter(session, limit=limit)
             
             print(f"\n找到 {len(stocks)} 支股票:")
             print(f"{'ID':<5} {'代號':<12} {'市場':<6} {'名稱':<20}")
@@ -57,13 +62,16 @@ class BackfillCLI:
     async def analyze_gaps(self, stock_id: int = None, days: int = 90):
         """分析數據缺口"""
         async with self.async_session_local() as session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(session)
+
             if stock_id:
-                stocks = [await stock_crud.get(session, stock_id)]
+                stocks = [await stock_repo.get(session, stock_id)]
                 if not stocks[0]:
                     print(f"找不到股票 ID: {stock_id}")
                     return
             else:
-                stocks = await stock_crud.get_multi(session, limit=100)
+                stocks, _ = await stock_repo.get_multi_with_filter(session, limit=100)
             
             end_date = date.today()
             start_date = end_date - timedelta(days=days)
@@ -75,10 +83,13 @@ class BackfillCLI:
             total_gaps = 0
             stocks_with_gaps = 0
             
+            # ✅ Clean Architecture: 實例化 price_history repository
+            price_repo = PriceHistoryRepository(session)
+
             for stock in stocks:
                 try:
-                    from models.repositories.crud_price_history import price_history_crud
-                    missing_dates = await price_history_crud.get_missing_dates(
+                    # ✅ Clean Architecture: 使用 PriceHistoryRepository 的 get_missing_dates()
+                    missing_dates = await price_repo.get_missing_dates(
                         session, stock_id=stock.id, start_date=start_date, end_date=end_date
                     )
                     
@@ -97,17 +108,20 @@ class BackfillCLI:
             print(f"\n總結: {stocks_with_gaps}/{len(stocks)} 支股票有缺口，總缺失 {total_gaps} 天")
     
     async def backfill_stock(
-        self, 
-        stock_id: int, 
-        start_date: str, 
+        self,
+        stock_id: int,
+        start_date: str,
         end_date: str = None,
         strategy: str = "missing_only",
         priority: str = "normal"
     ):
         """回補單支股票"""
         async with self.async_session_local() as session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(session)
+
             # 驗證股票存在
-            stock = await stock_crud.get(session, stock_id)
+            stock = await stock_repo.get(session, stock_id)
             if not stock:
                 print(f"找不到股票 ID: {stock_id}")
                 return
@@ -161,20 +175,23 @@ class BackfillCLI:
                 print(f"回補失敗: {str(e)}")
     
     async def batch_backfill(
-        self, 
-        market: str = None, 
-        start_date: str = None, 
+        self,
+        market: str = None,
+        start_date: str = None,
         end_date: str = None,
         strategy: str = "missing_only",
         max_stocks: int = 10
     ):
         """批次回補"""
         async with self.async_session_local() as session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(session)
+
             # 獲取股票列表
             if market:
-                stocks = await stock_crud.get_by_market(session, market=market, limit=max_stocks)
+                stocks, _ = await stock_repo.get_multi_with_filter(session, market=market, limit=max_stocks)
             else:
-                stocks = await stock_crud.get_multi(session, limit=max_stocks)
+                stocks, _ = await stock_repo.get_multi_with_filter(session, limit=max_stocks)
             
             if not stocks:
                 print("沒有找到股票")

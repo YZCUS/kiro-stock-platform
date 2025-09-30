@@ -17,7 +17,8 @@ from services.infrastructure.storage import indicator_storage_service
 from services.infrastructure.cache import indicator_cache_service
 from services.infrastructure.sync import indicator_sync_service
 from services.analysis.technical_analysis import IndicatorType
-from models.repositories.crud_stock import stock_crud
+# ✅ Clean Architecture: 使用 repository interface 而非 CRUD
+from infrastructure.persistence.stock_repository import StockRepository
 
 
 async def calculate_indicators_command(
@@ -35,10 +36,13 @@ async def calculate_indicators_command(
         await redis_client.connect()
         
         async with get_db() as db_session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(db_session)
+
             # 獲取股票ID
             stock_ids = []
             for symbol in stock_symbols:
-                stock = await stock_crud.get_by_symbol(db_session, symbol)
+                stock = await stock_repo.get_by_symbol(db_session, symbol)
                 if stock:
                     stock_ids.append(stock.id)
                     print(f"找到股票: {symbol} (ID: {stock.id})")
@@ -96,19 +100,22 @@ async def cache_management_command(
     """快取管理命令"""
     try:
         await redis_client.connect()
-        
+
         async with get_db() as db_session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(db_session)
+
             if action == "warm_up":
                 # 預熱快取
                 if stock_symbols:
                     stock_ids = []
                     for symbol in stock_symbols:
-                        stock = await stock_crud.get_by_symbol(db_session, symbol)
+                        stock = await stock_repo.get_by_symbol(db_session, symbol)
                         if stock:
                             stock_ids.append(stock.id)
                 else:
                     # 預熱所有股票
-                    stocks = await stock_crud.get_multi(db_session, limit=100)
+                    stocks, _ = await stock_repo.get_multi_with_filter(db_session, limit=100)
                     stock_ids = [stock.id for stock in stocks]
                 
                 print(f"開始預熱 {len(stock_ids)} 支股票的快取...")
@@ -134,7 +141,7 @@ async def cache_management_command(
                 # 清理快取
                 if stock_symbols:
                     for symbol in stock_symbols:
-                        stock = await stock_crud.get_by_symbol(db_session, symbol)
+                        stock = await stock_repo.get_by_symbol(db_session, symbol)
                         if stock:
                             count = await indicator_cache_service.invalidate_stock_indicators(
                                 stock.id, indicators
@@ -174,10 +181,13 @@ async def sync_management_command(
                 return
             
             async with get_db() as db_session:
+                # ✅ Clean Architecture: 實例化 repository
+                stock_repo = StockRepository(db_session)
+
                 # 獲取股票ID
                 stock_ids = []
                 for symbol in stock_symbols:
-                    stock = await stock_crud.get_by_symbol(db_session, symbol)
+                    stock = await stock_repo.get_by_symbol(db_session, symbol)
                     if stock:
                         stock_ids.append(stock.id)
                 
@@ -270,8 +280,11 @@ async def data_integrity_command(
         await redis_client.connect()
         
         async with get_db() as db_session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(db_session)
+
             for symbol in stock_symbols:
-                stock = await stock_crud.get_by_symbol(db_session, symbol)
+                stock = await stock_repo.get_by_symbol(db_session, symbol)
                 if not stock:
                     print(f"找不到股票: {symbol}")
                     continue

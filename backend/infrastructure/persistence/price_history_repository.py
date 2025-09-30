@@ -186,3 +186,41 @@ class PriceHistoryRepository(IPriceHistoryRepository):
             'min_volume': 0,
             'trading_days': 0
         }
+
+    async def get_missing_dates(
+        self,
+        db: AsyncSession,
+        stock_id: int,
+        start_date: date,
+        end_date: date
+    ) -> List[date]:
+        """取得缺失的交易日期"""
+        from datetime import timedelta
+
+        # 查詢該股票在期間內的所有日期
+        result = await db.execute(
+            select(PriceHistory.date)
+            .where(
+                and_(
+                    PriceHistory.stock_id == stock_id,
+                    PriceHistory.date >= start_date,
+                    PriceHistory.date <= end_date
+                )
+            )
+            .order_by(PriceHistory.date)
+        )
+
+        existing_dates = set(row[0] for row in result.fetchall())
+
+        # 生成所有工作日（週一到週五）
+        all_dates = []
+        current_date = start_date
+        while current_date <= end_date:
+            # 只包含工作日
+            if current_date.weekday() < 5:
+                all_dates.append(current_date)
+            current_date += timedelta(days=1)
+
+        # 找出缺失的日期
+        missing_dates = [d for d in all_dates if d not in existing_dates]
+        return missing_dates

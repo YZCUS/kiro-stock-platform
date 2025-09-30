@@ -21,7 +21,8 @@ from services.trading.signal_notification import (
     signal_notification_service,
     NotificationType
 )
-from models.repositories.crud_stock import stock_crud
+# ✅ Clean Architecture: 使用 repository implementation 而非 CRUD
+from infrastructure.persistence.stock_repository import StockRepository
 
 
 async def generate_buy_sell_points_command(
@@ -34,8 +35,11 @@ async def generate_buy_sell_points_command(
     
     try:
         async with get_db() as db_session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(db_session)
+
             for symbol in stock_symbols:
-                stock = await stock_crud.get_by_symbol(db_session, symbol)
+                stock = await stock_repo.get_by_symbol(db_session, symbol)
                 if not stock:
                     print(f"找不到股票: {symbol}")
                     continue
@@ -86,10 +90,13 @@ async def analyze_market_trend_command(
     
     try:
         async with get_db() as db_session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(db_session)
+
             trend_summary = {}
-            
+
             for symbol in stock_symbols:
-                stock = await stock_crud.get_by_symbol(db_session, symbol)
+                stock = await stock_repo.get_by_symbol(db_session, symbol)
                 if not stock:
                     print(f"找不到股票: {symbol}")
                     continue
@@ -154,15 +161,18 @@ async def filter_signals_command(
         min_priority_enum = priority_map.get(min_priority, SignalPriority.MEDIUM)
         
         async with get_db() as db_session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(db_session)
+
             filtered_points = []
-            
+
             # 如果沒有指定股票，獲取所有活躍股票
             if not stock_symbols:
-                stocks = await stock_crud.get_multi(db_session, limit=20)
+                stocks, _ = await stock_repo.get_multi_with_filter(db_session, limit=20)
                 stock_symbols = [stock.symbol for stock in stocks]
-            
+
             for symbol in stock_symbols:
-                stock = await stock_crud.get_by_symbol(db_session, symbol)
+                stock = await stock_repo.get_by_symbol(db_session, symbol)
                 if not stock:
                     continue
                 

@@ -18,8 +18,9 @@ from sqlalchemy.orm import sessionmaker
 from app.settings import settings
 from services.analysis.technical_analysis import technical_analysis_service, IndicatorType
 from services.analysis.indicator_calculator import advanced_calculator
-from models.repositories.crud_stock import stock_crud
-from models.repositories.crud_price_history import price_history_crud
+# ✅ Clean Architecture: 使用 repository implementations 而非 CRUD
+from infrastructure.persistence.stock_repository import StockRepository
+from infrastructure.persistence.price_history_repository import PriceHistoryRepository
 import pandas as pd
 import numpy as np
 
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 class TechnicalAnalysisCLI:
     """技術分析命令行介面"""
-    
+
     def __init__(self):
         self.engine = create_async_engine(
             settings.database.url.replace("postgresql://", "postgresql+asyncpg://"),
@@ -38,6 +39,7 @@ class TechnicalAnalysisCLI:
         self.async_session_local = sessionmaker(
             self.engine, class_=AsyncSession, expire_on_commit=False
         )
+        # Note: repositories 會在每個 async with session 中實例化
     
     async def close(self):
         """關閉資料庫連接"""
@@ -46,10 +48,13 @@ class TechnicalAnalysisCLI:
     async def list_stocks(self, market: str = None, limit: int = 20):
         """列出股票"""
         async with self.async_session_local() as session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(session)
+
             if market:
-                stocks = await stock_crud.get_by_market(session, market=market, limit=limit)
+                stocks, _ = await stock_repo.get_multi_with_filter(session, market=market, limit=limit)
             else:
-                stocks = await stock_crud.get_multi(session, limit=limit)
+                stocks, _ = await stock_repo.get_multi_with_filter(session, limit=limit)
             
             print(f"\n找到 {len(stocks)} 支股票:")
             print(f"{'ID':<5} {'代號':<12} {'市場':<6} {'名稱':<20}")
@@ -67,8 +72,11 @@ class TechnicalAnalysisCLI:
     ):
         """計算技術指標"""
         async with self.async_session_local() as session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(session)
+
             # 驗證股票存在
-            stock = await stock_crud.get(session, stock_id)
+            stock = await stock_repo.get(session, stock_id)
             if not stock:
                 print(f"找不到股票 ID: {stock_id}")
                 return
@@ -127,11 +135,14 @@ class TechnicalAnalysisCLI:
     ):
         """批次計算指標"""
         async with self.async_session_local() as session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(session)
+
             # 獲取股票列表
             if market:
-                stocks = await stock_crud.get_by_market(session, market=market, limit=max_stocks)
+                stocks, _ = await stock_repo.get_multi_with_filter(session, market=market, limit=max_stocks)
             else:
-                stocks = await stock_crud.get_multi(session, limit=max_stocks)
+                stocks, _ = await stock_repo.get_multi_with_filter(session, limit=max_stocks)
             
             if not stocks:
                 print("沒有找到股票")
@@ -186,8 +197,11 @@ class TechnicalAnalysisCLI:
     async def show_indicators(self, stock_id: int, indicator_types: str = None, days: int = 30):
         """顯示指標數據"""
         async with self.async_session_local() as session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(session)
+
             # 驗證股票存在
-            stock = await stock_crud.get(session, stock_id)
+            stock = await stock_repo.get(session, stock_id)
             if not stock:
                 print(f"找不到股票 ID: {stock_id}")
                 return
@@ -232,21 +246,25 @@ class TechnicalAnalysisCLI:
     async def analyze_advanced(self, stock_id: int, days: int = 100):
         """進階技術分析"""
         async with self.async_session_local() as session:
+            # ✅ Clean Architecture: 實例化 repositories
+            stock_repo = StockRepository(session)
+            price_repo = PriceHistoryRepository(session)
+
             # 驗證股票存在
-            stock = await stock_crud.get(session, stock_id)
+            stock = await stock_repo.get(session, stock_id)
             if not stock:
                 print(f"找不到股票 ID: {stock_id}")
                 return
-            
+
             print(f"\n進階技術分析: {stock.symbol} ({stock.market})")
             print(f"分析期間: 最近 {days} 天")
-            
+
             try:
                 # 獲取價格數據
                 end_date = date.today()
                 start_date = end_date - timedelta(days=days)
-                
-                price_data = await price_history_crud.get_stock_price_range(
+
+                price_data = await price_repo.get_stock_price_range(
                     session,
                     stock_id=stock_id,
                     start_date=start_date,
@@ -374,8 +392,11 @@ class TechnicalAnalysisCLI:
     async def export_indicators(self, stock_id: int, output_file: str, days: int = 90):
         """匯出指標數據"""
         async with self.async_session_local() as session:
+            # ✅ Clean Architecture: 實例化 repository
+            stock_repo = StockRepository(session)
+
             # 驗證股票存在
-            stock = await stock_crud.get(session, stock_id)
+            stock = await stock_repo.get(session, stock_id)
             if not stock:
                 print(f"找不到股票 ID: {stock_id}")
                 return

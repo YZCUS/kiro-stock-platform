@@ -144,9 +144,19 @@ def get_price_history_repository():
 
 
 def get_technical_indicator_repository():
-    """取得技術指標儲存庫"""
+    """取得技術指標儲存庫 (Legacy版本，過渡期使用)"""
     from models.repositories.crud_technical_indicator import technical_indicator_crud
     return technical_indicator_crud
+
+
+def get_technical_indicator_repository_clean(
+    db: AsyncSession = Depends(get_database_session)
+) -> 'ITechnicalIndicatorRepository':
+    """取得技術指標儲存庫 (Clean Architecture版本)"""
+    from domain.repositories.technical_indicator_repository_interface import ITechnicalIndicatorRepository
+    from infrastructure.persistence.technical_indicator_repository import TechnicalIndicatorRepository
+
+    return TechnicalIndicatorRepository(db)
 
 
 def get_trading_signal_repository():
