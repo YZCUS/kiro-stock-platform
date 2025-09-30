@@ -11,8 +11,15 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
-from core.config import settings
 import logging
+
+# 嘗試導入新的 settings，如果失敗則使用舊的
+try:
+    from app.settings import settings
+    _use_new_settings = True
+except ImportError:
+    from core.config import settings
+    _use_new_settings = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,9 +28,15 @@ logger = logging.getLogger(__name__)
 async def test_database_connection():
     """測試資料庫連接"""
     try:
+        # 根據 settings 類型獲取資料庫 URL
+        if _use_new_settings:
+            db_url = settings.database.url
+        else:
+            db_url = settings.DATABASE_URL
+
         # 建立資料庫引擎
         engine = create_async_engine(
-            settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
+            db_url.replace("postgresql://", "postgresql+asyncpg://"),
             echo=True
         )
         
@@ -76,12 +89,25 @@ async def test_redis_connection():
     """測試 Redis 連接"""
     try:
         import redis.asyncio as redis
-        
+
         logger.info("正在測試 Redis 連接...")
-        
+
+        # 根據 settings 類型獲取 Redis URL
+        if _use_new_settings:
+            # 新的 settings 結構：從配置組合 URL
+            redis_conf = settings.redis
+            if hasattr(redis_conf, 'password') and redis_conf.password:
+                auth_part = f":{redis_conf.password}@"
+            else:
+                auth_part = ""
+            redis_url = f"redis://{auth_part}{redis_conf.host}:{redis_conf.port}/{redis_conf.db}"
+        else:
+            # 舊的 settings 結構
+            redis_url = settings.REDIS_URL
+
         # 建立 Redis 客戶端
         redis_client = redis.from_url(
-            settings.REDIS_URL,
+            redis_url,
             encoding="utf-8",
             decode_responses=True
         )

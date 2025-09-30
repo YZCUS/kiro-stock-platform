@@ -12,20 +12,12 @@ from fastapi import Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import (
-    get_cache_service,
     get_database_session,
-    get_price_history_repository_clean,
-    get_stock_repository,
-    get_trading_signal_repository_clean,
-    get_trading_signal_service_clean,
     get_websocket_manager,
 )
 from domain.services.stock_service import StockService
 from domain.services.trading_signal_service import TradingSignalService
 from infrastructure.cache.redis_cache_service import ICacheService
-from domain.repositories.price_history_repository_interface import IPriceHistoryRepository
-from domain.repositories.stock_repository_interface import IStockRepository
-from domain.repositories.trading_signal_repository_interface import ITradingSignalRepository
 from infrastructure.realtime.websocket_manager import IWebSocketManager
 
 logger = logging.getLogger(__name__)
@@ -239,37 +231,30 @@ async def websocket_endpoint(
     stock_id: Optional[int] = None,
     client_id: Optional[str] = None,
     db: AsyncSession = Depends(get_database_session),
-    stock_repo: IStockRepository = Depends(get_stock_repository),
-    price_repo: IPriceHistoryRepository = Depends(get_price_history_repository_clean),
-    signal_repo: ITradingSignalRepository = Depends(get_trading_signal_repository_clean),
-    cache_service: ICacheService = Depends(get_cache_service),
     websocket_manager: IWebSocketManager = Depends(get_websocket_manager),
-    trading_signal_service: TradingSignalService = Depends(get_trading_signal_service_clean),
 ) -> None:
-    """WebSocket 端點處理函數"""
-    stock_service = StockService(stock_repo, price_repo, cache_service)
-    service = WebSocketService(
-        stock_service=stock_service,
-        trading_signal_service=trading_signal_service,
-        websocket_manager=websocket_manager,
-        cache_service=cache_service,
-    )
+    """
+    WebSocket 端點處理函數
 
+    使用全域單例的 WebSocketService，避免為每個連線創建新實例。
+    """
+    # 從依賴注入容器取得單例服務
+    from app.dependencies import get_websocket_service
+
+    service = get_websocket_service()
+
+    # 檢查服務狀態（初始化已在應用程式啟動時完成）
     if websocket_service_state.degraded_mode:
         logger.warning("WebSocket服務處於降級模式，拒絕新連接: %s", client_id)
         await websocket.close(code=1013, reason="Service temporarily unavailable")
         return
 
     if not websocket_service_state.is_initialized:
-        try:
-            await websocket_manager.initialize()
-            websocket_service_state.set_initialized(True)
-        except Exception as exc:  # noqa: BLE001
-            websocket_service_state.set_initialized(False, exc)
-            logger.exception("初始化 WebSocket 管理器失敗")
-            await websocket.close(code=1011, reason="Service initialization failed")
-            return
+        logger.error("WebSocket 管理器未初始化，拒絕連接: %s", client_id)
+        await websocket.close(code=1011, reason="Service not initialized")
+        return
 
+    # 建立連接
     await websocket_manager.connect(websocket, client_id)
 
     if stock_id:

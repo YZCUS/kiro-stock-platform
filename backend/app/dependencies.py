@@ -3,7 +3,7 @@
 實現控制反轉 (IoC) 和依賴注入 (DI) 模式
 """
 from functools import lru_cache
-from typing import Generator
+from typing import Generator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends
 
@@ -14,7 +14,7 @@ from infrastructure.realtime.websocket_manager import (
     RedisBackedWebSocketManager,
     SimpleWebSocketManager,
 )
-from services.infrastructure.redis_pubsub import redis_broadcaster
+from infrastructure.realtime.redis_pubsub import redis_broadcaster
 
 
 # =============================================================================
@@ -29,9 +29,17 @@ async def get_database_session() -> Generator[AsyncSession, None, None]:
         yield session
 
 
-@lru_cache()
+# Redis 客戶端單例
+_redis_client_singleton = None
+
+
 def get_redis_client(settings: Settings = Depends(get_settings)):
-    """取得 Redis 客戶端"""
+    """取得 Redis 客戶端（單例模式）"""
+    global _redis_client_singleton
+
+    if _redis_client_singleton is not None:
+        return _redis_client_singleton
+
     import redis
 
     try:
@@ -45,6 +53,7 @@ def get_redis_client(settings: Settings = Depends(get_settings)):
         )
         # 測試連接
         client.ping()
+        _redis_client_singleton = client
         return client
     except Exception as e:
         print(f"Redis 連接失敗: {e}")
@@ -55,18 +64,27 @@ def get_redis_client(settings: Settings = Depends(get_settings)):
 # 快取服務 (Clean Architecture)
 # =============================================================================
 
+# CacheService 單例
+_cache_service_singleton: Optional[ICacheService] = None
+
+
 def get_cache_service(
     settings: Settings = Depends(get_settings),
     redis_client=Depends(get_redis_client)
 ) -> ICacheService:
-    """取得統一快取服務"""
-    return RedisCacheService(redis_client, settings.redis)
+    """取得統一快取服務（單例模式）"""
+    global _cache_service_singleton
+
+    if _cache_service_singleton is not None:
+        return _cache_service_singleton
+
+    _cache_service_singleton = RedisCacheService(redis_client, settings.redis)
+    return _cache_service_singleton
+
+_websocket_manager_singleton: Optional[IWebSocketManager] = None
 
 
-_websocket_manager_singleton: IWebSocketManager | None = None
-
-
-def get_websocket_manager(settings: Settings | None = None) -> IWebSocketManager:
+def get_websocket_manager(settings: Optional[Settings] = None) -> IWebSocketManager:
     """取得全域 WebSocket 管理器實例，支援 DI 與外部呼叫"""
     global _websocket_manager_singleton
 
@@ -227,3 +245,71 @@ def get_data_validation_service_clean(
     from domain.services.data_validation_service import DataValidationService
 
     return DataValidationService(stock_repo, price_repo, cache_service)
+
+
+# =============================================================================
+# WebSocket Services 依賴
+# =============================================================================
+
+# WebSocketService 的全域單例實例
+_websocket_service_singleton: Optional['WebSocketService'] = None
+
+
+def get_websocket_service() -> 'WebSocketService':
+    """
+    取得 WebSocket 服務 (全域單例模式)
+
+    重要：WebSocketService 應該是單例的，所有 WebSocket 連線共享同一個實例。
+    這避免了為每個連線創建新的服務實例，大幅降低記憶體使用。
+
+    架構說明：
+    - WebSocketService 本身是單例
+    - stock_service 和 trading_signal_service 也應該是單例
+    - 但它們依賴 Repository（需要 db session 進行操作）
+    - Repository 是輕量級的（只包含查詢邏輯，不持有狀態）
+    - 每次資料庫操作時，db session 作為參數傳入
+
+    因此，單例策略：
+    1. WebSocketService: 單例 ✓
+    2. StockService/TradingSignalService: 單例 ✓
+    3. Repository: 輕量級，可以是單例 ✓
+    4. CacheService: 單例 ✓
+    5. WebSocketManager: 單例 ✓
+    6. DB Session: 每個請求獨立 ✓
+    """
+    global _websocket_service_singleton
+
+    if _websocket_service_singleton is None:
+        from api.v1.websocket import WebSocketService
+        from domain.services.stock_service import StockService
+        from domain.services.trading_signal_service import TradingSignalService
+        from infrastructure.persistence.stock_repository import StockRepository
+        from infrastructure.persistence.price_history_repository import PriceHistoryRepository
+        from infrastructure.persistence.trading_signal_repository import TradingSignalRepository
+
+        # 獲取單例依賴
+        settings = get_settings()
+        cache_service = get_cache_service(settings, get_redis_client(settings))
+        websocket_manager = get_websocket_manager(settings)
+
+        # 創建 Repository 單例（輕量級，只包含查詢邏輯）
+        # 注意：Repository 的 __init__ 不持有 db，db 在每個方法調用時傳入
+        stock_repo = StockRepository(db=None)  # db 會在調用時傳入
+        price_repo = PriceHistoryRepository(db=None)
+        signal_repo = TradingSignalRepository(db=None)
+
+        # 創建 Service 單例
+        stock_service = StockService(stock_repo, price_repo, cache_service)
+        trading_signal_service = TradingSignalService(
+            stock_repo, price_repo, cache_service, signal_repo
+        )
+
+        # 創建 WebSocketService 單例
+        _websocket_service_singleton = WebSocketService(
+            stock_service=stock_service,
+            trading_signal_service=trading_signal_service,
+            websocket_manager=websocket_manager,
+            cache_service=cache_service
+        )
+
+    return _websocket_service_singleton

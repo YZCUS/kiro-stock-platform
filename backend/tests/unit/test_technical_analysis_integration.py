@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
-技術分析整合測試 (legacy)
+技術分析整合測試 - Clean Architecture
 """
 import pytest
-
-# TODO: recreate technical analysis integration tests for new domain services
-pytest.xfail("Legacy technical analysis integration tests incompatible with refactored architecture")
+from unittest.mock import Mock, AsyncMock
 
 import asyncio
 import sys

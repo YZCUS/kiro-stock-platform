@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
-交易信號檢測器測試 (legacy)
+交易信號檢測器測試 - Clean Architecture
 """
 import pytest
-
-# TODO: replace detector tests with domain-level trading signal scenarios
-pytest.xfail("Legacy trading signal detector tests incompatible with refactored architecture")
+from unittest.mock import Mock, AsyncMock
 
 import asyncio
 import sys

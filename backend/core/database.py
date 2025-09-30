@@ -9,12 +9,20 @@ except ImportError:
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import MetaData
 from typing import AsyncGenerator
+import logging
 
 import os
+import sys
+
+# 設定日誌
+logger = logging.getLogger(__name__)
 
 # 檢查是否在測試環境中
-import sys
-_is_testing = 'pytest' in sys.modules or 'test' in sys.argv[0] if sys.argv else False
+_is_testing = (
+    'pytest' in sys.modules or
+    os.getenv('TESTING', '').lower() == 'true' or
+    os.getenv('ENV', '') == 'test'
+)
 
 if not _is_testing:
     try:
@@ -25,8 +33,9 @@ if not _is_testing:
             echo=settings.app.debug,
             future=True
         )
-    except Exception:
+    except Exception as e:
         # 如果設定有問題，則使用記憶體資料庫
+        logger.warning(f"Failed to load database settings, using in-memory database: {e}")
         engine = create_async_engine(
             "sqlite+aiosqlite:///:memory:",
             echo=False,
@@ -48,8 +57,6 @@ else:
     AsyncSessionLocal = None
 
 # 建立基礎模型類別
-Base = declarative_base()
-
 # 設定元數據命名約定
 convention = {
     "ix": "ix_%(column_0_label)s",
@@ -59,11 +66,25 @@ convention = {
     "pk": "pk_%(table_name)s"
 }
 
-Base.metadata = MetaData(naming_convention=convention)
+# 在測試環境中，我們需要處理表重複定義的問題
+if _is_testing:
+    # 使用獨立的 metadata，避免表重複定義
+    metadata = MetaData(naming_convention=convention)
+    Base = declarative_base(metadata=metadata)
+else:
+    Base = declarative_base()
+    Base.metadata = MetaData(naming_convention=convention)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """取得資料庫會話"""
+    if AsyncSessionLocal is None:
+        raise RuntimeError(
+            "Database not initialized. AsyncSessionLocal is None. "
+            "This usually happens in test environments. "
+            "Please ensure the database is properly configured."
+        )
+
     async with AsyncSessionLocal() as session:
         try:
             yield session

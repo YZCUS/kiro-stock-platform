@@ -61,10 +61,20 @@ class RedisClient:
         """建立 Redis 連接"""
         try:
             # 創建連接池
-            redis_url = settings.redis.get("url") if hasattr(settings.redis, "get") else None
+            # 優先使用 redis.url，否則從 host/port/password 構建
+            if isinstance(settings.redis, dict):
+                redis_url = settings.redis.get("url")
+            else:
+                redis_url = getattr(settings.redis, "url", None)
+
             if not redis_url:
-                auth_part = f":{settings.redis.password}@" if settings.redis.password else ""
-                redis_url = f"redis://{auth_part}{settings.redis.host}:{settings.redis.port}/{settings.redis.db}"
+                password = getattr(settings.redis, "password", None) if hasattr(settings, "redis") else None
+                host = getattr(settings.redis, "host", "localhost")
+                port = getattr(settings.redis, "port", 6379)
+                db = getattr(settings.redis, "db", 0)
+
+                auth_part = f":{password}@" if password else ""
+                redis_url = f"redis://{auth_part}{host}:{port}/{db}"
 
             self.connection_pool = redis.ConnectionPool.from_url(
                 redis_url,
@@ -149,9 +159,13 @@ class RedisClient:
         self,
         key: str,
         value: Any,
-        expire: int = settings.CACHE_EXPIRE_SECONDS
+        expire: Optional[int] = None
     ) -> bool:
         """設定快取值"""
+        # 如果沒有指定過期時間，使用預設值
+        if expire is None:
+            expire = getattr(settings, 'CACHE_EXPIRE_SECONDS', 3600)  # 預設 1 小時
+
         json_value = json.dumps(value, ensure_ascii=False, default=str)
         await self.redis_client.set(key, json_value, ex=expire)
         return True

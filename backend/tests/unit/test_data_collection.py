@@ -16,8 +16,9 @@ from domain.services.data_collection_service import DataCollectionService
 from infrastructure.persistence.stock_repository import StockRepository
 from infrastructure.persistence.price_history_repository import PriceHistoryRepository
 from infrastructure.cache.unified_cache_service import MockCacheService
-from domain.models.stock import Stock
-from domain.models.price_history import PriceHistory
+# 避免直接導入 domain models，使用 Mock 替代
+# from domain.models.stock import Stock
+# from domain.models.price_history import PriceHistory
 
 
 class TestDataCollectionService:
@@ -40,7 +41,7 @@ class TestDataCollectionService:
     async def test_collect_stock_data_success(self):
         """測試成功收集股票數據"""
         # Mock 股票數據
-        mock_stock = Mock(spec=Stock)
+        mock_stock = Mock()
         mock_stock.id = 1
         mock_stock.symbol = "2330.TW"
         mock_stock.market = "TW"
@@ -100,7 +101,7 @@ class TestDataCollectionService:
     @pytest.mark.asyncio
     async def test_collect_stock_data_no_data(self):
         """測試收集不到數據的情況"""
-        mock_stock = Mock(spec=Stock)
+        mock_stock = Mock()
         mock_stock.id = 1
         mock_stock.symbol = "INVALID.TW"
         mock_stock.market = "TW"
@@ -127,7 +128,7 @@ class TestDataCollectionService:
         # Mock 多個股票
         mock_stocks = []
         for i, symbol in enumerate(stock_symbols):
-            mock_stock = Mock(spec=Stock)
+            mock_stock = Mock()
             mock_stock.id = i + 1
             mock_stock.symbol = symbol
             mock_stock.market = "TW" if ".TW" in symbol else "US"

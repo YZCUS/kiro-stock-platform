@@ -14,8 +14,9 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from infrastructure.persistence.stock_repository import StockRepository
 from infrastructure.persistence.price_history_repository import PriceHistoryRepository
-from domain.models.stock import Stock
-from domain.models.price_history import PriceHistory
+# 避免直接導入 domain models，使用 Mock 替代
+# from domain.models.stock import Stock
+# from domain.models.price_history import PriceHistory
 
 
 class TestStockRepository:
@@ -29,7 +30,7 @@ class TestStockRepository:
     async def test_get_by_symbol_success(self):
         """測試成功根據代號取得股票"""
         # Mock 股票數據
-        mock_stock = Mock(spec=Stock)
+        mock_stock = Mock()
         mock_stock.symbol = '2330.TW'
         mock_stock.market = 'TW'
 
@@ -68,8 +69,8 @@ class TestStockRepository:
         """測試成功根據市場取得股票清單"""
         # Mock 股票清單
         mock_stocks = [
-            Mock(spec=Stock, symbol='2330.TW', market='TW'),
-            Mock(spec=Stock, symbol='2317.TW', market='TW')
+            Mock(symbol='2330.TW', market='TW'),
+            Mock(symbol='2317.TW', market='TW')
         ]
 
         # Mock 資料庫查詢結果
@@ -90,8 +91,8 @@ class TestStockRepository:
         """測試根據代號搜尋股票"""
         # Mock 搜尋結果
         mock_stocks = [
-            Mock(spec=Stock, symbol='2330.TW', name='台積電'),
-            Mock(spec=Stock, symbol='2337.TW', name='旺宏')
+            Mock( symbol='2330.TW', name='台積電'),
+            Mock( symbol='2337.TW', name='旺宏')
         ]
 
         # Mock 資料庫查詢結果
@@ -112,7 +113,7 @@ class TestStockRepository:
         """測試根據名稱搜尋股票"""
         # Mock 搜尋結果
         mock_stocks = [
-            Mock(spec=Stock, symbol='2330.TW', name='台積電')
+            Mock( symbol='2330.TW', name='台積電')
         ]
 
         # Mock 資料庫查詢結果
@@ -129,8 +130,8 @@ class TestStockRepository:
         assert len(result) == 1
         assert '台積' in result[0].name
 
-    @patch.object(Stock, 'validate_symbol')
-    @patch.object(Stock, 'normalize_symbol')
+    @patch('domain.models.stock.Stock.validate_symbol')
+    @patch('domain.models.stock.Stock.normalize_symbol')
     async def test_create_stock_success(self, mock_normalize, mock_validate):
         """測試成功創建股票"""
         # Mock 驗證和標準化
@@ -141,7 +142,7 @@ class TestStockRepository:
         self.crud_stock.get_by_symbol = AsyncMock(return_value=None)
 
         # Mock 創建成功
-        mock_created_stock = Mock(spec=Stock)
+        mock_created_stock = Mock()
         mock_created_stock.symbol = '2330.TW'
         mock_created_stock.market = 'TW'
         self.crud_stock.create = AsyncMock(return_value=mock_created_stock)
@@ -157,7 +158,7 @@ class TestStockRepository:
         mock_validate.assert_called_once_with('2330.tw', 'TW')
         mock_normalize.assert_called_once_with('2330.tw', 'TW')
 
-    @patch.object(Stock, 'validate_symbol')
+    @patch('domain.models.stock.Stock.validate_symbol')
     async def test_create_stock_invalid_symbol(self, mock_validate):
         """測試創建無效代號的股票"""
         # Mock 驗證失敗
@@ -169,8 +170,8 @@ class TestStockRepository:
                 self.mock_session, symbol='invalid', market='TW'
             )
 
-    @patch.object(Stock, 'validate_symbol')
-    @patch.object(Stock, 'normalize_symbol')
+    @patch('domain.models.stock.Stock.validate_symbol')
+    @patch('domain.models.stock.Stock.normalize_symbol')
     async def test_create_stock_already_exists(self, mock_normalize, mock_validate):
         """測試創建已存在的股票"""
         # Mock 驗證和標準化
@@ -178,7 +179,7 @@ class TestStockRepository:
         mock_normalize.return_value = '2330.TW'
 
         # Mock 股票已存在
-        existing_stock = Mock(spec=Stock)
+        existing_stock = Mock()
         self.crud_stock.get_by_symbol = AsyncMock(return_value=existing_stock)
 
         # 執行測試並期待異常
@@ -190,7 +191,7 @@ class TestStockRepository:
     async def test_get_with_latest_price_success(self):
         """測試取得股票及最新價格"""
         # Mock 帶價格的股票數據
-        mock_stock = Mock(spec=Stock)
+        mock_stock = Mock()
         mock_stock.id = 1
         mock_stock.symbol = '2330.TW'
         mock_stock.price_history = [
@@ -283,7 +284,7 @@ class TestPriceHistoryRepository:
         self.crud_price.get_by_stock_and_date = AsyncMock(return_value=None)
 
         # Mock 創建成功
-        mock_created_price = Mock(spec=PriceHistory)
+        mock_created_price = Mock()
         self.crud_price.create = AsyncMock(return_value=mock_created_price)
 
         # 執行測試
@@ -308,11 +309,11 @@ class TestPriceHistoryRepository:
     async def test_create_or_update_price_existing_record(self):
         """測試更新既有的價格記錄"""
         # Mock 價格已存在
-        existing_price = Mock(spec=PriceHistory)
+        existing_price = Mock()
         self.crud_price.get_by_stock_and_date = AsyncMock(return_value=existing_price)
 
         # Mock 更新成功
-        mock_updated_price = Mock(spec=PriceHistory)
+        mock_updated_price = Mock()
         self.crud_price.update = AsyncMock(return_value=mock_updated_price)
 
         # 執行測試
@@ -347,7 +348,7 @@ class TestPriceHistoryRepository:
         ]
 
         # Mock 創建成功
-        self.crud_price.create_or_update_price = AsyncMock(return_value=Mock(spec=PriceHistory))
+        self.crud_price.create_or_update_price = AsyncMock(return_value=Mock())
 
         # 執行測試
         result = await self.crud_price.bulk_create_prices(

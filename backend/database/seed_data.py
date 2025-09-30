@@ -11,8 +11,7 @@ from decimal import Decimal
 # 將專案根目錄加入 Python 路徑
 sys.path.append(str(Path(__file__).parent.parent))
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from app.settings import settings
 import logging
 
@@ -251,8 +250,8 @@ async def main():
         settings.database.url.replace("postgresql://", "postgresql+asyncpg://"),
         echo=False
     )
-    
-    AsyncSessionLocal = sessionmaker(
+
+    AsyncSessionLocal = async_sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
     
