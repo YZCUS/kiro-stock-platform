@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
-from models.domain.technical_indicator import TechnicalIndicator
+from domain.models.technical_indicator import TechnicalIndicator
 
 
 class ITechnicalIndicatorRepository(ABC):

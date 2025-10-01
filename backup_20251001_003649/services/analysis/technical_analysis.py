@@ -14,8 +14,8 @@ import logging
 from models.domain.stock import Stock
 from models.domain.price_history import PriceHistory
 from models.domain.technical_indicator import TechnicalIndicator
-from models.repositories.crud_stock import stock_crud
-from models.repositories.crud_price_history import price_history_crud
+from infrastructure.persistence.stock_repository import StockRepository
+from infrastructure.persistence.price_history_repository import PriceHistoryRepository
 from models.domain.system_log import SystemLog
 from services.analysis.indicator_calculator import indicator_calculator, PriceData
 
@@ -115,15 +115,17 @@ class TechnicalAnalysisService:
         
         try:
             # 獲取股票資訊
-            stock = await stock_crud.get(db_session, stock_id)
+            stock_repo = StockRepository(db_session)
+            stock = await stock_repo.get_by_id(db_session, stock_id)
             if not stock:
                 raise ValueError(f"找不到股票 ID: {stock_id}")
-            
+
             # 獲取價格數據
             end_date = date.today()
             start_date = end_date - timedelta(days=days)
-            
-            price_data = await price_history_crud.get_stock_price_range(
+
+            price_repo = PriceHistoryRepository(db_session)
+            price_data = await price_repo.get_by_stock_and_date_range(
                 db_session,
                 stock_id=stock_id,
                 start_date=start_date,
@@ -370,16 +372,17 @@ class TechnicalAnalysisService:
     ):
         """保存指標到資料庫"""
         try:
-            from models.repositories.crud_technical_indicator import technical_indicator_crud
-            
+            from infrastructure.persistence.technical_indicator_repository import TechnicalIndicatorRepository
+
             # 保存所有有效的指標值
             if result.values and result.dates:
                 saved_count = 0
-                
+                indicator_repo = TechnicalIndicatorRepository(db_session)
+
                 for date_val, value in zip(result.dates, result.values):
                     if not np.isnan(value):
                         try:
-                            await technical_indicator_crud.create_or_update_indicator(
+                            await indicator_repo.create_or_update_indicator(
                                 db_session,
                                 stock_id=stock_id,
                                 date=date_val,
@@ -390,7 +393,7 @@ class TechnicalAnalysisService:
                             saved_count += 1
                         except Exception as e:
                             logger.warning(f"保存指標 {result.indicator_type} 日期 {date_val} 時發生錯誤: {str(e)}")
-                
+
                 logger.debug(f"成功保存 {saved_count} 個 {result.indicator_type} 指標值")
                         
         except Exception as e:

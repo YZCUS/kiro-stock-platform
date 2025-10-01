@@ -11,7 +11,9 @@ import logging
 from core.redis import redis_client
 from app.settings import settings
 from models.domain.technical_indicator import TechnicalIndicator
-from models.repositories.crud_technical_indicator import technical_indicator_crud
+# ✅ Clean Architecture: 使用 repository implementations
+from infrastructure.persistence.technical_indicator_repository import TechnicalIndicatorRepository
+from infrastructure.persistence.stock_repository import StockRepository
 
 logger = logging.getLogger(__name__)
 
@@ -237,8 +239,10 @@ class IndicatorCacheService:
             # 從資料庫取得指標數據
             end_date = date.today()
             start_date = end_date - timedelta(days=days)
-            
-            indicators = await technical_indicator_crud.get_stock_indicators_by_date_range(
+
+            # ✅ 使用 repository
+            indicator_repo = TechnicalIndicatorRepository(db_session)
+            indicators = await indicator_repo.get_by_stock_and_date_range(
                 db_session,
                 stock_id=stock_id,
                 start_date=start_date,
@@ -349,9 +353,10 @@ class IndicatorCacheService:
         """預熱快取"""
         try:
             logger.info(f"開始預熱 {len(stock_ids)} 支股票的指標快取")
-            
-            from models.repositories.crud_stock import stock_crud
-            
+
+            # ✅ 使用 repository
+            stock_repo = StockRepository(db_session)
+
             warm_up_results = {
                 'processed_stocks': 0,
                 'successful_caches': 0,
@@ -359,11 +364,11 @@ class IndicatorCacheService:
                 'total_indicators_cached': 0,
                 'errors': []
             }
-            
+
             for stock_id in stock_ids:
                 try:
                     # 獲取股票資訊
-                    stock = await stock_crud.get(db_session, stock_id)
+                    stock = await stock_repo.get(db_session, stock_id)
                     if not stock:
                         warm_up_results['errors'].append(f"找不到股票 ID: {stock_id}")
                         continue
@@ -442,31 +447,33 @@ class IndicatorCacheService:
             
             end_date = date.today()
             start_date = end_date - timedelta(days=days)
-            
-            indicators = await technical_indicator_crud.get_stock_indicators_by_date_range(
+
+            # ✅ 使用 repository
+            indicator_repo = TechnicalIndicatorRepository(db_session)
+            indicators = await indicator_repo.get_by_stock_and_date_range(
                 db_session,
                 stock_id=stock_id,
                 start_date=start_date,
                 end_date=end_date,
                 indicator_types=indicator_types
             )
-            
+
             # 轉換為返回格式
             indicators_data = {}
             for indicator in indicators:
                 if indicator.indicator_type not in indicators_data:
                     indicators_data[indicator.indicator_type] = []
-                
+
                 indicators_data[indicator.indicator_type].append({
                     'date': indicator.date.isoformat(),
                     'value': float(indicator.value) if indicator.value else 0,
                     'parameters': indicator.parameters
                 })
-            
+
             # 快取結果
             if indicators_data:
-                from models.repositories.crud_stock import stock_crud
-                stock = await stock_crud.get(db_session, stock_id)
+                stock_repo = StockRepository(db_session)
+                stock = await stock_repo.get(db_session, stock_id)
                 if stock:
                     await self.cache_indicators_batch(indicators, stock.symbol)
             
@@ -516,10 +523,11 @@ class IndicatorCacheService:
     ) -> Dict[str, Any]:
         """刷新股票快取"""
         try:
-            from models.repositories.crud_stock import stock_crud
-            
+            # ✅ 使用 repository
+            stock_repo = StockRepository(db_session)
+
             # 獲取股票資訊
-            stock = await stock_crud.get(db_session, stock_id)
+            stock = await stock_repo.get(db_session, stock_id)
             if not stock:
                 return {
                     'success': False,

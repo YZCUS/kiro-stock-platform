@@ -19,9 +19,7 @@ from services.analysis.signal_detector import (
 )
 # ✅ Clean Architecture: 使用 repository implementations 而非 CRUD
 from infrastructure.persistence.stock_repository import StockRepository
-# Note: trading_signal_crud 目前還沒有遷移到 Clean Architecture
-# 暫時保留使用，需要在之後創建 TradingSignalRepository
-from models.repositories.crud_trading_signal import trading_signal_crud
+from infrastructure.persistence.trading_signal_repository import TradingSignalRepository
 
 
 async def detect_signals_command(
@@ -120,6 +118,7 @@ async def list_signals_command(
         async with get_db() as db_session:
             # ✅ Clean Architecture: 實例化 repository
             stock_repo = StockRepository(db_session)
+            trading_signal_repo = TradingSignalRepository(db_session)
 
             if stock_symbols:
                 # 查詢指定股票的信號
@@ -128,13 +127,13 @@ async def list_signals_command(
                     if not stock:
                         print(f"找不到股票: {symbol}")
                         continue
-                    
+
                     print(f"\n{symbol} 的交易信號:")
-                    
+
                     end_date = date.today()
                     start_date = end_date - timedelta(days=days)
-                    
-                    signals = await trading_signal_crud.get_stock_signals_by_date_range(
+
+                    signals = await trading_signal_repo.get_stock_signals_by_date_range(
                         db_session,
                         stock_id=stock.id,
                         start_date=start_date,
@@ -153,8 +152,8 @@ async def list_signals_command(
             else:
                 # 查詢所有高信心度信號
                 print(f"最近 {days} 天的高信心度信號 (≥{min_confidence}):")
-                
-                high_confidence_signals = await trading_signal_crud.get_high_confidence_signals(
+
+                high_confidence_signals = await trading_signal_repo.get_high_confidence_signals(
                     db_session,
                     min_confidence=min_confidence,
                     days=days,
@@ -196,6 +195,7 @@ async def signal_statistics_command(
         async with get_db() as db_session:
             # ✅ Clean Architecture: 實例化 repository
             stock_repo = StockRepository(db_session)
+            trading_signal_repo = TradingSignalRepository(db_session)
 
             if stock_symbols:
                 # 統計指定股票的信號
@@ -204,11 +204,11 @@ async def signal_statistics_command(
                     if not stock:
                         print(f"找不到股票: {symbol}")
                         continue
-                    
+
                     print(f"\n{symbol} 信號統計:")
-                    
+
                     # 基本統計
-                    stats = await trading_signal_crud.get_signal_statistics(
+                    stats = await trading_signal_repo.get_signal_statistics(
                         db_session,
                         stock_id=stock.id,
                         days=days
@@ -220,7 +220,7 @@ async def signal_statistics_command(
                     print(f"  信號類型數: {stats['signal_types_count']}")
                     
                     # 信號類型分布
-                    distribution = await trading_signal_crud.get_signal_type_distribution(
+                    distribution = await trading_signal_repo.get_signal_type_distribution(
                         db_session,
                         stock_id=stock.id,
                         days=days
@@ -234,20 +234,20 @@ async def signal_statistics_command(
             else:
                 # 全市場信號統計
                 print("全市場信號統計:")
-                
+
                 # 基本統計
-                stats = await trading_signal_crud.get_signal_statistics(
+                stats = await trading_signal_repo.get_signal_statistics(
                     db_session,
                     days=days
                 )
-                
+
                 print(f"  總信號數: {stats['total_signals']}")
                 print(f"  平均信心度: {stats['avg_confidence']:.3f}")
                 print(f"  最高信心度: {stats['max_confidence']:.3f}")
                 print(f"  信號類型數: {stats['signal_types_count']}")
-                
+
                 # 信號類型分布
-                distribution = await trading_signal_crud.get_signal_type_distribution(
+                distribution = await trading_signal_repo.get_signal_type_distribution(
                     db_session,
                     days=days
                 )
@@ -273,14 +273,15 @@ async def signal_analysis_command(
         async with get_db() as db_session:
             # ✅ Clean Architecture: 實例化 repository
             stock_repo = StockRepository(db_session)
+            trading_signal_repo = TradingSignalRepository(db_session)
 
             stock = await stock_repo.get_by_symbol(db_session, stock_symbol)
             if not stock:
                 print(f"找不到股票: {stock_symbol}")
                 return
-            
+
             # 信號表現分析
-            performance = await trading_signal_crud.get_signal_performance_analysis(
+            performance = await trading_signal_repo.get_signal_performance_analysis(
                 db_session,
                 stock_id=stock.id,
                 signal_type=signal_type,
@@ -329,13 +330,14 @@ async def cleanup_signals_command(
         async with get_db() as db_session:
             # ✅ Clean Architecture: 實例化 repository
             stock_repo = StockRepository(db_session)
+            trading_signal_repo = TradingSignalRepository(db_session)
 
             if stock_symbols:
                 total_deleted = 0
                 for symbol in stock_symbols:
                     stock = await stock_repo.get_by_symbol(db_session, symbol)
                     if stock:
-                        deleted = await trading_signal_crud.delete_old_signals(
+                        deleted = await trading_signal_repo.delete_old_signals(
                             db_session,
                             stock_id=stock.id,
                             keep_days=keep_days
@@ -344,12 +346,12 @@ async def cleanup_signals_command(
                         print(f"  {symbol}: 刪除 {deleted} 個舊信號")
                     else:
                         print(f"  找不到股票: {symbol}")
-                
+
                 print(f"\n總共刪除 {total_deleted} 個舊信號")
-            
+
             else:
                 # 清理所有股票的舊信號
-                deleted = await trading_signal_crud.delete_old_signals(
+                deleted = await trading_signal_repo.delete_old_signals(
                     db_session,
                     keep_days=keep_days
                 )

@@ -3,7 +3,7 @@
 """
 from sqlalchemy import Column, Integer, Date, Numeric, BigInteger, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
-from models.base import BaseModel, TimestampMixin
+from domain.models.base import BaseModel, TimestampMixin
 from decimal import Decimal
 from typing import Optional, Dict, Any
 from datetime import date

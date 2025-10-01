@@ -5,7 +5,7 @@ from sqlalchemy import Column, Integer, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy import func
-from models.base import BaseModel, TimestampMixin
+from domain.models.base import BaseModel, TimestampMixin
 from typing import Dict, Any, List, Optional
 import uuid
 
@@ -36,7 +36,7 @@ class UserWatchlist(BaseModel, TimestampMixin):
     @classmethod
     def get_user_stocks(cls, session, user_id: uuid.UUID) -> List['Stock']:
         """取得用戶的自選股票"""
-        from models.domain.stock import Stock
+        from domain.models.stock import Stock
         return session.query(Stock).join(cls).filter(cls.user_id == user_id).all()
     
     @classmethod
@@ -85,7 +85,7 @@ class UserWatchlist(BaseModel, TimestampMixin):
     @classmethod
     def get_popular_stocks(cls, session, limit: int = 10) -> List[Dict[str, Any]]:
         """取得熱門自選股（被最多用戶加入的股票）"""
-        from models.domain.stock import Stock
+        from domain.models.stock import Stock
         
         result = session.query(
             Stock,

@@ -12,7 +12,7 @@ from app.settings import settings
 from services.data.collection import data_collection_service
 from services.data.validation import data_validation_service
 from services.data.cleaning import data_cleaning_service
-from models.repositories.crud_stock import stock_crud
+from infrastructure.persistence.stock_repository import StockRepository
 from models.domain.system_log import SystemLog
 
 logger = logging.getLogger(__name__)
@@ -366,7 +366,8 @@ class DataCollectionScheduler:
             return {'quality_report': quality_report.__dict__}
         else:
             # 驗證所有股票（簡化版本）
-            stocks = await stock_crud.get_multi(db_session, limit=100)
+            stock_repo = StockRepository(db_session)
+            stocks = await stock_repo.get_all(db_session, skip=0, limit=100)
             validation_results = []
             
             for stock in stocks[:10]:  # 限制數量避免過長執行時間

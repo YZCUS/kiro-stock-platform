@@ -10,7 +10,7 @@ from sqlalchemy import select, func, and_, desc, delete
 import logging
 
 from domain.repositories.technical_indicator_repository_interface import ITechnicalIndicatorRepository
-from models.domain.technical_indicator import TechnicalIndicator
+from domain.models.technical_indicator import TechnicalIndicator
 
 logger = logging.getLogger(__name__)
 

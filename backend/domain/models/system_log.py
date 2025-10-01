@@ -3,7 +3,7 @@
 """
 from sqlalchemy import Column, Integer, String, Text, DateTime, func
 from sqlalchemy.dialects.postgresql import JSONB
-from models.base import BaseModel
+from domain.models.base import BaseModel
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum

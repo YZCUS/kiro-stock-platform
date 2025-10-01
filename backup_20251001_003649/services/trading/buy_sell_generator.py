@@ -17,9 +17,9 @@ from services.analysis.signal_detector import (
 )
 from models.domain.trading_signal import TradingSignal
 from models.domain.price_history import PriceHistory
-from models.repositories.crud_trading_signal import trading_signal_crud
-from models.repositories.crud_price_history import price_history_crud
-from models.repositories.crud_stock import stock_crud
+from infrastructure.persistence.trading_signal_repository import TradingSignalRepository
+from infrastructure.persistence.price_history_repository import PriceHistoryRepository
+from infrastructure.persistence.stock_repository import StockRepository
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +152,8 @@ class BuySellSignalGenerator:
         
         try:
             # 獲取股票資訊
-            stock = await stock_crud.get(db_session, stock_id)
+            stock_repo = StockRepository(db_session)
+            stock = await stock_repo.get_by_id(db_session, stock_id)
             if not stock:
                 return BuySellAnalysisResult(
                     stock_id=stock_id,
@@ -171,20 +172,22 @@ class BuySellSignalGenerator:
             # 獲取交易信號
             end_date = date.today()
             start_date = end_date - timedelta(days=days)
-            
-            signals = await trading_signal_crud.get_stock_signals_by_date_range(
+
+            signal_repo = TradingSignalRepository(db_session)
+            signals = await signal_repo.get_stock_signals_by_date_range(
                 db_session,
                 stock_id=stock_id,
                 start_date=start_date,
                 end_date=end_date,
                 min_confidence=min_confidence
             )
-            
+
             if not signals:
                 logger.warning(f"股票 {stock.symbol} 沒有找到交易信號")
-            
+
             # 獲取價格數據
-            price_data = await price_history_crud.get_stock_price_range(
+            price_repo = PriceHistoryRepository(db_session)
+            price_data = await price_repo.get_by_stock_and_date_range(
                 db_session,
                 stock_id=stock_id,
                 start_date=start_date,

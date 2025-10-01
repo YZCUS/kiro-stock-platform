@@ -11,8 +11,8 @@ from core.database import AsyncSession, get_db
 from services.infrastructure.storage import indicator_storage_service
 from services.infrastructure.cache import indicator_cache_service
 from services.analysis.technical_analysis import IndicatorType
-from models.repositories.crud_stock import stock_crud
-from models.repositories.crud_technical_indicator import technical_indicator_crud
+from infrastructure.persistence.stock_repository import StockRepository
+from infrastructure.persistence.technical_indicator_repository import TechnicalIndicatorRepository
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +261,8 @@ class IndicatorSyncService:
         try:
             async with get_db() as db_session:
                 # 獲取股票資訊
-                stock = await stock_crud.get(db_session, stock_id)
+                stock_repo = StockRepository(db_session)
+                stock = await stock_repo.get_by_id(db_session, stock_id)
                 if not stock:
                     return {
                         'success': False,
@@ -312,15 +313,17 @@ class IndicatorSyncService:
         try:
             async with get_db() as db_session:
                 # 獲取所有股票
-                stocks = await stock_crud.get_multi(db_session, limit=max_stocks)
-                
+                stock_repo = StockRepository(db_session)
+                stocks = await stock_repo.get_all(db_session, skip=0, limit=max_stocks)
+
                 missing_data_stocks = []
                 end_date = date.today()
                 start_date = end_date - timedelta(days=days_back)
-                
+
                 # 檢查每支股票的指標完整性
+                indicator_repo = TechnicalIndicatorRepository(db_session)
                 for stock in stocks:
-                    indicators = await technical_indicator_crud.get_stock_indicators_by_date_range(
+                    indicators = await indicator_repo.get_by_stock_and_date_range(
                         db_session,
                         stock_id=stock.id,
                         start_date=start_date,
@@ -396,18 +399,19 @@ class IndicatorSyncService:
                 # 這裡簡化實現，實際可以根據查詢頻率等指標確定活躍股票
                 # 目前選擇最近有指標更新的股票
                 from sqlalchemy import select, func, desc
-                
+                from models.domain.technical_indicator import TechnicalIndicator
+
                 result = await db_session.execute(
                     select(
-                        technical_indicator_crud.model.stock_id,
-                        func.max(technical_indicator_crud.model.updated_at).label('last_update')
+                        TechnicalIndicator.stock_id,
+                        func.max(TechnicalIndicator.updated_at).label('last_update')
                     ).group_by(
-                        technical_indicator_crud.model.stock_id
+                        TechnicalIndicator.stock_id
                     ).order_by(
                         desc('last_update')
                     ).limit(max_stocks)
                 )
-                
+
                 active_stock_ids = [row.stock_id for row in result.fetchall()]
                 
                 if not active_stock_ids:

@@ -131,23 +131,6 @@ def get_price_history_repository_clean(
 
     return PriceHistoryRepository(db)
 
-def get_stock_repository_legacy():
-    """取得股票儲存庫 (Legacy版本，過渡期使用)"""
-    from models.repositories.crud_stock import stock_crud
-    return stock_crud
-
-
-def get_price_history_repository():
-    """取得價格歷史儲存庫"""
-    from models.repositories.crud_price_history import price_history_crud
-    return price_history_crud
-
-
-def get_technical_indicator_repository():
-    """取得技術指標儲存庫 (Legacy版本，過渡期使用)"""
-    from models.repositories.crud_technical_indicator import technical_indicator_crud
-    return technical_indicator_crud
-
 
 def get_technical_indicator_repository_clean(
     db: AsyncSession = Depends(get_database_session)
@@ -159,12 +142,6 @@ def get_technical_indicator_repository_clean(
     return TechnicalIndicatorRepository(db)
 
 
-def get_trading_signal_repository():
-    """取得交易信號儲存庫"""
-    from models.repositories.crud_trading_signal import trading_signal_crud
-    return trading_signal_crud
-
-
 def get_trading_signal_repository_clean(
     db: AsyncSession = Depends(get_database_session)
 ) -> 'ITradingSignalRepository':
@@ -173,28 +150,6 @@ def get_trading_signal_repository_clean(
     from infrastructure.persistence.trading_signal_repository import TradingSignalRepository
 
     return TradingSignalRepository(db)
-
-
-# =============================================================================
-# 現有服務的依賴 (逐步重構)
-# =============================================================================
-
-def get_technical_analysis_service():
-    """取得技術分析服務 (暫時保持現有實現)"""
-    from services.analysis.technical_analysis import TechnicalAnalysisService
-    return TechnicalAnalysisService()
-
-
-def get_data_collection_service():
-    """取得數據收集服務 (暫時保持現有實現)"""
-    from services.data.collection import data_collection_service
-    return data_collection_service
-
-
-def get_data_validation_service():
-    """取得數據驗證服務 (暫時保持現有實現)"""
-    from services.data.validation import data_validation_service
-    return data_validation_service
 
 
 # =============================================================================

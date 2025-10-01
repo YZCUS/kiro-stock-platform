@@ -3,7 +3,7 @@
 """
 from sqlalchemy import Column, String, DateTime, Boolean, func, CheckConstraint
 from sqlalchemy.orm import relationship
-from models.base import BaseModel, TimestampMixin
+from domain.models.base import BaseModel, TimestampMixin
 from typing import List, Optional
 import re
 

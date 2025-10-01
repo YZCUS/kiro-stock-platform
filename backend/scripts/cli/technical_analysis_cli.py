@@ -16,9 +16,10 @@ sys.path.append(str(Path(__file__).parent.parent))
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.settings import settings
-from services.analysis.technical_analysis import technical_analysis_service, IndicatorType
+# ✅ Clean Architecture: 使用 domain services
+from domain.services.technical_analysis_service import IndicatorType
+from services.analysis.technical_analysis import technical_analysis_service
 from services.analysis.indicator_calculator import advanced_calculator
-# ✅ Clean Architecture: 使用 repository implementations 而非 CRUD
 from infrastructure.persistence.stock_repository import StockRepository
 from infrastructure.persistence.price_history_repository import PriceHistoryRepository
 import pandas as pd

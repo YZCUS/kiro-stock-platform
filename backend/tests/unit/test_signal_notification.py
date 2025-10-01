@@ -23,7 +23,7 @@ from services.trading.buy_sell_generator import (
     BuySellAction,
     SignalPriority
 )
-from models.domain.trading_signal import TradingSignal
+from domain.models.trading_signal import TradingSignal
 
 
 class TestSignalNotificationService:

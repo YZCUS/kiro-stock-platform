@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 
 from domain.repositories.stock_repository_interface import IStockRepository
-from models.domain.stock import Stock
+from domain.models.stock import Stock
 
 
 class StockRepository(IStockRepository):

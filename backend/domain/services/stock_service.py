@@ -398,7 +398,7 @@ class StockService:
         使用直接SQL查詢找到前一個交易日
         """
         from sqlalchemy import select, desc
-        from models.domain.price_history import PriceHistory
+        from domain.models.price_history import PriceHistory
 
         # 查詢前一個交易日
         previous_price_query = select(PriceHistory).where(

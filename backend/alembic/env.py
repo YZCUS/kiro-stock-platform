@@ -15,12 +15,12 @@ from app.settings import settings
 from core.database import Base
 
 # 匯入所有模型以確保它們被註冊到 Base.metadata
-from models.domain.stock import Stock
-from models.domain.price_history import PriceHistory
-from models.domain.technical_indicator import TechnicalIndicator
-from models.domain.trading_signal import TradingSignal
-from models.domain.user_watchlist import UserWatchlist
-from models.domain.system_log import SystemLog
+from domain.models.stock import Stock
+from domain.models.price_history import PriceHistory
+from domain.models.technical_indicator import TechnicalIndicator
+from domain.models.trading_signal import TradingSignal
+from domain.models.user_watchlist import UserWatchlist
+from domain.models.system_log import SystemLog
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

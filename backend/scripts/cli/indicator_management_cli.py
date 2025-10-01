@@ -16,8 +16,8 @@ from core.redis import redis_client
 from services.infrastructure.storage import indicator_storage_service
 from services.infrastructure.cache import indicator_cache_service
 from services.infrastructure.sync import indicator_sync_service
-from services.analysis.technical_analysis import IndicatorType
-# ✅ Clean Architecture: 使用 repository interface 而非 CRUD
+# ✅ Clean Architecture: 使用 domain services
+from domain.services.technical_analysis_service import IndicatorType
 from infrastructure.persistence.stock_repository import StockRepository
 
 

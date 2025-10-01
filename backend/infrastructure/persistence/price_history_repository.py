@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, desc
 
 from domain.repositories.price_history_repository_interface import IPriceHistoryRepository
-from models.domain.price_history import PriceHistory
+from domain.models.price_history import PriceHistory
 
 
 class PriceHistoryRepository(IPriceHistoryRepository):

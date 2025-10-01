@@ -21,9 +21,9 @@ setup_test_path()
 from core.database import get_db
 from services.analysis.technical_analysis import technical_analysis_service, IndicatorType
 from services.analysis.indicator_calculator import indicator_calculator, PriceData
-from models.domain.stock import Stock
-from models.domain.price_history import PriceHistory
-from models.domain.technical_indicator import TechnicalIndicator
+from domain.models.stock import Stock
+from domain.models.price_history import PriceHistory
+from domain.models.technical_indicator import TechnicalIndicator
 from models.repositories.crud_stock import stock_crud
 from models.repositories.crud_price_history import price_history_crud
 from models.repositories.crud_technical_indicator import technical_indicator_crud

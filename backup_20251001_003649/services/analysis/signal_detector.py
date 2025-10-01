@@ -11,9 +11,9 @@ import logging
 
 from models.domain.technical_indicator import TechnicalIndicator
 from models.domain.trading_signal import TradingSignal
-from models.repositories.crud_technical_indicator import technical_indicator_crud
-from models.repositories.crud_trading_signal import trading_signal_crud
-from models.repositories.crud_stock import stock_crud
+from infrastructure.persistence.technical_indicator_repository import TechnicalIndicatorRepository
+from infrastructure.persistence.trading_signal_repository import TradingSignalRepository
+from infrastructure.persistence.stock_repository import StockRepository
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,8 @@ class TradingSignalDetector:
         
         try:
             # 獲取股票資訊
-            stock = await stock_crud.get(db_session, stock_id)
+            stock_repo = StockRepository(db_session)
+            stock = await stock_repo.get_by_id(db_session, stock_id)
             if not stock:
                 return SignalDetectionResult(
                     stock_id=stock_id,
@@ -141,8 +142,9 @@ class TradingSignalDetector:
             # 獲取技術指標數據
             end_date = date.today()
             start_date = end_date - timedelta(days=days)
-            
-            indicators = await technical_indicator_crud.get_stock_indicators_by_date_range(
+
+            indicator_repo = TechnicalIndicatorRepository(db_session)
+            indicators = await indicator_repo.get_by_stock_and_date_range(
                 db_session,
                 stock_id=stock_id,
                 start_date=start_date,
@@ -195,19 +197,20 @@ class TradingSignalDetector:
             # 保存信號到資料庫
             if save_to_db and detected_signals:
                 try:
+                    signal_repo = TradingSignalRepository(db_session)
                     for signal in detected_signals:
                         trading_signal = signal.to_trading_signal(stock_id)
-                        
+
                         # 檢查是否已存在相同信號
-                        existing = await trading_signal_crud.get_by_stock_date_type(
+                        existing = await signal_repo.get_by_stock_date_type(
                             db_session,
                             stock_id=stock_id,
                             date=signal.date,
                             signal_type=signal.signal_type.value
                         )
-                        
+
                         if not existing:
-                            await trading_signal_crud.create(db_session, obj_in=trading_signal)
+                            await signal_repo.create(db_session, trading_signal)
                     
                     await db_session.commit()
                     logger.info(f"保存 {len(detected_signals)} 個交易信號到資料庫")

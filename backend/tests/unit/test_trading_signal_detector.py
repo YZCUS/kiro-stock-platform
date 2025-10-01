@@ -25,9 +25,9 @@ from services.analysis.signal_detector import (
     SignalStrength,
     DetectedSignal
 )
-from models.domain.stock import Stock
-from models.domain.technical_indicator import TechnicalIndicator
-from models.domain.trading_signal import TradingSignal
+from domain.models.stock import Stock
+from domain.models.technical_indicator import TechnicalIndicator
+from domain.models.trading_signal import TradingSignal
 from models.repositories.crud_stock import stock_crud
 from models.repositories.crud_technical_indicator import technical_indicator_crud
 from models.repositories.crud_trading_signal import trading_signal_crud

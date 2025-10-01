@@ -11,8 +11,8 @@ from core.database import AsyncSession
 from core.redis import redis_client
 from services.analysis.technical_analysis import technical_analysis_service, IndicatorType, AnalysisResult
 from services.infrastructure.cache import indicator_cache_service
-from models.repositories.crud_technical_indicator import technical_indicator_crud
-from models.repositories.crud_stock import stock_crud
+from infrastructure.persistence.technical_indicator_repository import TechnicalIndicatorRepository
+from infrastructure.persistence.stock_repository import StockRepository
 from models.domain.technical_indicator import TechnicalIndicator
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,8 @@ class IndicatorStorageService:
         
         try:
             # 獲取股票資訊
-            stock = await stock_crud.get(db_session, stock_id)
+            stock_repo = StockRepository(db_session)
+            stock = await stock_repo.get_by_id(db_session, stock_id)
             if not stock:
                 return StorageResult(
                     success=False,
@@ -122,8 +123,9 @@ class IndicatorStorageService:
                     # 獲取剛存儲的指標數據
                     end_date = date.today()
                     start_date = end_date - timedelta(days=7)  # 快取最近7天
-                    
-                    stored_indicators = await technical_indicator_crud.get_stock_indicators_by_date_range(
+
+                    indicator_repo = TechnicalIndicatorRepository(db_session)
+                    stored_indicators = await indicator_repo.get_by_stock_and_date_range(
                         db_session,
                         stock_id=stock_id,
                         start_date=start_date,
@@ -295,7 +297,8 @@ class IndicatorStorageService:
         try:
             # 如果沒有指定股票，獲取所有股票
             if stock_ids is None:
-                stocks = await stock_crud.get_multi(db_session, limit=1000)
+                stock_repo = StockRepository(db_session)
+                stocks = await stock_repo.get_all(db_session, skip=0, limit=1000)
                 stock_ids = [stock.id for stock in stocks]
             
             logger.info(f"開始同步 {len(stock_ids)} 支股票的指標數據和快取")
@@ -307,13 +310,15 @@ class IndicatorStorageService:
             for stock_id in stock_ids:
                 try:
                     # 獲取股票資訊
-                    stock = await stock_crud.get(db_session, stock_id)
+                    stock_repo = StockRepository(db_session)
+                    stock = await stock_repo.get_by_id(db_session, stock_id)
                     if not stock:
                         errors.append(f"找不到股票 ID: {stock_id}")
                         continue
-                    
+
                     # 檢查資料庫中的最新指標日期
-                    latest_indicators = await technical_indicator_crud.get_latest_indicators(
+                    indicator_repo = TechnicalIndicatorRepository(db_session)
+                    latest_indicators = await indicator_repo.get_latest_indicators(
                         db_session,
                         stock_id=stock_id,
                         indicator_types=indicator_types
@@ -426,11 +431,13 @@ class IndicatorStorageService:
             
             if stock_ids is None:
                 # 清理所有股票的舊數據
-                stocks = await stock_crud.get_multi(db_session, limit=1000)
+                stock_repo = StockRepository(db_session)
+                stocks = await stock_repo.get_all(db_session, skip=0, limit=1000)
                 stock_ids = [stock.id for stock in stocks]
-            
+
+            indicator_repo = TechnicalIndicatorRepository(db_session)
             for stock_id in stock_ids:
-                deleted_count = await technical_indicator_crud.delete_old_indicators(
+                deleted_count = await indicator_repo.delete_old_indicators(
                     db_session,
                     stock_id=stock_id,
                     keep_days=keep_days
@@ -528,18 +535,20 @@ class IndicatorStorageService:
             驗證結果
         """
         try:
-            stock = await stock_crud.get(db_session, stock_id)
+            stock_repo = StockRepository(db_session)
+            stock = await stock_repo.get_by_id(db_session, stock_id)
             if not stock:
                 return {
                     'success': False,
                     'error': f'找不到股票 ID: {stock_id}'
                 }
-            
+
             end_date = date.today()
             start_date = end_date - timedelta(days=days)
-            
+
             # 檢查指標數據完整性
-            indicators = await technical_indicator_crud.get_stock_indicators_by_date_range(
+            indicator_repo = TechnicalIndicatorRepository(db_session)
+            indicators = await indicator_repo.get_by_stock_and_date_range(
                 db_session,
                 stock_id=stock_id,
                 start_date=start_date,

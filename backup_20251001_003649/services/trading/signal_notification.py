@@ -15,8 +15,8 @@ from services.trading.buy_sell_generator import (
     SignalPriority
 )
 from models.domain.trading_signal import TradingSignal
-from models.repositories.crud_stock import stock_crud
-from models.repositories.crud_trading_signal import trading_signal_crud
+from infrastructure.persistence.stock_repository import StockRepository
+from infrastructure.persistence.trading_signal_repository import TradingSignalRepository
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +212,8 @@ class SignalNotificationService:
         """處理交易信號通知"""
         try:
             # 獲取股票資訊
-            stock = await stock_crud.get(db_session, stock_id)
+            stock_repo = StockRepository(db_session)
+            stock = await stock_repo.get_by_id(db_session, stock_id)
             if not stock:
                 logger.warning(f"找不到股票 ID: {stock_id}")
                 return
@@ -240,7 +241,8 @@ class SignalNotificationService:
         """處理買賣點通知"""
         try:
             # 獲取股票資訊
-            stock = await stock_crud.get(db_session, stock_id)
+            stock_repo = StockRepository(db_session)
+            stock = await stock_repo.get_by_id(db_session, stock_id)
             if not stock:
                 logger.warning(f"找不到股票 ID: {stock_id}")
                 return
