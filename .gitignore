@@ -181,3 +181,6 @@ airflow/docs/
 frontend/docs/
 **/README.md
 !README.md
+
+# backup
+backup_*/
