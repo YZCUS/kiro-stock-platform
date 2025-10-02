@@ -16,13 +16,23 @@ _yf_module = None
 
 try:
     import yfinance as yf
+    import requests
+
+    # 設置自定義 session 以避免速率限制
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    })
+
     _yf_module = yf
     _yfinance_available = True
-    logger.info(f"YFinance {yf.__version__} loaded successfully")
+    logger.info(f"YFinance {yf.__version__} loaded successfully with custom headers")
 except ImportError as e:
     logger.warning(f"YFinance not available: {e}. Using fallback mode.")
+    session = None
 except Exception as e:
     logger.error(f"Error loading YFinance: {e}. Using fallback mode.")
+    session = None
 
 
 class YFinanceWrapper:
@@ -85,7 +95,8 @@ class YFinanceWrapper:
             )
 
         try:
-            return _yf_module.Ticker(symbol)
+            # 使用自定義 session 來避免速率限制
+            return _yf_module.Ticker(symbol, session=session if session else None)
         except Exception as e:
             logger.error(f"Error creating ticker for {symbol}: {e}")
             # 回退到 mock 模式

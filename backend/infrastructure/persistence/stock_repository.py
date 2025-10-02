@@ -30,6 +30,16 @@ class StockRepository(IStockRepository):
         )
         return result.scalar_one_or_none()
 
+    async def get_by_symbol_and_market(self, db: AsyncSession, symbol: str, market: str):
+        """根據代號和市場取得股票"""
+        result = await db.execute(
+            select(Stock).where(
+                Stock.symbol == symbol,
+                Stock.market == market
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def get_multi_with_filter(
         self,
         db: AsyncSession,

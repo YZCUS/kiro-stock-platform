@@ -10,6 +10,7 @@
 - 📈 **視覺化圖表**: 基於TradingView Lightweight Charts的專業級K線圖
 - ⚡ **即時快取**: Redis快取系統提供高效數據存取
 - 🔧 **工作流自動化**: Apache Airflow管理數據收集與分析流程
+- 🏗️ **Clean Architecture**: 遵循 Clean Architecture 原則，確保代碼可維護性和可測試性
 
 ## 技術架構
 
@@ -20,6 +21,7 @@
 - **Redis** - 快取和會話管理
 - **Apache Airflow** - 工作流程自動化和調度
 - **TA-Lib** - 技術指標計算庫
+- **yfinance** - Yahoo Finance 數據源整合
 - **Alembic** - 資料庫遷移管理
 - **Docker** - 容器化部署
 
@@ -61,15 +63,13 @@
    # 或手動啟動
    make build
    make up
-   make db-init
-   make db-seed
    ```
 
 4. **訪問應用程式**
    - 前端應用: http://localhost:3000
    - 後端 API: http://localhost:8000
    - API 文檔: http://localhost:8000/docs
-   - Airflow 管理介面: http://localhost:8080 (admin/admin)
+   - Airflow 管理介面: http://localhost:8081 (admin/admin)
 
 ### 開發模式
 
@@ -89,39 +89,83 @@
    npm run dev
    ```
 
-3. **資料庫管理**
+3. **Airflow 開發**
    ```bash
-   # 資料庫遷移
-   make db-migrate
-
-   # 測試資料庫連接
-   make db-test
-
-   # 重置資料庫（開發用）
-   make db-reset
+   cd airflow
+   pip install -r requirements.txt
+   # 代碼格式化和檢查
+   black .
+   flake8 .
    ```
 
-## 專案結構
+4. **資料庫管理**
+   ```bash
+   # 初始化資料庫
+   python backend/database/migrate.py init
+
+   # 執行遷移
+   python backend/database/migrate.py upgrade
+
+   # 種子資料
+   python backend/database/seed_data.py
+   ```
+
+## 專案結構（Clean Architecture）
 
 ```
 kiro-stock-platform/
-├── backend/                     # FastAPI 後端
-│   ├── alembic/                # 資料庫遷移
-│   ├── app/                    # 主要應用程式
-│   │   ├── api/v1/            # API 路由 v1
-│   │   ├── core/              # 核心配置
-│   │   ├── models/            # 資料模型與倉庫
-│   │   │   ├── domain/        # 領域模型
-│   │   │   └── repositories/  # 資料存取層
+├── backend/                     # FastAPI 後端 (Clean Architecture)
+│   ├── alembic/                # 資料庫遷移配置
+│   │   └── versions/           # 遷移腳本
+│   ├── app/                    # 應用程式層
+│   │   ├── main.py            # FastAPI 應用入口
+│   │   ├── dependencies.py    # 依賴注入容器
+│   │   └── settings.py        # 型別安全配置管理
+│   ├── api/                    # 介面層 (API Routes)
+│   │   ├── routers/           # API 路由定義
+│   │   │   └── v1/            # API v1 端點
+│   │   │       ├── stocks.py       # 股票管理
+│   │   │       ├── analysis.py     # 技術分析
+│   │   │       └── signals.py      # 交易信號
+│   │   ├── schemas/           # Pydantic 模型 (請求/回應)
+│   │   └── utils/             # API 工具函數
+│   ├── domain/                 # 領域層 (業務核心)
 │   │   ├── services/          # 業務邏輯服務
-│   │   │   ├── analysis/      # 技術分析服務
-│   │   │   ├── data/          # 資料收集服務
-│   │   │   ├── trading/       # 交易信號服務
-│   │   │   └── infrastructure/ # 基礎設施服務
-│   │   └── main.py           # FastAPI 應用入口
+│   │   │   ├── stock_service.py                # 股票業務邏輯
+│   │   │   ├── technical_analysis_service.py   # 技術分析
+│   │   │   ├── data_collection_service.py      # 數據收集
+│   │   │   └── trading_signal_service.py       # 交易信號
+│   │   └── repositories/      # Repository 介面 (Ports)
+│   │       ├── stock_repository_interface.py
+│   │       └── price_history_repository_interface.py
+│   ├── infrastructure/         # 基礎設施層
+│   │   ├── persistence/       # Repository 實作
+│   │   │   ├── stock_repository.py
+│   │   │   └── price_history_repository.py
+│   │   ├── cache/             # Redis 快取封裝
+│   │   │   └── redis_cache_service.py
+│   │   ├── external/          # 外部服務整合
+│   │   │   └── yfinance_wrapper.py  # Yahoo Finance API
+│   │   └── scheduler/         # 排程服務
+│   ├── models/                 # SQLAlchemy 領域模型
+│   │   └── domain/            # 資料庫實體定義
+│   │       ├── stock.py
+│   │       ├── price_history.py
+│   │       ├── technical_indicator.py
+│   │       └── trading_signal.py
+│   ├── core/                   # 系統級配置
+│   │   ├── config.py          # 系統配置 (Legacy)
+│   │   ├── database.py        # 資料庫連接
+│   │   └── redis.py           # Redis 連接
 │   ├── database/              # 資料庫工具
-│   ├── scripts/              # CLI 工具
-│   └── tests/                # 測試檔案
+│   │   ├── migrate.py         # 遷移腳本
+│   │   └── seed_data.py       # 種子資料
+│   ├── scripts/               # CLI 工具
+│   │   └── create_tables.py  # 資料表建立
+│   └── tests/                 # 測試套件
+│       ├── unit/              # 單元測試 (領域服務)
+│       ├── integration/       # 整合測試 (API)
+│       └── e2e/              # 端對端測試
 ├── frontend/                  # Next.js 前端
 │   ├── src/
 │   │   ├── app/              # App Router 頁面
@@ -131,72 +175,225 @@ kiro-stock-platform/
 │   │   ├── types/            # TypeScript 型別定義
 │   │   └── utils/            # 工具函數
 │   └── public/               # 靜態資源
-├── airflow/                   # Apache Airflow
+├── airflow/                   # Apache Airflow (模組化)
 │   ├── dags/                 # DAG 定義
-│   ├── docker/               # Docker 配置
-│   └── include/              # 共用模組
+│   │   └── stock_daily_collection.py
+│   ├── plugins/              # Airflow 插件
+│   │   ├── operators/        # 自定義 Operators
+│   │   │   └── api_operator.py
+│   │   ├── sensors/          # 自定義 Sensors
+│   │   │   └── market_open_sensor.py
+│   │   ├── services/         # 服務層
+│   │   │   ├── storage_service.py
+│   │   │   ├── notification_service.py
+│   │   │   └── monitoring_service.py
+│   │   ├── common/           # 共用工具
+│   │   │   └── date_utils.py
+│   │   └── workflows/        # 工作流邏輯
+│   │       ├── stock_collection/
+│   │       └── storage_monitoring/
+│   └── logs/                 # Airflow 日誌
 ├── docker-compose.yml         # Docker 服務配置
 ├── Makefile                   # 開發工具指令
 └── CLAUDE.md                  # Claude Code 專案指導
 ```
 
-## API 文檔
+### Clean Architecture 層級說明
 
-啟動服務後，您可以在以下位置查看 API 文檔：
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+#### 1. **領域層 (Domain Layer)**
+- 純業務邏輯，無外部依賴
+- Repository 介面定義 (依賴反轉)
+- 領域服務與業務規則
+
+#### 2. **基礎設施層 (Infrastructure Layer)**
+- Repository 介面的具體實作
+- 外部 API 整合 (Yahoo Finance)
+- 快取實作 (Redis)
+- 資料庫 ORM 映射
+
+#### 3. **應用層 (Application Layer)**
+- 依賴注入容器
+- 應用配置管理
+- 服務編排
+
+#### 4. **介面層 (Interface Layer - API)**
+- HTTP 路由和請求處理
+- 輸入驗證和回應格式化
+- 委派業務邏輯到領域服務
+
+## API 端點文檔
+
+### 股票管理端點
+
+#### 獲取活躍股票清單
+```bash
+GET /api/v1/stocks/active
+```
+
+#### 獲取股票詳情
+```bash
+GET /api/v1/stocks/{stock_id}
+```
+
+#### 新增股票
+```bash
+POST /api/v1/stocks
+Content-Type: application/json
+
+{
+  "symbol": "2330.TW",
+  "name": "台積電",
+  "market": "TW"
+}
+```
+
+### 數據收集端點
+
+#### 批次收集股票數據
+```bash
+POST /api/v1/stocks/collect-batch
+Content-Type: application/json
+
+{
+  "stocks": [
+    {"symbol": "2330.TW", "market": "TW"},
+    {"symbol": "AAPL", "market": "US"}
+  ]
+}
+```
+
+#### 收集所有活躍股票數據
+```bash
+POST /api/v1/stocks/collect-all
+```
+
+### 技術分析端點
+
+#### 獲取股票技術指標
+```bash
+GET /api/v1/stocks/{stock_id}/indicators?period=30
+```
+
+#### 獲取交易信號
+```bash
+GET /api/v1/stocks/{stock_id}/signals
+```
+
+### 健康檢查
+```bash
+GET /health
+```
 
 ## 開發指南
 
-### 新增股票
+### 新增業務服務
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/stocks" \
-     -H "Content-Type: application/json" \
-     -d '{"symbol": "2330.TW", "market": "TW"}'
-```
+1. **在 `domain/services/` 建立服務類**
+   ```python
+   class MyService:
+       def __init__(self, repository: IRepository):
+           self.repo = repository
+   ```
 
-### 獲取技術指標
+2. **在 `app/dependencies.py` 註冊服務**
+   ```python
+   def get_my_service(
+       repo: IRepository = Depends(get_repository)
+   ) -> MyService:
+       return MyService(repo)
+   ```
 
-```bash
-curl "http://localhost:8000/api/v1/stocks/2330.TW/indicators"
-```
+3. **在 API Router 中使用**
+   ```python
+   @router.get("/endpoint")
+   async def endpoint(
+       service: MyService = Depends(get_my_service)
+   ):
+       return await service.do_something()
+   ```
+
+### 新增 Repository
+
+1. **定義介面 `domain/repositories/`**
+   ```python
+   class IMyRepository(ABC):
+       @abstractmethod
+       async def get(self, id: int): pass
+   ```
+
+2. **實作 `infrastructure/persistence/`**
+   ```python
+   class MyRepository(IMyRepository):
+       async def get(self, id: int):
+           # 實作細節
+   ```
 
 ## 測試
 
+### 執行所有測試
 ```bash
-# 執行所有測試 (使用 Makefile)
 make test
+```
 
-# 個別測試
-# 後端測試
+### 後端測試
+```bash
 cd backend
-python -m pytest tests/ -v
-python tests/run_tests.py          # 執行所有測試
-python tests/run_indicator_tests.py # 技術指標專用測試
 
-# 前端測試
+# 單元測試 (領域服務)
+python -m pytest tests/unit/ -v
+
+# 整合測試 (API)
+python -m pytest tests/integration/ -v
+
+# 架構測試
+python -m pytest tests/unit/test_domain_services_migration.py -v
+
+# 覆蓋率測試
+python -m pytest tests/ --cov=domain --cov=infrastructure --cov=api
+```
+
+### 前端測試
+```bash
 cd frontend
 npm test
 npm run type-check  # TypeScript 型別檢查
 ```
 
+### Airflow 測試
+```bash
+cd airflow
+
+# 代碼品質檢查
+black . --check
+flake8 .
+
+# DAG 驗證
+python -c "from dags.stock_daily_collection import dag; print('DAG is valid')"
+```
+
 ## 程式碼品質
 
+### 後端
 ```bash
-# 使用 Makefile 執行所有檢查
-make lint     # 程式碼檢查
-make format   # 程式碼格式化
-
-# 個別執行
-# 後端
 cd backend
-python -m flake8 .    # 程式碼檢查
-python -m black .     # 程式碼格式化
+python -m flake8 .        # 風格檢查
+python -m black .         # 代碼格式化
+python -m isort .         # Import 排序
+mypy domain/ infrastructure/ api/  # 型別檢查
+```
 
-# 前端
+### 前端
+```bash
 cd frontend
-npm run lint          # ESLint 檢查
+npm run lint              # ESLint 檢查
+npm run type-check        # TypeScript 檢查
+```
+
+### Airflow
+```bash
+cd airflow
+black .                   # 代碼格式化
+flake8 .                  # 風格檢查
 ```
 
 ## 部署
@@ -204,24 +401,44 @@ npm run lint          # ESLint 檢查
 ### Docker 部署
 
 ```bash
-# 生產環境部署
-make prod-deploy
+# 開發環境
+docker-compose up -d
 
-# 或手動執行
-docker-compose -f docker-compose.prod.yml up -d
+# 檢查服務狀態
+docker-compose ps
+
+# 查看日誌
+docker-compose logs -f backend
+docker-compose logs -f airflow-scheduler
 ```
 
 ### 資料庫管理
 
 ```bash
-# 備份資料庫
-make db-backup
+# 建立資料表
+docker exec stock_analysis_backend python scripts/create_tables.py
 
-# 還原資料庫
-make db-restore
+# 執行遷移
+docker exec stock_analysis_backend python database/migrate.py upgrade
 
-# 查看服務日誌
-make logs
+# 種子資料
+docker exec stock_analysis_backend python database/seed_data.py
+```
+
+### Airflow 管理
+
+```bash
+# 建立管理員帳號
+docker exec stock_analysis_airflow_webserver airflow users create \
+  --username admin \
+  --firstname Admin \
+  --lastname User \
+  --role Admin \
+  --email admin@example.com \
+  --password admin
+
+# 觸發 DAG
+docker exec stock_analysis_airflow_scheduler airflow dags trigger daily_stock_collection_api
 ```
 
 ## 常用指令
@@ -238,15 +455,63 @@ make clean       # 清理 Docker 資源
 make test        # 執行所有測試
 make lint        # 程式碼檢查
 make format      # 程式碼格式化
+make logs        # 查看服務日誌
 ```
+
+## 環境變數
+
+### Backend
+- `DATABASE_URL` - PostgreSQL 連接字串
+- `REDIS_URL` - Redis 連接字串
+- `BACKEND_API_URL` - Backend API URL (Airflow 使用)
+
+### Airflow
+- `BACKEND_API_URL` - Backend API endpoint
+- `AIRFLOW__CORE__EXECUTOR` - Executor 類型
+- `AIRFLOW__DATABASE__SQL_ALCHEMY_CONN` - Airflow metadata DB
+
+## 故障排除
+
+### Backend 無法啟動
+```bash
+# 檢查日誌
+docker logs stock_analysis_backend
+
+# 驗證資料庫連接
+docker exec stock_analysis_backend python database/test_connection.py
+```
+
+### Airflow Scheduler 不運作
+```bash
+# 檢查日誌權限
+sudo chown -R 50000:50000 airflow/logs/
+
+# 重啟 scheduler
+docker-compose restart airflow-scheduler
+```
+
+### Yahoo Finance API 限制
+- 系統已實作重試邏輯和 User-Agent headers
+- 如遇速率限制，等待 10-30 分鐘
+- 考慮使用其他數據源或增加請求間隔
 
 ## 貢獻指南
 
 1. Fork 專案
 2. 建立功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交變更 (`git commit -m 'Add some amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 開啟 Pull Request
+3. 遵循 Clean Architecture 原則
+4. 確保所有測試通過 (`make test`)
+5. 執行代碼品質檢查 (`make lint`)
+6. 提交變更 (`git commit -m 'Add some amazing feature'`)
+7. 推送到分支 (`git push origin feature/amazing-feature`)
+8. 開啟 Pull Request
+
+## 架構原則
+
+- **依賴反轉**: 業務邏輯不依賴基礎設施細節
+- **介面隔離**: 清晰的抽象邊界
+- **單一職責**: 每個類別只有一個變更原因
+- **開放封閉**: 對擴展開放，對修改封閉
 
 ## 授權條款
 

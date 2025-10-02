@@ -258,6 +258,122 @@ class DataCollectionService:
             results=results
         )
 
+    async def collect_batch_stocks_data(
+        self,
+        db: AsyncSession,
+        stock_list: list[dict],
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None
+    ) -> dict:
+        """
+        批次收集指定股票清單的數據
+
+        Args:
+            db: 資料庫會話
+            stock_list: 股票清單 [{"symbol": "2330.TW", "market": "TW"}, ...]
+            start_date: 開始日期
+            end_date: 結束日期
+
+        Returns:
+            包含收集結果的字典
+        """
+        start_time = datetime.now()
+
+        # 設定日期範圍
+        if end_date is None:
+            end_date = datetime.now().date()
+        if start_date is None:
+            start_date = end_date - timedelta(days=7)
+
+        # 批次處理
+        results = []
+        total_records = 0
+        successful_count = 0
+        failed_count = 0
+        collection_errors = []
+
+        for i, stock_entry in enumerate(stock_list):
+            symbol = stock_entry.get("symbol")
+            market = stock_entry.get("market")
+
+            try:
+                # 檢查API節流狀況
+                if await self._should_throttle():
+                    await self._apply_throttle_delay()
+
+                # 根據 symbol 和 market 找到股票
+                stock = await self.stock_repo.get_by_symbol_and_market(db, symbol, market)
+                if not stock:
+                    collection_errors.append(f"{symbol}: 股票不存在")
+                    failed_count += 1
+                    continue
+
+                # 收集數據
+                result = await self.collect_stock_data(
+                    db,
+                    stock_id=stock.id,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+
+                results.append(result)
+
+                if result.status == DataCollectionStatus.SUCCESS:
+                    successful_count += 1
+                    total_records += result.records_collected
+                else:
+                    failed_count += 1
+                    if result.errors:
+                        collection_errors.append(f"{symbol}: {', '.join(result.errors)}")
+
+                # 更新節流狀態
+                await self._update_throttle_status(result)
+
+                # 批次間延遲
+                if i < len(stock_list) - 1:
+                    await self._apply_batch_delay()
+
+            except Exception as e:
+                failed_count += 1
+                error_msg = str(e)
+                collection_errors.append(f"{symbol}: {error_msg}")
+                results.append(CollectionResult(
+                    stock_id=0,
+                    symbol=symbol,
+                    status=DataCollectionStatus.FAILED,
+                    records_collected=0,
+                    start_date=start_date,
+                    end_date=end_date,
+                    errors=[error_msg],
+                    warnings=[],
+                    execution_time_seconds=0
+                ))
+
+        execution_time = (datetime.now() - start_time).total_seconds()
+
+        # 構建回應
+        success = failed_count == 0
+        if success:
+            message = f"批次收集成功完成，處理了 {len(stock_list)} 隻股票"
+        else:
+            error_preview = ", ".join(collection_errors[:3])
+            remaining = len(collection_errors) - 3
+            if remaining > 0:
+                error_preview += f"; 還有 {remaining} 個其他錯誤"
+            message = f"批次收集完成，處理了 {len(stock_list)} 隻股票 (錯誤示例: {error_preview})"
+
+        return {
+            "success": success,
+            "message": message,
+            "total_stocks": len(stock_list),
+            "success_count": successful_count,
+            "error_count": failed_count,
+            "total_records": total_records,
+            "execution_time": execution_time,
+            "collection_errors": collection_errors,
+            "throttle_level": self.throttle_level.value
+        }
+
     async def get_collection_health_status(self, db: AsyncSession) -> Dict[str, Any]:
         """
         取得收集系統健康狀態
@@ -318,9 +434,63 @@ class DataCollectionService:
         start_date: date,
         end_date: date
     ) -> List[Dict[str, Any]]:
-        """執行實際的數據收集 (簡化版本)"""
-        # 這裡應該調用Infrastructure層的具體實現
-        # 暫時返回模擬數據
+        """執行實際的數據收集，包含重試邏輯"""
+        import asyncio
+        import logging
+        from infrastructure.external.yfinance_wrapper import yfinance_wrapper
+
+        logger = logging.getLogger(__name__)
+        max_retries = 3
+        base_delay = 2
+
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    delay = base_delay * (2 ** attempt)
+                    logger.info(f"Retry {attempt + 1}/{max_retries} for {symbol}, waiting {delay}s")
+                    await asyncio.sleep(delay)
+
+                loop = asyncio.get_event_loop()
+                df = await loop.run_in_executor(
+                    None,
+                    lambda: yfinance_wrapper.get_ticker(symbol).history(
+                        start=start_date.isoformat(),
+                        end=end_date.isoformat()
+                    )
+                )
+
+                if df is None or df.empty:
+                    logger.warning(f"No data returned for {symbol}")
+                    return []
+
+                result_data = []
+                for date_idx, row in df.iterrows():
+                    data_point = {
+                        'date': date_idx.date() if hasattr(date_idx, 'date') else date_idx,
+                        'open': float(row.get('Open', 0)),
+                        'high': float(row.get('High', 0)),
+                        'low': float(row.get('Low', 0)),
+                        'close': float(row.get('Close', 0)),
+                        'volume': int(row.get('Volume', 0)),
+                        'adj_close': float(row.get('Adj Close', row.get('Close', 0)))
+                    }
+                    result_data.append(data_point)
+
+                logger.info(f"Successfully collected {len(result_data)} records for {symbol}")
+                return result_data
+
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Attempt {attempt + 1}/{max_retries} failed for {symbol}: {error_msg}")
+
+                if '429' in error_msg or 'Too Many Requests' in error_msg or 'rate limit' in error_msg.lower():
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        logger.error(f"Rate limit exceeded for {symbol} after {max_retries} attempts")
+                else:
+                    break
+
         return []
 
     async def _should_throttle(self) -> bool:

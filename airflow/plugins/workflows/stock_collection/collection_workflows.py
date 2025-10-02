@@ -51,6 +51,14 @@ def try_main_collection_workflow(**context):
         stocks_count = len(stocks_list)
         print(f"獲取到 {stocks_count} 支活躍股票")
 
+        # 轉換股票清單格式為 backend API 期望的格式
+        # Backend API 期望: [{"symbol": "2330.TW", "market": "TW"}, ...]
+        # 前端 API 回傳: [{"id": 1, "symbol": "2330.TW", "name": "台積電", "market": "TW"}, ...]
+        formatted_stocks = [
+            {"symbol": stock.get("symbol"), "market": stock.get("market")}
+            for stock in stocks_list
+        ]
+
         # 步驟2: 基於股票清單收集數據
         # 使用 /collect-batch 端點，針對特定股票清單進行收集
         collection_strategy = 'batch'  # 追蹤實際使用的收集策略
@@ -63,7 +71,7 @@ def try_main_collection_workflow(**context):
                 endpoint="/stocks/collect-batch",
                 method="POST",
                 payload={
-                    'stocks': stocks_list,
+                    'stocks': formatted_stocks,
                     'use_stock_list': True
                 }
             )
