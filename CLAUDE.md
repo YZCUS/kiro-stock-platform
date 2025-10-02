@@ -15,14 +15,18 @@ This is a **股票分析平台** (Stock Analysis Platform) - an automated stock 
 - Apache Airflow for workflow automation
 - TA-Lib for technical indicator calculations
 - SQLAlchemy ORM with Alembic migrations
+- JWT (python-jose) for authentication
+- Passlib + bcrypt for password encryption
 
 **Frontend (TypeScript/Next.js):**
 - Next.js 14 with App Router
 - TypeScript for type safety
 - TailwindCSS for styling
+- shadcn/ui for UI components
 - TradingView Lightweight Charts for financial charts
 - Redux Toolkit for state management
 - React Query for data fetching and caching
+- WebSocket for real-time data
 
 ## Essential Commands
 
@@ -120,7 +124,9 @@ backend/
 │   │   └── v1/
 │   │       ├── stocks.py         # Stock management endpoints
 │   │       ├── analysis.py       # Technical analysis endpoints
-│   │       └── signals.py        # Trading signals endpoints
+│   │       ├── signals.py        # Trading signals endpoints
+│   │       ├── auth.py           # Authentication endpoints
+│   │       └── watchlist.py      # Watchlist management endpoints
 │   ├── schemas/                  # Pydantic models (domain input/output)
 │   └── utils/                    # API-specific utilities
 ├── domain/                       # 實際業務核心 - Business Logic Layer
@@ -145,11 +151,15 @@ backend/
 │       ├── stock.py
 │       ├── price_history.py
 │       ├── technical_indicator.py
-│       └── trading_signal.py
+│       ├── trading_signal.py
+│       ├── user.py               # User model (authentication)
+│       └── user_watchlist.py     # User watchlist model
 ├── core/                         # 系統級設定 & 共用工具
 │   ├── config.py                 # System configuration
 │   ├── database.py               # Database connection
-│   └── redis.py                  # Redis connection
+│   ├── redis.py                  # Redis connection
+│   ├── auth.py                   # JWT authentication utilities
+│   └── auth_dependencies.py      # Authentication dependency injection
 ├── utils/                        # 純共用小工具（與業務無關的 helper）
 ├── scripts/                      # CLI / one-off scripts
 └── tests/                        # Comprehensive test suite
@@ -231,6 +241,8 @@ core/config.py                     →    app/settings.py (new) + core/config.py
 - Price history with OHLCV data
 - Technical indicators (RSI, SMA, EMA, MACD, Bollinger Bands, KD)
 - Trading signals with golden cross/death cross detection
+- User accounts with authentication (UUID, email, username, encrypted password)
+- User watchlists (many-to-many relationship between users and stocks)
 
 **Airflow DAGs:**
 - Daily stock data collection from Yahoo Finance
@@ -242,11 +254,16 @@ core/config.py                     →    app/settings.py (new) + core/config.py
 - Alembic for schema migrations
 - Optimized for time-series data queries
 - Redis caching for frequently accessed data
+- User authentication with bcrypt password encryption
+- UUID primary keys for user accounts
+- Foreign key constraints for data integrity
 
 ### API Design
 - RESTful API with FastAPI
+- JWT Bearer token authentication
 - Automatic OpenAPI documentation at `/docs`
 - CORS enabled for frontend integration
+- Protected endpoints with authentication middleware
 - Health check endpoint at `/health`
 
 ## Service URLs (Development)
@@ -254,6 +271,68 @@ core/config.py                     →    app/settings.py (new) + core/config.py
 - Backend API: http://localhost:8000
 - API Documentation: http://localhost:8000/docs
 - Airflow UI: http://localhost:8080 (admin/admin)
+
+## User Features
+
+### Authentication System
+The platform includes a complete JWT-based authentication system:
+
+**Features:**
+- User registration with email and username validation
+- Secure login with JWT token generation
+- Password encryption using bcrypt
+- Token-based authentication for protected endpoints
+- Change password functionality
+- Automatic token refresh from localStorage
+
+**Backend Implementation:**
+- `domain/models/user.py` - User model with UUID primary key
+- `core/auth.py` - JWT token generation and validation utilities
+- `core/auth_dependencies.py` - FastAPI authentication dependencies
+- `api/routers/v1/auth.py` - Authentication endpoints
+
+**Frontend Implementation:**
+- `/login` - Login page with form validation
+- `/register` - Registration page with password confirmation
+- `store/slices/authSlice.ts` - Redux authentication state
+- `services/authApi.ts` - Authentication API service
+- `components/AuthInit.tsx` - Automatic login restoration
+
+**API Endpoints:**
+- `POST /api/v1/auth/register` - Register new user
+- `POST /api/v1/auth/login` - Login and get JWT token
+- `GET /api/v1/auth/me` - Get current user info (protected)
+- `POST /api/v1/auth/change-password` - Change password (protected)
+
+### Watchlist Feature
+Users can manage personal stock watchlists:
+
+**Features:**
+- Add stocks to personal watchlist
+- Remove stocks from watchlist
+- View watchlist with latest stock prices
+- Check if a stock is in watchlist
+- View popular stocks (most watched by users)
+
+**Backend Implementation:**
+- `domain/models/user_watchlist.py` - Many-to-many relationship model
+- `api/routers/v1/watchlist.py` - Watchlist management endpoints
+- Database foreign keys to users and stocks tables
+- Unique constraint on (user_id, stock_id)
+
+**Frontend Implementation:**
+- `/watchlist` - Watchlist management page
+- `store/slices/watchlistSlice.ts` - Redux watchlist state
+- `services/watchlistApi.ts` - Watchlist API service
+- Star icon in navigation for authenticated users
+
+**API Endpoints:**
+- `GET /api/v1/watchlist/` - Get user's watchlist (protected)
+- `GET /api/v1/watchlist/detailed` - Get watchlist with latest prices (protected)
+- `POST /api/v1/watchlist/` - Add stock to watchlist (protected)
+- `DELETE /api/v1/watchlist/{stock_id}` - Remove from watchlist (protected)
+- `GET /api/v1/watchlist/check/{stock_id}` - Check if in watchlist (protected)
+- `GET /api/v1/watchlist/popular` - Get popular stocks (public)
 
 ## Testing Strategy
 
@@ -372,3 +451,15 @@ mypy domain/ infrastructure/ api/
 - Service Layer for business logic
 - Dependency Injection for loose coupling
 - Interface Segregation for clean boundaries
+
+**Authentication Implementation:**
+7. **Protected Endpoints**: Use `Depends(get_current_active_user)` to protect endpoints requiring authentication
+8. **Optional Authentication**: Use `Depends(get_optional_current_user)` for endpoints that support both authenticated and anonymous access
+9. **Database Function Names**: Use `get_db` (not `get_database_session`) for database session dependency
+10. **Password Security**: Always use `User.get_password_hash()` for password encryption, never store plain passwords
+11. **Token Expiration**: Default JWT token expiration is 30 minutes (configurable via `settings.security.access_token_expire_minutes`)
+
+**Watchlist Implementation:**
+12. **Foreign Key Constraints**: UserWatchlist model must have foreign keys to both `users.id` and `stocks.id`
+13. **Unique Constraints**: Ensure (user_id, stock_id) unique constraint to prevent duplicate watchlist entries
+14. **Cascade Delete**: Use `ondelete="CASCADE"` to automatically clean up watchlist entries when users or stocks are deleted

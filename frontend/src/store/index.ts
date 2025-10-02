@@ -9,6 +9,8 @@ import stocksReducer from './slices/stocksSlice';
 import signalsReducer from './slices/signalsSlice';
 import indicatorsReducer from './slices/indicatorsSlice';
 import uiReducer from './slices/uiSlice';
+import authReducer from './slices/authSlice';
+import watchlistReducer from './slices/watchlistSlice';
 
 // 配置 Redux store
 export const store = configureStore({
@@ -17,6 +19,8 @@ export const store = configureStore({
     signals: signalsReducer,
     indicators: indicatorsReducer,
     ui: uiReducer,
+    auth: authReducer,
+    watchlist: watchlistReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

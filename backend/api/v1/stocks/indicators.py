@@ -258,16 +258,16 @@ async def get_specific_indicator(
     indicator_type: str,
     period: Optional[int] = Query(None, description="週期"),
     limit: int = Query(100, ge=1, le=1000, description="返回數量"),
-    db: AsyncSession = Depends(get_database_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    analysis_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean)
 ):
     """
     取得特定類型的技術指標
     """
     try:
         # 檢查股票是否存在
-        # stock = await stock_crud.get(db, stock_id) # stock_crud is not defined
-        # if not stock:
-        #     raise HTTPException(status_code=404, detail="股票不存在")
+        stock = await stock_service.get_stock_by_id(db, stock_id)
 
         # 檢查指標類型是否有效
         try:
@@ -275,13 +275,11 @@ async def get_specific_indicator(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"無效的指標類型: {indicator_type}")
 
-        # 使用技術分析服務獲取指標數據
-        analysis_service = TechnicalAnalysisService()
-
         # 決定週期和所需天數
         used_period = period or _extract_period_from_indicator(indicator_type)
         required_days = max(used_period * 4, 50)
 
+        # 使用注入的技術分析服務獲取指標數據
         indicator_data = await analysis_service.get_stock_indicators(
             db_session=db,
             stock_id=stock_id,
@@ -295,10 +293,10 @@ async def get_specific_indicator(
             if raw_data and len(raw_data) > 0:
                 # 格式化為標準響應
                 formatted_response = {
-                    "symbol": "N/A", # Placeholder, actual symbol not available here
+                    "symbol": stock.symbol,
                     "indicators": {indicator_type.lower(): raw_data},
                     "period": used_period,
-                    "timestamp": date.today().isoformat(), # Placeholder, actual timestamp not available here
+                    "timestamp": date.today().isoformat(),
                     "success": True,
                     "data_points": len(raw_data) if isinstance(raw_data, list) else 1
                 }
@@ -314,10 +312,10 @@ async def get_specific_indicator(
         return {
             "success": False,
             "data": {
-                "symbol": "N/A", # Placeholder
+                "symbol": stock.symbol,
                 "indicators": {},
                 "period": used_period,
-                "timestamp": date.today().isoformat(), # Placeholder
+                "timestamp": date.today().isoformat(),
                 "success": False,
                 "data_points": 0
             },
@@ -340,7 +338,9 @@ async def get_stock_indicators_summary(
     period: Optional[int] = Query(None, description="週期參數（覆蓋指標預設週期）"),
     start_date: Optional[date] = Query(None, description="開始日期"),
     end_date: Optional[date] = Query(None, description="結束日期"),
-    db: AsyncSession = Depends(get_database_session)
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    analysis_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean)
 ):
     """
     取得股票技術指標摘要（前端 getIndicators 專用格式）

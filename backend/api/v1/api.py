@@ -4,6 +4,8 @@ API v1 路由器 - 重構版本
 from fastapi import APIRouter
 from api.v1.stocks import router as stocks_router  # 使用新的模組化stocks路由
 from api.v1 import analysis, signals
+from api.routers.v1.auth import router as auth_router
+from api.routers.v1.watchlist import router as watchlist_router
 
 # 建立主要 API 路由器
 api_router = APIRouter()
@@ -19,3 +21,5 @@ async def test_endpoint():
 api_router.include_router(stocks_router)  # stocks路由已包含prefix和tags
 api_router.include_router(analysis.router, tags=["analysis"])
 api_router.include_router(signals.router, tags=["signals"])
+api_router.include_router(auth_router)  # 認證路由
+api_router.include_router(watchlist_router)  # 自選股路由

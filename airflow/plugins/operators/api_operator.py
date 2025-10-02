@@ -16,7 +16,7 @@ from plugins.services.storage_service import store_large_data, retrieve_large_da
 logger = logging.getLogger(__name__)
 
 # 常量定義
-DEFAULT_BACKEND_API_URL = 'http://localhost:8000/api/v1'
+DEFAULT_BACKEND_API_URL = os.environ.get('BACKEND_API_URL', 'http://backend:8000/api/v1')
 DEFAULT_MAX_XCOM_SIZE = 40960  # 40KB
 DEFAULT_API_TIMEOUT = 300  # 秒
 

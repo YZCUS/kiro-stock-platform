@@ -11,6 +11,8 @@
 - ⚡ **即時快取**: Redis快取系統提供高效數據存取
 - 🔧 **工作流自動化**: Apache Airflow管理數據收集與分析流程
 - 🏗️ **Clean Architecture**: 遵循 Clean Architecture 原則，確保代碼可維護性和可測試性
+- 🔐 **用戶認證系統**: JWT token 認證，支援註冊、登入、密碼管理
+- ⭐ **自選股功能**: 個人化自選股管理，追蹤關注的股票並查看即時報價
 
 ## 技術架構
 
@@ -23,15 +25,19 @@
 - **TA-Lib** - 技術指標計算庫
 - **yfinance** - Yahoo Finance 數據源整合
 - **Alembic** - 資料庫遷移管理
+- **JWT (python-jose)** - JSON Web Token 認證
+- **Passlib + bcrypt** - 密碼加密
 - **Docker** - 容器化部署
 
 ### 前端技術棧
 - **Next.js 14** - React 全端框架 (App Router)
 - **TypeScript** - 型別安全開發
 - **TailwindCSS** - 實用優先的CSS框架
+- **shadcn/ui** - 高品質 UI 元件庫
 - **TradingView Lightweight Charts** - 專業金融圖表庫
 - **Redux Toolkit** - 狀態管理
 - **TanStack Query (React Query)** - 資料獲取、快取和同步
+- **WebSocket** - 即時數據推送
 
 ## 快速開始
 
@@ -152,11 +158,15 @@ kiro-stock-platform/
 │   │       ├── stock.py
 │   │       ├── price_history.py
 │   │       ├── technical_indicator.py
-│   │       └── trading_signal.py
+│   │       ├── trading_signal.py
+│   │       ├── user.py              # 用戶模型
+│   │       └── user_watchlist.py    # 自選股模型
 │   ├── core/                   # 系統級配置
 │   │   ├── config.py          # 系統配置 (Legacy)
 │   │   ├── database.py        # 資料庫連接
-│   │   └── redis.py           # Redis 連接
+│   │   ├── redis.py           # Redis 連接
+│   │   ├── auth.py            # JWT 認證工具
+│   │   └── auth_dependencies.py  # 認證依賴注入
 │   ├── database/              # 資料庫工具
 │   │   ├── migrate.py         # 遷移腳本
 │   │   └── seed_data.py       # 種子資料
@@ -222,6 +232,91 @@ kiro-stock-platform/
 - 委派業務邏輯到領域服務
 
 ## API 端點文檔
+
+### 認證端點
+
+#### 註冊新用戶
+```bash
+POST /api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "username": "username",
+  "password": "password123"
+}
+```
+
+#### 用戶登入
+```bash
+POST /api/v1/auth/login
+Content-Type: application/json
+
+{
+  "username": "username",  # 或 email
+  "password": "password123"
+}
+```
+
+#### 取得當前用戶資訊
+```bash
+GET /api/v1/auth/me
+Authorization: Bearer <token>
+```
+
+#### 修改密碼
+```bash
+POST /api/v1/auth/change-password
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "old_password": "oldpass",
+  "new_password": "newpass"
+}
+```
+
+### 自選股端點
+
+#### 取得自選股清單
+```bash
+GET /api/v1/watchlist/
+Authorization: Bearer <token>
+```
+
+#### 取得自選股詳細資訊（含最新價格）
+```bash
+GET /api/v1/watchlist/detailed
+Authorization: Bearer <token>
+```
+
+#### 新增股票到自選股
+```bash
+POST /api/v1/watchlist/
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "stock_id": 123
+}
+```
+
+#### 從自選股移除股票
+```bash
+DELETE /api/v1/watchlist/{stock_id}
+Authorization: Bearer <token>
+```
+
+#### 檢查股票是否在自選股中
+```bash
+GET /api/v1/watchlist/check/{stock_id}
+Authorization: Bearer <token>
+```
+
+#### 取得熱門自選股
+```bash
+GET /api/v1/watchlist/popular?limit=10
+```
 
 ### 股票管理端點
 

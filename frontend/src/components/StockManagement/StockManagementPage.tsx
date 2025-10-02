@@ -6,7 +6,7 @@
 import React, { useState, useMemo } from 'react';
 import { useAppDispatch } from '../../store';
 import { addToast } from '../../store/slices/uiSlice';
-import { useStocks, useDeleteStock } from '../../hooks/useStocks';
+import { useStocks, useDeleteStock, useCreateStock } from '../../hooks/useStocks';
 import { StockFilter } from '../../types';
 
 export interface StockManagementPageProps {}
@@ -16,6 +16,12 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newStock, setNewStock] = useState({
+    symbol: '',
+    name: '',
+    market: 'TW' as 'TW' | 'US',
+  });
 
   // 構建查詢參數
   const queryParams = useMemo(() => {
@@ -52,6 +58,27 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
     },
   });
 
+  // 使用 React Query 新增 mutation
+  const createStockMutation = useCreateStock({
+    onSuccess: () => {
+      dispatch(addToast({
+        type: 'success',
+        title: '成功',
+        message: '已成功新增股票',
+      }));
+      setShowAddModal(false);
+      setNewStock({ symbol: '', name: '', market: 'TW' });
+      refetch();
+    },
+    onError: (error: any) => {
+      dispatch(addToast({
+        type: 'error',
+        title: '錯誤',
+        message: error.response?.data?.detail || '新增股票失敗，請稍後再試',
+      }));
+    },
+  });
+
   // 從響應中提取數據
   const stocks = stocksResponse?.items || [];
   const pagination = {
@@ -81,6 +108,20 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
     setPage(newPage);
   };
 
+  // 處理新增股票
+  const handleAddStock = async () => {
+    if (!newStock.symbol.trim() || !newStock.name.trim()) {
+      dispatch(addToast({
+        type: 'error',
+        title: '錯誤',
+        message: '請填寫股票代號和名稱',
+      }));
+      return;
+    }
+
+    createStockMutation.mutate(newStock);
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
@@ -96,7 +137,10 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-medium text-gray-900">股票列表</h2>
-          <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+          >
             新增股票
           </button>
         </div>
@@ -322,6 +366,96 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
           </div>
         </div>
       </div>
+
+      {/* 新增股票 Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">新增股票</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  股票代號 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newStock.symbol}
+                  onChange={(e) => setNewStock({...newStock, symbol: e.target.value})}
+                  placeholder="例如: 2330.TW 或 AAPL"
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  disabled={createStockMutation.isPending}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  股票名稱 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newStock.name}
+                  onChange={(e) => setNewStock({...newStock, name: e.target.value})}
+                  placeholder="例如: 台積電 或 Apple Inc."
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  disabled={createStockMutation.isPending}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  市場 <span className="text-red-500">*</span>
+                </label>
+                <div className="flex gap-4">
+                  <label className="flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      name="market"
+                      value="TW"
+                      checked={newStock.market === 'TW'}
+                      onChange={(e) => setNewStock({...newStock, market: 'TW'})}
+                      className="mr-2"
+                      disabled={createStockMutation.isPending}
+                    />
+                    <span className="text-sm text-gray-700">台股</span>
+                  </label>
+                  <label className="flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      name="market"
+                      value="US"
+                      checked={newStock.market === 'US'}
+                      onChange={(e) => setNewStock({...newStock, market: 'US'})}
+                      className="mr-2"
+                      disabled={createStockMutation.isPending}
+                    />
+                    <span className="text-sm text-gray-700">美股</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setNewStock({ symbol: '', name: '', market: 'TW' });
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  disabled={createStockMutation.isPending}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleAddStock}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={createStockMutation.isPending}
+                >
+                  {createStockMutation.isPending ? '新增中...' : '確認新增'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

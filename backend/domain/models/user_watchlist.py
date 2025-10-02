@@ -16,7 +16,7 @@ class UserWatchlist(BaseModel, TimestampMixin):
     __tablename__ = "user_watchlists"
     
     # 基本欄位
-    user_id = Column(UUID(as_uuid=True), default=uuid.uuid4, nullable=False, index=True, comment="用戶ID")
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True, comment="用戶ID")
     stock_id = Column(Integer, ForeignKey("stocks.id", ondelete="CASCADE"), nullable=False, index=True, comment="股票ID")
     
     # 約束條件
@@ -27,6 +27,7 @@ class UserWatchlist(BaseModel, TimestampMixin):
     
     # 關聯關係
     stock = relationship("Stock", back_populates="user_watchlists")
+    user = relationship("User", back_populates="watchlists")
     
     @classmethod
     def get_user_watchlist(cls, session, user_id: uuid.UUID) -> List['UserWatchlist']:

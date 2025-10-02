@@ -1,7 +1,7 @@
 /**
  * WebSocket React Hooks
  */
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../store';
 import { setWebSocketConnected, setWebSocketReconnecting, setWebSocketError } from '../store/slices/uiSlice';
 import { addRealtimeSignal } from '../store/slices/signalsSlice';
