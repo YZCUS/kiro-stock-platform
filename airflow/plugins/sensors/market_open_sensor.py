@@ -1,28 +1,36 @@
 """
-工作流程感測器 - 簡化版本，專注於工作流程編排
-"""
-from datetime import datetime, time
-from typing import Optional
-import pendulum
+市場開盤感測器
 
+提供交易日和市場時間的檢測功能，支援台灣和美國市場。
+"""
 from airflow.sensors.base import BaseSensorOperator
-from airflow.utils.decorators import apply_defaults
 from airflow.utils.context import Context
 
-# 移除手動的 sys.path 操作，改用 Docker PYTHONPATH 設定
-
-from ..utils.date_utils import is_trading_day, get_taipei_now, get_taipei_today, is_market_hours
+from plugins.common.date_utils import (
+    is_trading_day,
+    get_taipei_now,
+    get_taipei_today,
+    is_market_hours
+)
 
 
 class TradingDaySensor(BaseSensorOperator):
     """
-    交易日感測器 - 使用台北時區
-    等待交易日到來
+    交易日感測器
+
+    檢查指定日期是否為交易日（非週末、非假日）。
+    使用台北時區進行日期判斷。
+
+    Example:
+        trading_day_check = TradingDaySensor(
+            task_id='check_trading_day',
+            poke_interval=60,
+            timeout=3600
+        )
     """
-    
-    @apply_defaults
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
     
     def poke(self, context: Context) -> bool:
         """檢查是否為交易日"""
@@ -44,20 +52,33 @@ class TradingDaySensor(BaseSensorOperator):
 
 class MarketHoursSensor(BaseSensorOperator):
     """
-    市場時間感測器 - 使用台北時區
+    市場時間感測器
+
+    檢查當前時間是否在市場交易時間內。
+    支援台灣 (TW) 和美國 (US) 市場。
+
+    Args:
+        market: 市場代碼，'TW' 或 'US'，默認為 'TW'
+        check_trading_day: 是否同時檢查交易日，默認為 True
+
+    Example:
+        market_open_check = MarketHoursSensor(
+            task_id='check_market_open',
+            market='TW',
+            poke_interval=300,
+            timeout=3600
+        )
     """
-    
+
     template_fields = ['market']
-    
-    @apply_defaults
+
     def __init__(
         self,
         market: str = 'TW',
         check_trading_day: bool = True,
-        *args,
         **kwargs
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
         self.market = market
         self.check_trading_day = check_trading_day
     

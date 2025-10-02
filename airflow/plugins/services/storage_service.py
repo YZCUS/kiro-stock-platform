@@ -14,7 +14,7 @@ from contextlib import contextmanager
 
 # 导入时区感知的时间工具
 try:
-    from ..utils.date_utils import get_taipei_now
+    from ..common.date_utils import get_taipei_now
     import pendulum  # 用于时间戳转换
 except ImportError:
     # 备用方案：如果导入失败，使用 pendulum
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # 导入通知管理器
 try:
-    from ..utils.notification_manager import get_notification_manager
+    from .notification_service import get_notification_manager
     NOTIFICATIONS_ENABLED = True
 except ImportError:
     logger.warning("通知管理器未找到，将禁用通知功能")

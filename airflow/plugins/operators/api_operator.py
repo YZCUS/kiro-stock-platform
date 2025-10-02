@@ -1,47 +1,51 @@
 """
 API調用操作器 - 支援外部存儲的版本
 """
-import requests
+import json
 import os
 import logging
 from typing import Dict, Any, List, Optional
-from datetime import date, datetime
+
+import requests
 
 from airflow.models import BaseOperator
-from airflow.utils.decorators import apply_defaults
 from airflow.utils.context import Context
 
-from ..storage.xcom_storage import store_large_data, retrieve_large_data
+from plugins.services.storage_service import store_large_data, retrieve_large_data
 
 logger = logging.getLogger(__name__)
+
+# 常量定義
+DEFAULT_BACKEND_API_URL = 'http://localhost:8000/api/v1'
+DEFAULT_MAX_XCOM_SIZE = 40960  # 40KB
+DEFAULT_API_TIMEOUT = 300  # 秒
 
 
 class APICallOperator(BaseOperator):
     """
     通用API調用操作器
+
+    支援自動檢測大數據並使用外部存儲（Redis）
     """
 
     template_fields = ['endpoint', 'method', 'payload']
 
-    @apply_defaults
     def __init__(
         self,
         endpoint: str,
         method: str = 'GET',
         payload: Optional[Dict[str, Any]] = None,
-        base_url: str = None,
-        timeout: int = 300,
+        base_url: Optional[str] = None,
+        timeout: int = DEFAULT_API_TIMEOUT,
         use_external_storage: bool = True,
-        max_xcom_size: int = 40960,  # 40KB，留一些緩衝空間
-        *args,
+        max_xcom_size: int = DEFAULT_MAX_XCOM_SIZE,
         **kwargs
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
         self.endpoint = endpoint
         self.method = method.upper()
         self.payload = payload or {}
-        # 預設的 base_url 已包含 API 版本前綴
-        self.base_url = base_url or os.getenv('BACKEND_API_URL', 'http://localhost:8000/api/v1')
+        self.base_url = base_url or os.getenv('BACKEND_API_URL', DEFAULT_BACKEND_API_URL)
         self.timeout = timeout
         self.use_external_storage = use_external_storage
         self.max_xcom_size = max_xcom_size
@@ -78,7 +82,6 @@ class APICallOperator(BaseOperator):
 
             # 檢查數據大小是否需要外部存儲
             if self.use_external_storage:
-                import json
                 serialized_size = len(json.dumps(result_data, ensure_ascii=False).encode('utf-8'))
 
                 if serialized_size > self.max_xcom_size:
@@ -180,12 +183,16 @@ class APICallOperator(BaseOperator):
 
 class StockDataCollectionOperator(BaseOperator):
     """
-    股票數據收集操作器 - 支援依賴股票清單
+    股票數據收集操作器
+
+    支援三種模式：
+    1. 單支股票收集 (symbol + market)
+    2. 全量收集 (collect_all=True)
+    3. 使用上游任務的股票清單 (use_upstream_stocks=True)
     """
 
     template_fields = ['symbol', 'market']
 
-    @apply_defaults
     def __init__(
         self,
         symbol: Optional[str] = None,
@@ -195,11 +202,10 @@ class StockDataCollectionOperator(BaseOperator):
         collect_all: bool = False,
         use_upstream_stocks: bool = False,
         upstream_task_id: Optional[str] = None,
-        base_url: str = None,
-        *args,
+        base_url: Optional[str] = None,
         **kwargs
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
         self.symbol = symbol
         self.market = market
         self.start_date = start_date
@@ -207,7 +213,7 @@ class StockDataCollectionOperator(BaseOperator):
         self.collect_all = collect_all
         self.use_upstream_stocks = use_upstream_stocks
         self.upstream_task_id = upstream_task_id
-        self.base_url = base_url or os.getenv('BACKEND_API_URL', 'http://localhost:8000/api/v1')
+        self.base_url = base_url or os.getenv('BACKEND_API_URL', DEFAULT_BACKEND_API_URL)
     
     def execute(self, context: Context) -> Dict[str, Any]:
         """執行股票數據收集"""
@@ -318,12 +324,13 @@ class StockDataCollectionOperator(BaseOperator):
 
 class TechnicalAnalysisOperator(BaseOperator):
     """
-    技術分析操作器 - 簡化版本
+    技術分析操作器
+
+    支援單支股票或批次技術指標分析
     """
-    
+
     template_fields = ['stock_id', 'indicator', 'days']
-    
-    @apply_defaults
+
     def __init__(
         self,
         stock_id: Optional[int] = None,
@@ -331,17 +338,16 @@ class TechnicalAnalysisOperator(BaseOperator):
         days: int = 30,
         batch_analysis: bool = False,
         market: Optional[str] = None,
-        base_url: str = None,
-        *args,
+        base_url: Optional[str] = None,
         **kwargs
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
         self.stock_id = stock_id
         self.indicator = indicator
         self.days = days
         self.batch_analysis = batch_analysis
         self.market = market
-        self.base_url = base_url or os.getenv('BACKEND_API_URL', 'http://localhost:8000/api/v1')
+        self.base_url = base_url or os.getenv('BACKEND_API_URL', DEFAULT_BACKEND_API_URL)
     
     def execute(self, context: Context) -> Dict[str, Any]:
         """執行技術分析"""
@@ -376,24 +382,24 @@ class TechnicalAnalysisOperator(BaseOperator):
 
 class SignalDetectionOperator(BaseOperator):
     """
-    信號偵測操作器 - 簡化版本
+    信號偵測操作器
+
+    偵測股票的買賣信號（金叉、死叉等）
     """
-    
+
     template_fields = ['stock_id', 'signal_types']
-    
-    @apply_defaults
+
     def __init__(
         self,
         stock_id: Optional[int] = None,
-        signal_types: List[str] = None,
-        base_url: str = None,
-        *args,
+        signal_types: Optional[List[str]] = None,
+        base_url: Optional[str] = None,
         **kwargs
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
         self.stock_id = stock_id
         self.signal_types = signal_types or ['BUY', 'SELL']
-        self.base_url = base_url or os.getenv('BACKEND_API_URL', 'http://localhost:8000/api/v1')
+        self.base_url = base_url or os.getenv('BACKEND_API_URL', DEFAULT_BACKEND_API_URL)
     
     def execute(self, context: Context) -> Dict[str, Any]:
         """執行信號偵測"""
@@ -415,24 +421,24 @@ class SignalDetectionOperator(BaseOperator):
 
 class DataValidationOperator(BaseOperator):
     """
-    數據驗證操作器 - 簡化版本
+    數據驗證操作器
+
+    驗證股票數據的完整性和正確性
     """
-    
+
     template_fields = ['stock_id']
-    
-    @apply_defaults
+
     def __init__(
         self,
         stock_id: int,
         days: int = 30,
-        base_url: str = None,
-        *args,
+        base_url: Optional[str] = None,
         **kwargs
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
         self.stock_id = stock_id
         self.days = days
-        self.base_url = base_url or os.getenv('BACKEND_API_URL', 'http://localhost:8000/api/v1')
+        self.base_url = base_url or os.getenv('BACKEND_API_URL', DEFAULT_BACKEND_API_URL)
     
     def execute(self, context: Context) -> Dict[str, Any]:
         """執行數據驗證"""
