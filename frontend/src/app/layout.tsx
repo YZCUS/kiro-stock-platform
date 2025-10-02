@@ -1,11 +1,14 @@
 /**
- * 根Layout組件
+ * 根Layout組件 - Enhanced with shadcn/ui
  */
 import './globals.css';
+import Link from 'next/link';
 import { Providers } from '../store/providers';
 import Toast from '../components/ui/Toast';
 import WebSocketStatus from '../components/ui/WebSocketStatus';
 import ErrorBoundary from '../components/ErrorBoundary';
+import { Button } from '@/components/ui/button';
+import { BarChart3 } from 'lucide-react';
 
 export const metadata = {
   title: '股票分析平台',
@@ -19,78 +22,61 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-TW">
-      <body className="min-h-screen bg-gray-50">
+      <body className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
         <ErrorBoundary>
           <Providers>
-            {/* 導航列 */}
-          <nav className="bg-white shadow-sm border-b border-gray-200">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="flex justify-between h-16">
-                <div className="flex items-center">
-                  <a href="/" className="text-xl font-bold text-gray-900">
-                    股票分析平台
-                  </a>
-                </div>
-                <div className="flex items-center space-x-8">
-                  <a
-                    href="/"
-                    className="text-gray-900 hover:text-gray-600 px-3 py-2 text-sm font-medium"
-                  >
-                    首頁
-                  </a>
-                  <a
-                    href="/stocks"
-                    className="text-gray-900 hover:text-gray-600 px-3 py-2 text-sm font-medium"
-                  >
-                    股票管理
-                  </a>
-                  <a
-                    href="/charts"
-                    className="text-gray-900 hover:text-gray-600 px-3 py-2 text-sm font-medium"
-                  >
-                    圖表分析
-                  </a>
-                  <a
-                    href="/dashboard"
-                    className="text-gray-900 hover:text-gray-600 px-3 py-2 text-sm font-medium"
-                  >
-                    即時儀表板
-                  </a>
-                  <a
-                    href="/signals"
-                    className="text-gray-900 hover:text-gray-600 px-3 py-2 text-sm font-medium"
-                  >
-                    交易信號
-                  </a>
-                  <a
-                    href="/system"
-                    className="text-gray-900 hover:text-gray-600 px-3 py-2 text-sm font-medium"
-                  >
-                    系統狀態
-                  </a>
+            {/* Navigation */}
+            <nav className="bg-white/80 backdrop-blur-md shadow-sm border-b border-gray-200 sticky top-0 z-50">
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="flex justify-between h-16">
+                  <div className="flex items-center">
+                    <Link href="/" className="flex items-center gap-2 text-xl font-bold text-gray-900 hover:text-blue-600 transition-colors">
+                      <BarChart3 className="w-6 h-6" />
+                      股票分析平台
+                    </Link>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href="/">首頁</Link>
+                    </Button>
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href="/stocks">股票管理</Link>
+                    </Button>
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href="/charts">圖表分析</Link>
+                    </Button>
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href="/dashboard">即時儀表板</Link>
+                    </Button>
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href="/signals">交易信號</Link>
+                    </Button>
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href="/system">系統狀態</Link>
+                    </Button>
 
-                  {/* WebSocket 狀態指示器 */}
-                  <div className="border-l border-gray-300 pl-4">
-                    <WebSocketStatus />
+                    {/* WebSocket Status */}
+                    <div className="border-l border-gray-300 ml-4 pl-4">
+                      <WebSocketStatus />
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </nav>
+            </nav>
 
-          {/* 主內容 */}
-          <main>
-            {children}
-          </main>
+            {/* Main Content */}
+            <main className="min-h-[calc(100vh-8rem)]">
+              {children}
+            </main>
 
-          {/* 頁腳 */}
-          <footer className="bg-white border-t border-gray-200 mt-12">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-              <div className="text-center text-gray-600">
-                <p>&copy; 2025 股票分析平台. 版權所有.</p>
+            {/* Footer */}
+            <footer className="bg-white/80 backdrop-blur-md border-t border-gray-200 mt-12">
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <div className="text-center text-gray-600">
+                  <p>&copy; 2025 股票分析平台. 版權所有.</p>
+                </div>
               </div>
-            </div>
-          </footer>
+            </footer>
 
             {/* Toast 通知 */}
             <Toast />

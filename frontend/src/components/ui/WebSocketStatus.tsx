@@ -35,15 +35,18 @@ const WebSocketStatus: React.FC<WebSocketStatusProps> = ({ className = '' }) => 
 
     if (error) {
       return (
-        <div className="flex items-center space-x-2 text-red-600">
-          <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-          <span className="text-sm font-medium">連線中斷</span>
-          <button
-            onClick={reconnect}
-            className="text-xs px-2 py-1 bg-red-100 hover:bg-red-200 rounded transition-colors"
-          >
-            重連
-          </button>
+        <div className="flex flex-col space-y-1">
+          <div className="flex items-center space-x-2 text-red-600">
+            <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+            <span className="text-sm font-medium">連線中斷</span>
+            <button
+              onClick={reconnect}
+              className="text-xs px-2 py-1 bg-red-100 hover:bg-red-200 rounded transition-colors"
+            >
+              重連
+            </button>
+          </div>
+          <div className="text-xs text-red-500 font-mono">{error}</div>
         </div>
       );
     }

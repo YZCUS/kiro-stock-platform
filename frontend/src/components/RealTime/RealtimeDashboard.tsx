@@ -48,14 +48,14 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
 
   // 使用 useMemo 優化股票列表，減少不必要的重新渲染
   const stocks = useMemo(() => {
-    return stocksData?.data || [];
-  }, [stocksData?.data]);
+    return stocksData?.items || [];
+  }, [stocksData?.items]);
 
   // 獲取最新信號數據
   const { data: signalsData } = useSignals({ pageSize: 5 });
   const latestSignals = useMemo(() => {
-    return signalsData?.data || [];
-  }, [signalsData?.data]);
+    return signalsData?.items || [];
+  }, [signalsData?.items]);
 
   // 使用 useMemo 優化股票查找，避免重複查找操作
   const activeStock = useMemo(() => {

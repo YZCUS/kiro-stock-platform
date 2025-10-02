@@ -1,8 +1,8 @@
 /**
  * WebSocket React Hooks
  */
-import { useEffect, useRef, useCallback, useState } from 'react';
-import { useAppDispatch } from '../store';
+import { useEffect, useRef, useCallback } from 'react';
+import { useAppDispatch, useAppSelector } from '../store';
 import { setWebSocketConnected, setWebSocketReconnecting, setWebSocketError } from '../store/slices/uiSlice';
 import { addRealtimeSignal } from '../store/slices/signalsSlice';
 import { getWebSocketManager, WebSocketEventType, WebSocketCallback } from '../lib/websocket';
@@ -14,15 +14,14 @@ import { WebSocketMessage, TradingSignal } from '../types';
 export function useWebSocket() {
   const dispatch = useAppDispatch();
   const wsManager = useRef(getWebSocketManager());
-  const [isConnected, setIsConnected] = useState(false);
-  const [isReconnecting, setIsReconnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  // 從 Redux 讀取全局狀態，而不是使用本地 state
+  const isConnected = useAppSelector((state) => state.ui.websocket.connected);
+  const isReconnecting = useAppSelector((state) => state.ui.websocket.reconnecting);
+  const error = useAppSelector((state) => state.ui.websocket.connectionError);
 
   // 穩定化事件處理器，避免不必要的重新訂閱
   const handleWelcome = useCallback(() => {
-    setIsConnected(true);
-    setIsReconnecting(false);
-    setError(null);
     dispatch(setWebSocketConnected(true));
     dispatch(setWebSocketReconnecting(false));
     dispatch(setWebSocketError(null));
@@ -30,44 +29,51 @@ export function useWebSocket() {
 
   const handleError = useCallback((message: WebSocketMessage) => {
     const errorMsg = message.message || 'WebSocket connection error';
-    setError(errorMsg);
-    setIsConnected(false);
     dispatch(setWebSocketConnected(false));
     dispatch(setWebSocketError(errorMsg));
+  }, [dispatch]);
+
+  const handleDisconnected = useCallback(() => {
+    dispatch(setWebSocketConnected(false));
   }, [dispatch]);
 
   useEffect(() => {
     const manager = wsManager.current;
 
+    // 同步初始狀態 - 如果已經連接，更新 Redux
+    if (manager.isConnected()) {
+      dispatch(setWebSocketConnected(true));
+      dispatch(setWebSocketError(null));
+    }
+
     // 註冊事件監聽器
     manager.on(WebSocketEventType.WELCOME, handleWelcome);
     manager.on(WebSocketEventType.ERROR, handleError);
+    manager.on(WebSocketEventType.DISCONNECTED, handleDisconnected);
 
-    // 嘗試連接
-    manager.connect().catch(error => {
-      const errorMsg = error.message || 'Failed to connect to WebSocket';
-      setError(errorMsg);
-      dispatch(setWebSocketError(errorMsg));
-    });
+    // 嘗試連接（如果尚未連接）
+    if (!manager.isConnected()) {
+      manager.connect().catch(error => {
+        const errorMsg = error.message || 'Failed to connect to WebSocket';
+        dispatch(setWebSocketError(errorMsg));
+      });
+    }
 
     // 清理函數
     return () => {
       manager.off(WebSocketEventType.WELCOME, handleWelcome);
       manager.off(WebSocketEventType.ERROR, handleError);
+      manager.off(WebSocketEventType.DISCONNECTED, handleDisconnected);
     };
-  }, [dispatch, handleWelcome, handleError]);
+  }, [dispatch, handleWelcome, handleError, handleDisconnected]);
 
   // 手動重連
   const reconnect = useCallback(() => {
-    setIsReconnecting(true);
-    setError(null);
     dispatch(setWebSocketReconnecting(true));
     dispatch(setWebSocketError(null));
 
     wsManager.current.connect().catch(error => {
       const errorMsg = error.message || 'Failed to reconnect to WebSocket';
-      setError(errorMsg);
-      setIsReconnecting(false);
       dispatch(setWebSocketReconnecting(false));
       dispatch(setWebSocketError(errorMsg));
     });
@@ -76,9 +82,6 @@ export function useWebSocket() {
   // 斷開連接
   const disconnect = useCallback(() => {
     wsManager.current.disconnect();
-    setIsConnected(false);
-    setIsReconnecting(false);
-    setError(null);
     dispatch(setWebSocketConnected(false));
     dispatch(setWebSocketReconnecting(false));
     dispatch(setWebSocketError(null));

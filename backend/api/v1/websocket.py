@@ -231,17 +231,17 @@ async def websocket_endpoint(
     stock_id: Optional[int] = None,
     client_id: Optional[str] = None,
     db: AsyncSession = Depends(get_database_session),
-    websocket_manager: IWebSocketManager = Depends(get_websocket_manager),
 ) -> None:
     """
     WebSocket 端點處理函數
 
     使用全域單例的 WebSocketService，避免為每個連線創建新實例。
     """
-    # 從依賴注入容器取得單例服務
-    from app.dependencies import get_websocket_service
+    # 從依賴注入容器取得單例服務和管理器
+    from app.dependencies import get_websocket_service, get_websocket_manager
 
     service = get_websocket_service()
+    websocket_manager = get_websocket_manager()
 
     # 檢查服務狀態（初始化已在應用程式啟動時完成）
     if websocket_service_state.degraded_mode:

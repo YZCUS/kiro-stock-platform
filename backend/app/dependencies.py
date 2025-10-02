@@ -259,9 +259,9 @@ def get_websocket_service() -> 'WebSocketService':
 
         # 創建 Repository 單例（輕量級，只包含查詢邏輯）
         # 注意：Repository 的 __init__ 不持有 db，db 在每個方法調用時傳入
-        stock_repo = StockRepository(db=None)  # db 會在調用時傳入
-        price_repo = PriceHistoryRepository(db=None)
-        signal_repo = TradingSignalRepository(db=None)
+        stock_repo = StockRepository(db_session=None)  # db 會在調用時傳入
+        price_repo = PriceHistoryRepository(db_session=None)
+        signal_repo = TradingSignalRepository(db_session=None)
 
         # 創建 Service 單例
         stock_service = StockService(stock_repo, price_repo, cache_service)
