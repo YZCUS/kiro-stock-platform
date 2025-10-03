@@ -9,6 +9,8 @@ import { useAppDispatch } from '../../store';
 import { addToast } from '../../store/slices/uiSlice';
 import { useStocks, useDeleteStock, useCreateStock } from '../../hooks/useStocks';
 import { StockFilter } from '../../types';
+import StocksApiService from '../../services/stocksApi';
+import ConfirmDialog from '../ui/ConfirmDialog';
 
 export interface StockManagementPageProps {}
 
@@ -18,10 +20,17 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newStock, setNewStock] = useState({
-    symbol: '',
-    market: 'TW' as 'TW' | 'US',
+  const [isBackfilling, setIsBackfilling] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    isOpen: boolean;
+    stockId: number | null;
+    stockName: string;
+  }>({
+    isOpen: false,
+    stockId: null,
+    stockName: '',
   });
+  const [stockSymbol, setStockSymbol] = useState('');
 
   // 構建查詢參數
   const queryParams = useMemo(() => {
@@ -48,6 +57,8 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
         title: '成功',
         message: '已成功移除股票',
       }));
+      // 立即重新獲取列表
+      refetch();
     },
     onError: () => {
       dispatch(addToast({
@@ -60,15 +71,33 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
 
   // 使用 React Query 新增 mutation
   const createStockMutation = useCreateStock({
-    onSuccess: () => {
+    onSuccess: async () => {
       dispatch(addToast({
         type: 'success',
         title: '成功',
         message: '已成功新增股票',
       }));
-      setShowAddModal(false);
-      setNewStock({ symbol: '', market: 'TW' });
-      refetch();
+
+      // 延遲一下讓後端有時間處理
+      setTimeout(async () => {
+        try {
+          // 自動回填新增股票的價格數據
+          const backfillResult = await StocksApiService.backfillMissingPrices();
+
+          if (backfillResult.total_stocks > 0) {
+            dispatch(addToast({
+              type: 'success',
+              title: '已自動回填',
+              message: `成功回填 ${backfillResult.successful} 個股票的價格數據`,
+            }));
+          }
+        } catch (error) {
+          console.error('Auto-backfill failed:', error);
+        } finally {
+          // 無論回填是否成功，都刷新列表
+          await refetch();
+        }
+      }, 500);
     },
     onError: (error: any) => {
       dispatch(addToast({
@@ -90,11 +119,26 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
   const loading = isLoading || deleteStockMutation.isPending;
   const error = queryError?.message || null;
 
-  // 處理刪除股票
-  const handleDeleteStock = async (stockId: number, stockName: string) => {
-    if (window.confirm(`確定要移除股票 ${stockName} 嗎？`)) {
-      deleteStockMutation.mutate(stockId);
+  // 打開刪除確認對話框
+  const handleDeleteStock = (stockId: number, stockName: string) => {
+    setDeleteConfirm({
+      isOpen: true,
+      stockId,
+      stockName,
+    });
+  };
+
+  // 確認刪除
+  const confirmDelete = () => {
+    if (deleteConfirm.stockId) {
+      deleteStockMutation.mutate(deleteConfirm.stockId);
     }
+    setDeleteConfirm({ isOpen: false, stockId: null, stockName: '' });
+  };
+
+  // 取消刪除
+  const cancelDelete = () => {
+    setDeleteConfirm({ isOpen: false, stockId: null, stockName: '' });
   };
 
   // 處理搜尋（防抖處理在實際應用中可以使用 useDebounce）
@@ -108,9 +152,96 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
     setPage(newPage);
   };
 
+  // 處理重新載入並自動回填缺失價格
+  const handleRefreshWithBackfill = async () => {
+    setIsBackfilling(true);
+
+    try {
+      // 先檢查是否有缺失價格的股票並回填
+      const backfillResult = await StocksApiService.backfillMissingPrices();
+
+      if (!backfillResult || !backfillResult.success) {
+        throw new Error('回填結果無效');
+      }
+
+      // 如果所有股票都有價格，只刷新列表並顯示成功訊息
+      if (backfillResult.total_stocks === 0) {
+        await refetch();
+        dispatch(addToast({
+          type: 'success',
+          title: '已更新',
+          message: '股票列表已刷新',
+        }));
+        return;
+      }
+
+      // 如果有回填成功的股票
+      dispatch(addToast({
+        type: 'success',
+        title: '回填完成',
+        message: `成功回填 ${backfillResult.successful} 個股票的價格數據`,
+      }));
+
+      // 顯示失敗的股票（如果有）
+      if (backfillResult.failed > 0) {
+        const failedSymbols = backfillResult.results
+          .filter(r => !r.success)
+          .map(r => r.symbol)
+          .join(', ');
+
+        dispatch(addToast({
+          type: 'warning',
+          title: '部分失敗',
+          message: `${backfillResult.failed} 個股票回填失敗: ${failedSymbols}`,
+        }));
+      }
+
+      // 回填後重新載入列表
+      await refetch();
+
+    } catch (error: any) {
+      console.error('❌ 操作失敗:', error);
+
+      const errorMessage = error.response?.data?.detail
+        || error.message
+        || '操作失敗，請稍後再試';
+
+      dispatch(addToast({
+        type: 'error',
+        title: '錯誤',
+        message: errorMessage,
+      }));
+    } finally {
+      setIsBackfilling(false);
+    }
+  };
+
+  // 自動識別市場：數字為台股，英文為美股
+  const detectMarket = (symbol: string): 'TW' | 'US' => {
+    const trimmedSymbol = symbol.trim().toUpperCase();
+    // 如果全部是數字，判定為台股
+    if (/^\d+$/.test(trimmedSymbol)) {
+      return 'TW';
+    }
+    // 如果包含英文字母，判定為美股
+    return 'US';
+  };
+
+  // 格式化股票代號
+  const formatSymbol = (symbol: string, market: 'TW' | 'US'): string => {
+    const trimmedSymbol = symbol.trim().toUpperCase();
+    // 台股需要加上 .TW 後綴（如果沒有的話）
+    if (market === 'TW' && !trimmedSymbol.endsWith('.TW')) {
+      return `${trimmedSymbol}.TW`;
+    }
+    return trimmedSymbol;
+  };
+
   // 處理新增股票
-  const handleAddStock = async () => {
-    if (!newStock.symbol.trim()) {
+  const handleAddStock = () => {
+    const trimmedSymbol = stockSymbol.trim();
+
+    if (!trimmedSymbol) {
       dispatch(addToast({
         type: 'error',
         title: '錯誤',
@@ -119,7 +250,29 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
       return;
     }
 
-    createStockMutation.mutate(newStock);
+    // 驗證格式
+    if (!/^[A-Za-z0-9.]+$/.test(trimmedSymbol)) {
+      dispatch(addToast({
+        type: 'error',
+        title: '錯誤',
+        message: '股票代號只能包含英文字母和數字',
+      }));
+      return;
+    }
+
+    // 自動識別市場
+    const market = detectMarket(trimmedSymbol);
+    const formattedSymbol = formatSymbol(trimmedSymbol, market);
+
+    // 提交到後端（後端會自動查詢公司名稱）
+    createStockMutation.mutate({
+      symbol: formattedSymbol,
+      market: market,
+    });
+
+    // 成功後清空輸入（在 mutation onSuccess 中處理）
+    setStockSymbol('');
+    setShowAddModal(false);
   };
 
   return (
@@ -137,12 +290,31 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-medium text-gray-900">股票列表</h2>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
-          >
-            新增股票
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleRefreshWithBackfill}
+              disabled={isBackfilling}
+              className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2"
+            >
+              {isBackfilling ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  抓取中...
+                </>
+              ) : (
+                <>🔄 重新載入</>
+              )}
+            </button>
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+            >
+              新增股票
+            </button>
+          </div>
         </div>
 
         <div className="mb-4">
@@ -200,7 +372,7 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {stock.latest_price?.close ? (
-                      <span>{stock.market === 'TW' ? 'NT$' : '$'}{stock.latest_price.close.toFixed(2)}</span>
+                      <span className="font-semibold">{stock.market === 'TW' ? 'NT$' : '$'}{stock.latest_price.close.toFixed(2)}</span>
                     ) : (
                       <span className="text-gray-400">---</span>
                     )}
@@ -381,63 +553,65 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
       {/* 新增股票 Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md animate-scale-in">
             <h3 className="text-lg font-medium text-gray-900 mb-4">新增股票</h3>
+
+            {/* 提示訊息 */}
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+              <div className="flex">
+                <svg className="h-5 w-5 text-blue-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div className="text-sm text-blue-700">
+                  <p className="font-medium mb-1">支援台股與美股</p>
+                  <ul className="list-disc list-inside space-y-1 text-xs">
+                    <li><strong>台股</strong>：輸入數字代號（如：2330）</li>
+                    <li><strong>美股</strong>：輸入英文代碼（如：AAPL）</li>
+                    <li>系統將自動查詢公司名稱</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  市場 <span className="text-red-500">*</span>
-                </label>
-                <div className="flex gap-4">
-                  <label className="flex items-center cursor-pointer">
-                    <input
-                      type="radio"
-                      name="market"
-                      value="TW"
-                      checked={newStock.market === 'TW'}
-                      onChange={(e) => setNewStock({...newStock, market: 'TW'})}
-                      className="mr-2"
-                      disabled={createStockMutation.isPending}
-                    />
-                    <span className="text-sm text-gray-700">台股</span>
-                  </label>
-                  <label className="flex items-center cursor-pointer">
-                    <input
-                      type="radio"
-                      name="market"
-                      value="US"
-                      checked={newStock.market === 'US'}
-                      onChange={(e) => setNewStock({...newStock, market: 'US'})}
-                      className="mr-2"
-                      disabled={createStockMutation.isPending}
-                    />
-                    <span className="text-sm text-gray-700">美股</span>
-                  </label>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
                   股票代號 <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
-                  value={newStock.symbol}
-                  onChange={(e) => setNewStock({...newStock, symbol: e.target.value.toUpperCase()})}
-                  placeholder="台股: 2330.TW | 美股: AAPL"
+                  value={stockSymbol}
+                  onChange={(e) => setStockSymbol(e.target.value.toUpperCase())}
+                  placeholder="台股輸入數字（如 2330）或美股英文（如 AAPL）"
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   disabled={createStockMutation.isPending}
+                  autoFocus
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleAddStock();
+                    }
+                  }}
                 />
-                <p className="mt-1 text-xs text-gray-500">
-                  系統將自動抓取股票名稱
-                </p>
+                {stockSymbol && (
+                  <p className="mt-2 text-xs text-gray-600">
+                    {detectMarket(stockSymbol) === 'TW' ? (
+                      <span className="text-green-600">
+                        ✓ <strong>台股</strong>
+                      </span>
+                    ) : (
+                      <span className="text-blue-600">
+                        ✓ <strong>美股</strong>
+                      </span>
+                    )}
+                  </p>
+                )}
               </div>
 
               <div className="flex justify-end gap-3 mt-6">
                 <button
                   onClick={() => {
                     setShowAddModal(false);
-                    setNewStock({ symbol: '', market: 'TW' });
+                    setStockSymbol('');
                   }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                   disabled={createStockMutation.isPending}
@@ -446,16 +620,36 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
                 </button>
                 <button
                   onClick={handleAddStock}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={createStockMutation.isPending}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  disabled={createStockMutation.isPending || !stockSymbol.trim()}
                 >
-                  {createStockMutation.isPending ? '新增中...' : '確認新增'}
+                  {createStockMutation.isPending ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      新增中...
+                    </>
+                  ) : '確認新增'}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* 刪除確認對話框 */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        title="確認移除股票"
+        message={`確定要移除股票「${deleteConfirm.stockName}」嗎？此操作無法復原。`}
+        confirmText="移除"
+        cancelText="取消"
+        type="danger"
+        onConfirm={confirmDelete}
+        onCancel={cancelDelete}
+      />
     </div>
   );
 };

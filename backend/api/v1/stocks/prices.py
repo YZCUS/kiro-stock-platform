@@ -4,9 +4,12 @@
 """
 from typing import List, Optional, Dict, Any
 from datetime import date
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 
 from app.dependencies import (
     get_database_session,
@@ -16,7 +19,10 @@ from app.dependencies import (
 from api.schemas.stocks import PriceDataResponse
 from domain.services.stock_service import StockService
 from domain.services.data_collection_service import DataCollectionService
+from domain.models.stock import Stock
+from domain.models.price_history import PriceHistory
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -159,3 +165,110 @@ async def backfill_stock_data(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"數據回填失敗: {str(e)}")
+
+
+@router.post("/backfill-missing", response_model=Dict[str, Any])
+async def backfill_missing_prices(
+    db: AsyncSession = Depends(get_database_session),
+    data_collection_service: DataCollectionService = Depends(get_data_collection_service_clean)
+):
+    """
+    自動回填所有缺失價格的股票數據
+
+    此端點會：
+    1. 找出所有沒有價格數據的活躍股票
+    2. 逐一抓取它們的歷史價格數據
+    3. 返回處理結果摘要
+    """
+    try:
+        logger.info("開始批量回填缺失的股票價格數據")
+
+        # 查找所有沒有價格數據的活躍股票
+        # 使用 LEFT JOIN 找出 price_history 表中沒有記錄的股票
+        query = (
+            select(Stock)
+            .outerjoin(PriceHistory, Stock.id == PriceHistory.stock_id)
+            .where(Stock.is_active == True)
+            .group_by(Stock.id)
+            .having(func.count(PriceHistory.id) == 0)
+        )
+
+        result = await db.execute(query)
+        stocks_without_prices = result.scalars().all()
+
+        logger.info(f"找到 {len(stocks_without_prices)} 個沒有價格數據的股票")
+
+        if not stocks_without_prices:
+            return {
+                "success": True,
+                "message": "所有活躍股票都已有價格數據",
+                "total_stocks": 0,
+                "successful": 0,
+                "failed": 0,
+                "results": []
+            }
+
+        # 逐一回填數據
+        results = []
+        successful = 0
+        failed = 0
+
+        for stock in stocks_without_prices:
+            try:
+                logger.info(f"正在回填股票: {stock.symbol} ({stock.name})")
+
+                collect_result = await data_collection_service.collect_stock_data(
+                    db=db,
+                    stock_id=stock.id,
+                    start_date=None,  # 使用預設日期範圍
+                    end_date=None
+                )
+
+                if collect_result.status == collect_result.status.SUCCESS:
+                    successful += 1
+                    results.append({
+                        "stock_id": stock.id,
+                        "symbol": stock.symbol,
+                        "name": stock.name,
+                        "success": True,
+                        "data_points": collect_result.records_collected,
+                        "message": "成功回填數據"
+                    })
+                else:
+                    failed += 1
+                    results.append({
+                        "stock_id": stock.id,
+                        "symbol": stock.symbol,
+                        "name": stock.name,
+                        "success": False,
+                        "data_points": 0,
+                        "message": f"回填失敗: {collect_result.status.value}",
+                        "errors": collect_result.errors
+                    })
+
+            except Exception as e:
+                failed += 1
+                logger.error(f"回填股票 {stock.symbol} 時發生錯誤: {str(e)}")
+                results.append({
+                    "stock_id": stock.id,
+                    "symbol": stock.symbol,
+                    "name": stock.name,
+                    "success": False,
+                    "data_points": 0,
+                    "message": f"錯誤: {str(e)}"
+                })
+
+        logger.info(f"批量回填完成: 成功 {successful}, 失敗 {failed}")
+
+        return {
+            "success": True,
+            "message": f"批量回填完成：成功 {successful} 個，失敗 {failed} 個",
+            "total_stocks": len(stocks_without_prices),
+            "successful": successful,
+            "failed": failed,
+            "results": results
+        }
+
+    except Exception as e:
+        logger.error(f"批量回填失敗: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"批量回填失敗: {str(e)}")

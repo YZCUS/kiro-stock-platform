@@ -28,11 +28,11 @@ const Toast: React.FC = () => {
   }
 
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2">
+    <div className="fixed top-20 right-4 z-[9999] space-y-2 max-w-md">
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`max-w-sm w-full shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden ${
+          className={`w-full shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden animate-slide-in ${
             toast.type === 'success'
               ? 'bg-green-50 ring-green-500'
               : toast.type === 'error'
@@ -67,8 +67,8 @@ const Toast: React.FC = () => {
                   </svg>
                 )}
               </div>
-              <div className="ml-3 w-0 flex-1 pt-0.5">
-                <p className={`text-sm font-medium ${
+              <div className="ml-3 flex-1 min-w-0">
+                <p className={`text-sm font-medium break-words ${
                   toast.type === 'success'
                     ? 'text-green-900'
                     : toast.type === 'error'
@@ -80,7 +80,7 @@ const Toast: React.FC = () => {
                   {toast.title}
                 </p>
                 {toast.message && (
-                  <p className={`mt-1 text-sm ${
+                  <p className={`mt-1 text-sm break-words ${
                     toast.type === 'success'
                       ? 'text-green-700'
                       : toast.type === 'error'

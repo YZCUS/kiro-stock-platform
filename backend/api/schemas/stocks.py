@@ -13,8 +13,11 @@ class LatestPriceInfo(BaseModel):
     close: Optional[float] = None
     change: Optional[float] = None  # 漲跌金額
     change_percent: Optional[float] = None  # 漲跌幅度 (%)
-    date: Optional[date] = None
+    date: Optional[str] = None  # ISO format date string
     volume: Optional[int] = None
+
+    class Config:
+        from_attributes = True
 
 
 # 基本股票模型

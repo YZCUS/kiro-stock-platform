@@ -5,9 +5,13 @@
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
+import logging
 
 from domain.repositories.stock_repository_interface import IStockRepository
 from domain.models.stock import Stock
+from infrastructure.external.yfinance_wrapper import yfinance_wrapper
+
+logger = logging.getLogger(__name__)
 
 
 class StockRepository(IStockRepository):
@@ -106,8 +110,31 @@ class StockRepository(IStockRepository):
 
     async def create(self, db: AsyncSession, obj_in):
         """創建股票"""
-        # 如果沒有提供 name，使用 symbol 作為默認值
-        stock_name = obj_in.name if obj_in.name else obj_in.symbol
+        # 如果沒有提供 name，嘗試從 Yahoo Finance 查詢公司名稱
+        stock_name = obj_in.name
+
+        if not stock_name:
+            try:
+                logger.info(f"Fetching company name for {obj_in.symbol} from Yahoo Finance")
+                ticker = yfinance_wrapper.get_ticker(obj_in.symbol)
+
+                # 嘗試獲取公司名稱
+                if hasattr(ticker, 'info') and ticker.info:
+                    # 優先使用 longName，其次使用 shortName
+                    stock_name = ticker.info.get('longName') or ticker.info.get('shortName')
+
+                    if stock_name:
+                        logger.info(f"Found company name: {stock_name} for {obj_in.symbol}")
+                    else:
+                        logger.warning(f"No company name found for {obj_in.symbol}, using symbol as name")
+                        stock_name = obj_in.symbol
+                else:
+                    logger.warning(f"No info available for {obj_in.symbol}, using symbol as name")
+                    stock_name = obj_in.symbol
+
+            except Exception as e:
+                logger.error(f"Error fetching company name for {obj_in.symbol}: {e}")
+                stock_name = obj_in.symbol
 
         # 創建Stock實例
         db_obj = Stock(

@@ -25,7 +25,7 @@ export class StocksApiService {
   /**
    * 獲取股票列表
    */
-  static async getStocks(params: StockListParams = {}): Promise<PaginatedResponse<Stock>> {
+  static async getStocks(params: StockListParams & { search?: string } = {}): Promise<PaginatedResponse<Stock>> {
     const queryParams = new URLSearchParams();
 
     if (params.page) {
@@ -40,8 +40,10 @@ export class StocksApiService {
     if (params.filters?.active_only !== undefined) {
       queryParams.append('is_active', params.filters.active_only.toString());
     }
-    if (params.filters?.search) {
-      queryParams.append('search', params.filters.search);
+    // Support both params.search and params.filters.search
+    const searchTerm = (params as any).search || params.filters?.search;
+    if (searchTerm) {
+      queryParams.append('search', searchTerm);
     }
 
     const url = `${API_ENDPOINTS.STOCKS.LIST}?${queryParams.toString()}`;
@@ -174,6 +176,28 @@ export class StocksApiService {
     timestamp: string;
   }> {
     return ApiService.post(API_ENDPOINTS.PRICES.BACKFILL(stockId), params);
+  }
+
+  /**
+   * 批量回填所有缺失價格的股票數據
+   */
+  static async backfillMissingPrices(): Promise<{
+    success: boolean;
+    message: string;
+    total_stocks: number;
+    successful: number;
+    failed: number;
+    results: Array<{
+      stock_id: number;
+      symbol: string;
+      name: string;
+      success: boolean;
+      data_points: number;
+      message: string;
+      errors?: string[];
+    }>;
+  }> {
+    return ApiService.post('/api/v1/stocks/backfill-missing', {});
   }
 }
 

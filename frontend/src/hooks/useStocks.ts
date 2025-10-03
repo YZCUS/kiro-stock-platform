@@ -33,8 +33,10 @@ export function useStocks(
   return useQuery({
     queryKey: STOCKS_QUERY_KEYS.list(params),
     queryFn: () => StocksApiService.getStocks(params),
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
+    staleTime: 0, // Always fetch fresh data
+    gcTime: 0, // No cache - always refetch
+    refetchOnMount: true, // Refetch when component mounts
+    refetchOnWindowFocus: true, // Refetch when window gains focus
     ...options,
   });
 }

@@ -3,13 +3,18 @@
 負責: GET /, /active, /search, /simple
 """
 from typing import List, Optional, Dict, Any
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
 
 from app.dependencies import get_database_session, get_stock_service
-from api.schemas.stocks import StockResponse, StockListResponse
+from api.schemas.stocks import StockResponse, StockListResponse, LatestPriceInfo
 from domain.services.stock_service import StockService
+from domain.models.price_history import PriceHistory
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -37,10 +42,48 @@ async def get_stocks(
             per_page=per_page
         )
 
-        items = [StockResponse.model_validate(item) for item in result["items"]]
+        # 為每個股票獲取最新價格資訊
+        stock_responses = []
+        for stock in result["items"]:
+            # stock_service 返回的是 dict，需要用 ['id'] 訪問
+            stock_id = stock.id if hasattr(stock, 'id') else stock['id']
+
+            # 查詢最新兩個交易日的價格（用於計算漲跌）
+            price_query = select(PriceHistory).where(
+                PriceHistory.stock_id == stock_id
+            ).order_by(desc(PriceHistory.date)).limit(2)
+
+            price_result = await db.execute(price_query)
+            prices = price_result.scalars().all()
+
+            # 轉換股票資料
+            stock_data = StockResponse.model_validate(stock).model_dump()
+
+            # 如果有價格資料，計算最新價格和漲跌
+            if prices and len(prices) > 0:
+                latest = prices[0]
+                close_price = float(latest.close_price) if latest.close_price else None
+
+                change = None
+                change_percent = None
+                if close_price and len(prices) > 1:
+                    prev_close = float(prices[1].close_price) if prices[1].close_price else None
+                    if prev_close and prev_close != 0:
+                        change = close_price - prev_close
+                        change_percent = (change / prev_close) * 100
+
+                stock_data['latest_price'] = {
+                    'close': close_price,
+                    'change': change,
+                    'change_percent': change_percent,
+                    'date': latest.date.isoformat() if latest.date else None,
+                    'volume': latest.volume
+                }
+
+            stock_responses.append(StockResponse(**stock_data))
 
         return StockListResponse(
-            items=items,
+            items=stock_responses,
             total=result["total"],
             page=result["page"],
             per_page=result["per_page"],
