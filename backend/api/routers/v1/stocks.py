@@ -14,9 +14,7 @@ from app.dependencies import (
     get_technical_analysis_service_clean,
     get_data_collection_service_clean,
     get_trading_signal_service_clean,
-    get_data_validation_service,
     get_stock_repository,
-    get_price_history_repository,
     get_cache_service,
     get_settings
 )
@@ -51,6 +49,10 @@ async def get_stocks(
 ):
     """取得股票清單（支援過濾和分頁）"""
     try:
+        from sqlalchemy import select, desc
+        from domain.models.price_history import PriceHistory
+        from api.schemas.stocks import LatestPriceInfo
+
         # 使用Domain Service處理業務邏輯
         result = await stock_service.get_stock_list(
             db=db,
@@ -61,9 +63,53 @@ async def get_stocks(
             per_page=per_page
         )
 
+        # 為每個股票獲取最新價格
+        import logging
+        logger = logging.getLogger(__name__)
+
+        stock_responses = []
+        logger.info(f"DEBUG: Processing {len(result['items'])} stocks")
+        raise Exception("TEST: This code IS running!")
+        for stock in result["items"]:
+            logger.info(f"DEBUG: Processing stock {stock.id} - {stock.symbol}")
+            # 查詢最新兩個交易日的價格（用於計算漲跌）
+            price_query = select(PriceHistory).where(
+                PriceHistory.stock_id == stock.id
+            ).order_by(desc(PriceHistory.date)).limit(2)
+            logger.info(f"DEBUG: Executing price query for stock {stock.id}")
+
+            price_result = await db.execute(price_query)
+            prices = price_result.scalars().all()
+
+            # 構建股票響應
+            stock_data = StockResponse.model_validate(stock).model_dump()
+
+            if prices and len(prices) > 0:
+                latest = prices[0]
+                close_price = float(latest.close_price) if latest.close_price else None
+
+                # 計算漲跌
+                change = None
+                change_percent = None
+                if close_price and len(prices) > 1:
+                    prev_close = float(prices[1].close_price) if prices[1].close_price else None
+                    if prev_close:
+                        change = close_price - prev_close
+                        change_percent = (change / prev_close) * 100
+
+                stock_data['latest_price'] = LatestPriceInfo(
+                    close=close_price,
+                    change=change,
+                    change_percent=change_percent,
+                    date=latest.date,
+                    volume=latest.volume
+                )
+
+            stock_responses.append(StockResponse(**stock_data))
+
         # 轉換為API回應格式
         response_data = {
-            "items": [StockResponse.model_validate(stock) for stock in result["items"]],
+            "items": stock_responses,
             "total": result["total"],
             "page": result["page"],
             "per_page": result["per_page"],
@@ -73,6 +119,8 @@ async def get_stocks(
         return StockListResponse(**response_data)
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"取得股票清單失敗: {str(e)}")
 
 
@@ -149,8 +197,7 @@ async def get_stock_prices(
     end_date: Optional[date] = Query(None, description="結束日期"),
     limit: int = Query(100, description="返回數量限制"),
     db: AsyncSession = Depends(get_database_session),
-    stock_repo=Depends(get_stock_repository),
-    price_repo=Depends(get_price_history_repository)
+    stock_repo=Depends(get_stock_repository)
 ):
     """取得股票價格數據"""
     try:
@@ -160,12 +207,22 @@ async def get_stock_prices(
             raise HTTPException(status_code=404, detail="股票不存在")
 
         # 取得價格數據
+        from sqlalchemy import select, and_, desc
+        from domain.models.price_history import PriceHistory
+
+        query = select(PriceHistory).where(PriceHistory.stock_id == stock_id)
+
         if start_date and end_date:
-            prices = await price_repo.get_by_stock_and_date_range(
-                db, stock_id, start_date, end_date, limit=limit
+            query = query.where(
+                and_(
+                    PriceHistory.date >= start_date,
+                    PriceHistory.date <= end_date
+                )
             )
-        else:
-            prices = await price_repo.get_by_stock(db, stock_id, limit=limit)
+
+        query = query.order_by(desc(PriceHistory.date)).limit(limit)
+        result = await db.execute(query)
+        prices = result.scalars().all()
 
         return [
             PriceDataResponse(
@@ -268,9 +325,14 @@ async def refresh_stock_data(
     collection_service=Depends(get_data_collection_service_clean)
 ):
     """手動更新股票數據"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"=== ENTERING refresh_stock_data endpoint, stock_id={stock_id}, days={days} ===")
     try:
+        logger.info("Checking if stock exists...")
         # 檢查股票是否存在
         stock = await stock_repo.get(db, stock_id)
+        logger.info(f"Stock found: {stock}")
         if not stock:
             raise HTTPException(status_code=404, detail="股票不存在")
 
@@ -280,20 +342,33 @@ async def refresh_stock_data(
         start_date = end_date - timedelta(days=days)
 
         # 呼叫Domain Service
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Calling collect_stock_data with stock_id={stock.id}, start={start_date}, end={end_date}")
+
         result = await collection_service.collect_stock_data(
-            db, stock.symbol, stock.market, start_date, end_date
+            db, stock_id=stock.id, start_date=start_date, end_date=end_date
         )
 
+        logger.info(f"Collection result type: {type(result)}, result: {result}")
+
+        # 檢查結果狀態 (result.status 是 DataCollectionStatus enum)
+        from domain.services.data_collection_service import DataCollectionStatus
+        success = result.status == DataCollectionStatus.SUCCESS
+        message = f"成功收集 {result.records_collected} 筆數據" if success else "數據收集失敗"
+
         return DataCollectionResponse(
-            success=result.success,
-            message=result.message,
-            data_points=result.data_points_collected,
+            success=success,
+            message=message,
+            data_points=result.records_collected,
             errors=result.errors
         )
 
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"數據刷新失敗: {str(e)}")
 
 

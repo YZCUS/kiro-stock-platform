@@ -106,11 +106,14 @@ class StockRepository(IStockRepository):
 
     async def create(self, db: AsyncSession, obj_in):
         """創建股票"""
+        # 如果沒有提供 name，使用 symbol 作為默認值
+        stock_name = obj_in.name if obj_in.name else obj_in.symbol
+
         # 創建Stock實例
         db_obj = Stock(
             symbol=obj_in.symbol,
             market=obj_in.market,
-            name=obj_in.name
+            name=stock_name
         )
 
         db.add(db_obj)

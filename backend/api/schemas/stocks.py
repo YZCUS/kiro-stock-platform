@@ -7,15 +7,26 @@ from datetime import date, datetime
 from .common import PaginatedResponse
 
 
+# 價格資訊模型
+class LatestPriceInfo(BaseModel):
+    """最新價格資訊"""
+    close: Optional[float] = None
+    change: Optional[float] = None  # 漲跌金額
+    change_percent: Optional[float] = None  # 漲跌幅度 (%)
+    date: Optional[date] = None
+    volume: Optional[int] = None
+
+
 # 基本股票模型
 class StockResponse(BaseModel):
     id: int
     symbol: str
     market: str
-    name: str
+    name: Optional[str] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    latest_price: Optional[LatestPriceInfo] = None  # 最新價格資訊
 
     class Config:
         from_attributes = True

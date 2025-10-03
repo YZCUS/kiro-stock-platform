@@ -107,7 +107,7 @@ class PriceHistoryRepository(IPriceHistoryRepository):
                 low_price=data['low_price'],
                 close_price=data['close_price'],
                 volume=data.get('volume', 0),
-                adj_close=data.get('adj_close')
+                adjusted_close=data.get('adjusted_close')
             )
             price_objects.append(price_obj)
 

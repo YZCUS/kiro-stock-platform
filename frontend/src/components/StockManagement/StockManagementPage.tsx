@@ -4,6 +4,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { useAppDispatch } from '../../store';
 import { addToast } from '../../store/slices/uiSlice';
 import { useStocks, useDeleteStock, useCreateStock } from '../../hooks/useStocks';
@@ -19,7 +20,6 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newStock, setNewStock] = useState({
     symbol: '',
-    name: '',
     market: 'TW' as 'TW' | 'US',
   });
 
@@ -67,7 +67,7 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
         message: '已成功新增股票',
       }));
       setShowAddModal(false);
-      setNewStock({ symbol: '', name: '', market: 'TW' });
+      setNewStock({ symbol: '', market: 'TW' });
       refetch();
     },
     onError: (error: any) => {
@@ -110,11 +110,11 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
 
   // 處理新增股票
   const handleAddStock = async () => {
-    if (!newStock.symbol.trim() || !newStock.name.trim()) {
+    if (!newStock.symbol.trim()) {
       dispatch(addToast({
         type: 'error',
         title: '錯誤',
-        message: '請填寫股票代號和名稱',
+        message: '請填寫股票代號',
       }));
       return;
     }
@@ -170,10 +170,10 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
                   市場
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  價格
+                  最新價格
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  漲跌
+                  漲跌幅
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   操作
@@ -187,7 +187,7 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
                     {stock.symbol}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {stock.name}
+                    {stock.name || stock.symbol}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
@@ -199,17 +199,28 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {stock.market === 'TW' ? 'NT$' : '$'} ---
+                    {stock.latest_price?.close ? (
+                      <span>{stock.market === 'TW' ? 'NT$' : '$'}{stock.latest_price.close.toFixed(2)}</span>
+                    ) : (
+                      <span className="text-gray-400">---</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <span className="text-gray-500">
-                      未獲取
-                    </span>
+                    {stock.latest_price?.change_percent !== null && stock.latest_price?.change_percent !== undefined ? (
+                      <span className={stock.latest_price.change_percent >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                        {stock.latest_price.change_percent >= 0 ? '+' : ''}{stock.latest_price.change_percent.toFixed(2)}%
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">---</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 space-x-2">
-                    <button className="text-blue-600 hover:text-blue-800 font-medium">
+                    <Link
+                      href={`/charts?stock=${stock.id}`}
+                      className="text-blue-600 hover:text-blue-800 font-medium"
+                    >
                       查看
-                    </button>
+                    </Link>
                     <button
                       onClick={() => handleDeleteStock(stock.id, stock.name)}
                       className="text-red-600 hover:text-red-800 font-medium"
@@ -374,34 +385,6 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
             <h3 className="text-lg font-medium text-gray-900 mb-4">新增股票</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  股票代號 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={newStock.symbol}
-                  onChange={(e) => setNewStock({...newStock, symbol: e.target.value})}
-                  placeholder="例如: 2330.TW 或 AAPL"
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  disabled={createStockMutation.isPending}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  股票名稱 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={newStock.name}
-                  onChange={(e) => setNewStock({...newStock, name: e.target.value})}
-                  placeholder="例如: 台積電 或 Apple Inc."
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  disabled={createStockMutation.isPending}
-                />
-              </div>
-
-              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   市場 <span className="text-red-500">*</span>
                 </label>
@@ -433,11 +416,28 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  股票代號 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newStock.symbol}
+                  onChange={(e) => setNewStock({...newStock, symbol: e.target.value.toUpperCase()})}
+                  placeholder="台股: 2330.TW | 美股: AAPL"
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  disabled={createStockMutation.isPending}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  系統將自動抓取股票名稱
+                </p>
+              </div>
+
               <div className="flex justify-end gap-3 mt-6">
                 <button
                   onClick={() => {
                     setShowAddModal(false);
-                    setNewStock({ symbol: '', name: '', market: 'TW' });
+                    setNewStock({ symbol: '', market: 'TW' });
                   }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                   disabled={createStockMutation.isPending}

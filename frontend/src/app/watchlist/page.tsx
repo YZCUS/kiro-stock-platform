@@ -28,11 +28,9 @@ export default function WatchlistPage() {
   }, [isAuthenticated]);
 
   const loadWatchlist = async () => {
-    if (!token) return;
-
     dispatch(setWatchlistLoading(true));
     try {
-      const data = await getWatchlistDetailed(token);
+      const data = await getWatchlistDetailed();
       dispatch(setWatchlistItems(data));
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || '載入自選股失敗';
@@ -41,10 +39,8 @@ export default function WatchlistPage() {
   };
 
   const handleRemove = async (stockId: number, watchlistId: number) => {
-    if (!token) return;
-
     try {
-      await removeFromWatchlist(stockId, token);
+      await removeFromWatchlist(stockId);
       dispatch(removeWatchlistItem(watchlistId));
     } catch (err: any) {
       alert('移除失敗：' + (err.response?.data?.detail || '未知錯誤'));

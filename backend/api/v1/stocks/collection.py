@@ -12,7 +12,7 @@ from app.dependencies import (
     get_data_collection_service_clean,
     get_stock_service
 )
-from domain.services.data_collection_service import DataCollectionService
+from domain.services.data_collection_service import DataCollectionService, DataCollectionStatus
 from domain.services.stock_service import StockService
 from api.schemas.stocks import (
     DataCollectionRequest,
@@ -53,8 +53,8 @@ async def refresh_stock_data(
         )
 
         return DataCollectionResponse(
-            success=collect_result.status == collect_result.status.SUCCESS,
-            message="數據刷新完成" if collect_result.status == collect_result.status.SUCCESS else "數據刷新失敗",
+            success=collect_result.status == DataCollectionStatus.SUCCESS,
+            message="數據刷新完成" if collect_result.status == DataCollectionStatus.SUCCESS else "數據刷新失敗",
             data_points=collect_result.records_collected,
             errors=collect_result.errors
         )
@@ -86,8 +86,8 @@ async def collect_stock_data(
         )
 
         return DataCollectionResponse(
-            success=result.status == result.status.SUCCESS,
-            message="數據收集完成" if result.status == result.status.SUCCESS else "數據收集失敗",
+            success=result.status == DataCollectionStatus.SUCCESS,
+            message="數據收集完成" if result.status == DataCollectionStatus.SUCCESS else "數據收集失敗",
             data_points=result.records_collected,
             errors=result.errors
         )

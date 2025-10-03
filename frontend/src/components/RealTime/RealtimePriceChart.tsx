@@ -23,10 +23,26 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const smaSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [historicalData, setHistoricalData] = useState<any[]>([]);
 
   // 使用 WebSocket hooks
   const { priceData, lastUpdate, isSubscribed } = usePriceUpdates(stockId);
   const { indicators } = useIndicatorUpdates(stockId);
+
+  // 載入歷史價格數據
+  useEffect(() => {
+    const loadHistoricalData = async () => {
+      try {
+        const response = await fetch(`http://localhost:8000/api/v1/stocks/${stockId}/prices?limit=100`);
+        const data = await response.json();
+        setHistoricalData(data);
+      } catch (error) {
+        console.error('Failed to load historical data:', error);
+      }
+    };
+
+    loadHistoricalData();
+  }, [stockId]);
 
   // 初始化圖表
   useEffect(() => {
@@ -78,42 +94,6 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
     seriesRef.current = candlestickSeries;
     smaSeriesRef.current = smaSeries;
 
-    // 生成一些初始模擬數據
-    const now = Date.now();
-    const initialData = Array.from({ length: 50 }, (_, i) => {
-      const time = (now - (50 - i) * 60 * 1000) as UTCTimestamp;
-      const basePrice = 100 + Math.sin(i * 0.1) * 10;
-      const volatility = Math.random() * 2 - 1;
-      const open = basePrice + volatility;
-      const close = open + (Math.random() * 4 - 2);
-      const high = Math.max(open, close) + Math.random() * 2;
-      const low = Math.min(open, close) - Math.random() * 2;
-
-      return {
-        time: Math.floor(time / 1000) as UTCTimestamp,
-        open,
-        high,
-        low,
-        close,
-      };
-    });
-
-    // 生成對應的 SMA 數據
-    const smaData = initialData.map((item, index) => {
-      if (index < 19) return null; // SMA 需要至少20個數據點
-
-      const sum = initialData
-        .slice(index - 19, index + 1)
-        .reduce((acc, curr) => acc + curr.close, 0);
-      return {
-        time: item.time,
-        value: sum / 20,
-      };
-    }).filter(Boolean) as { time: UTCTimestamp; value: number }[];
-
-    candlestickSeries.setData(initialData);
-    smaSeries.setData(smaData);
-
     setIsInitialized(true);
 
     // 處理視窗大小變化
@@ -135,6 +115,44 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
       }
     };
   }, [height, isInitialized]);
+
+  // 載入歷史數據到圖表
+  useEffect(() => {
+    if (!isInitialized || !seriesRef.current || !smaSeriesRef.current || historicalData.length === 0) return;
+
+    try {
+      // 轉換歷史數據為圖表格式
+      const chartData = historicalData
+        .map(item => {
+          const date = new Date(item.date);
+          return {
+            time: Math.floor(date.getTime() / 1000) as UTCTimestamp,
+            open: item.open,
+            high: item.high,
+            low: item.low,
+            close: item.close,
+          };
+        })
+        .sort((a, b) => a.time - b.time);
+
+      // 計算 SMA
+      const smaData = chartData.map((item, index) => {
+        if (index < 19) return null;
+        const sum = chartData
+          .slice(index - 19, index + 1)
+          .reduce((acc, curr) => acc + curr.close, 0);
+        return {
+          time: item.time,
+          value: sum / 20,
+        };
+      }).filter(Boolean) as { time: UTCTimestamp; value: number }[];
+
+      seriesRef.current.setData(chartData);
+      smaSeriesRef.current.setData(smaData);
+    } catch (error) {
+      console.error('Failed to set chart data:', error);
+    }
+  }, [isInitialized, historicalData]);
 
   // 處理即時價格更新
   useEffect(() => {

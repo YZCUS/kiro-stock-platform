@@ -32,13 +32,13 @@ export class StocksApiService {
       queryParams.append('page', params.page.toString());
     }
     if (params.pageSize) {
-      queryParams.append('page_size', params.pageSize.toString());
+      queryParams.append('per_page', params.pageSize.toString());
     }
     if (params.filters?.market) {
       queryParams.append('market', params.filters.market);
     }
     if (params.filters?.active_only !== undefined) {
-      queryParams.append('active_only', params.filters.active_only.toString());
+      queryParams.append('is_active', params.filters.active_only.toString());
     }
     if (params.filters?.search) {
       queryParams.append('search', params.filters.search);

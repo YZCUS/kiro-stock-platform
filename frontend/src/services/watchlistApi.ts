@@ -31,14 +31,9 @@ export interface PopularStock {
 /**
  * Get user's watchlist
  */
-export const getWatchlist = async (token: string): Promise<WatchlistResponse> => {
+export const getWatchlist = async (): Promise<WatchlistResponse> => {
   const response = await apiClient.get<WatchlistResponse>(
-    API_ENDPOINTS.WATCHLIST.LIST,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
+    API_ENDPOINTS.WATCHLIST.LIST
   );
   return response.data;
 };
@@ -46,14 +41,9 @@ export const getWatchlist = async (token: string): Promise<WatchlistResponse> =>
 /**
  * Get user's watchlist with detailed stock info
  */
-export const getWatchlistDetailed = async (token: string): Promise<WatchlistStockDetail[]> => {
+export const getWatchlistDetailed = async (): Promise<WatchlistStockDetail[]> => {
   const response = await apiClient.get<WatchlistStockDetail[]>(
-    API_ENDPOINTS.WATCHLIST.DETAILED,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
+    API_ENDPOINTS.WATCHLIST.DETAILED
   );
   return response.data;
 };
@@ -62,17 +52,11 @@ export const getWatchlistDetailed = async (token: string): Promise<WatchlistStoc
  * Add stock to watchlist
  */
 export const addToWatchlist = async (
-  stockId: number,
-  token: string
+  stockId: number
 ): Promise<WatchlistItemResponse> => {
   const response = await apiClient.post<WatchlistItemResponse>(
     API_ENDPOINTS.WATCHLIST.ADD,
-    { stock_id: stockId },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
+    { stock_id: stockId }
   );
   return response.data;
 };
@@ -81,16 +65,10 @@ export const addToWatchlist = async (
  * Remove stock from watchlist
  */
 export const removeFromWatchlist = async (
-  stockId: number,
-  token: string
+  stockId: number
 ): Promise<void> => {
   await apiClient.delete(
-    API_ENDPOINTS.WATCHLIST.REMOVE(stockId),
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
+    API_ENDPOINTS.WATCHLIST.REMOVE(stockId)
   );
 };
 
@@ -98,16 +76,10 @@ export const removeFromWatchlist = async (
  * Check if stock is in watchlist
  */
 export const checkInWatchlist = async (
-  stockId: number,
-  token: string
+  stockId: number
 ): Promise<{ in_watchlist: boolean; stock_id: number }> => {
   const response = await apiClient.get(
-    API_ENDPOINTS.WATCHLIST.CHECK(stockId),
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
+    API_ENDPOINTS.WATCHLIST.CHECK(stockId)
   );
   return response.data;
 };

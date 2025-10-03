@@ -2,15 +2,25 @@
  * 股票分析平台 - TypeScript 類型定義
  */
 
+// 最新價格資訊
+export interface LatestPriceInfo {
+  close: number | null;
+  change: number | null;
+  change_percent: number | null;
+  date: string | null;
+  volume: number | null;
+}
+
 // 基礎類型
 export interface Stock {
   id: number;
   symbol: string;
   market: string;
-  name: string;
+  name: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  latest_price?: LatestPriceInfo | null;
 }
 
 export interface PriceData {

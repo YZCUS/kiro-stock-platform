@@ -134,7 +134,22 @@ class DataCollectionService:
 
             # 儲存數據
             if collected_data:
-                saved_records = await self.price_repo.create_batch(db, collected_data)
+                # 轉換數據格式並添加 stock_id
+                formatted_data = []
+                for data_point in collected_data:
+                    formatted_point = {
+                        'stock_id': stock_id,
+                        'date': data_point['date'],
+                        'open_price': data_point['open'],
+                        'high_price': data_point['high'],
+                        'low_price': data_point['low'],
+                        'close_price': data_point['close'],
+                        'volume': data_point.get('volume', 0),
+                        'adjusted_close': data_point.get('adj_close')
+                    }
+                    formatted_data.append(formatted_point)
+
+                saved_records = await self.price_repo.create_batch(db, formatted_data)
                 records_count = len(saved_records)
                 status = DataCollectionStatus.SUCCESS
                 errors = []
