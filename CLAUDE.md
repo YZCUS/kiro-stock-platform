@@ -463,3 +463,11 @@ mypy domain/ infrastructure/ api/
 12. **Foreign Key Constraints**: UserWatchlist model must have foreign keys to both `users.id` and `stocks.id`
 13. **Unique Constraints**: Ensure (user_id, stock_id) unique constraint to prevent duplicate watchlist entries
 14. **Cascade Delete**: Use `ondelete="CASCADE"` to automatically clean up watchlist entries when users or stocks are deleted
+
+**Stock Management Features:**
+15. **Auto Company Name Fetch**: When creating stocks, `stock_repository.create()` automatically fetches company name from Yahoo Finance using `yfinance_wrapper.get_ticker().info['longName']`
+16. **Smart Market Detection**: Frontend auto-detects market based on symbol pattern - numeric = Taiwan (TW), alphabetic = US
+17. **Auto Symbol Formatting**: Taiwan stocks automatically append `.TW` suffix (e.g., 2330 → 2330.TW)
+18. **Price Backfill**: Use `POST /api/v1/stocks/backfill-missing` to automatically fetch missing stock prices
+19. **Latest Price Display**: Stock listing API includes `latest_price` field with close, change, change_percent, date, and volume from most recent price_history record
+20. **Company Name Limitation**: Yahoo Finance returns English names for both TW and US stocks (e.g., Taiwan stocks show "Taiwan Semiconductor Manufacturing Company Limited" not "台積電")
