@@ -26,6 +26,52 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.get("/prices/data-exists")
+async def check_price_data_exists(
+    date: str = Query(..., description="檢查日期 (YYYY-MM-DD)"),
+    db: AsyncSession = Depends(get_database_session)
+) -> Dict[str, Any]:
+    """
+    檢查指定日期是否有價格數據
+
+    Args:
+        date: 日期字串 (YYYY-MM-DD 格式)
+        db: 資料庫會話
+
+    Returns:
+        Dict: 包含 has_data 和 stock_count 的字典
+    """
+    try:
+        from datetime import datetime
+
+        # 解析日期
+        check_date = datetime.strptime(date, "%Y-%m-%d").date()
+
+        # 查詢該日期的價格數據數量
+        query = select(func.count(PriceHistory.id)).where(
+            PriceHistory.date == check_date
+        )
+
+        result = await db.execute(query)
+        count = result.scalar()
+
+        logger.info(f"檢查日期 {check_date} 的價格數據: {count} 筆")
+
+        return {
+            "success": True,
+            "date": date,
+            "has_data": count > 0,
+            "stock_count": count
+        }
+
+    except ValueError as e:
+        logger.error(f"日期格式錯誤: {date}")
+        raise HTTPException(status_code=400, detail=f"日期格式錯誤，請使用 YYYY-MM-DD 格式")
+    except Exception as e:
+        logger.error(f"檢查價格數據時發生錯誤: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"檢查失敗: {str(e)}")
+
+
 @router.get("/{stock_id}/prices", response_model=List[PriceDataResponse])
 async def get_stock_prices(
     stock_id: int,

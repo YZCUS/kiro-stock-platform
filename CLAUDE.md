@@ -243,6 +243,8 @@ core/config.py                     →    app/settings.py (new) + core/config.py
 - Trading signals with golden cross/death cross detection
 - User accounts with authentication (UUID, email, username, encrypted password)
 - User watchlists (many-to-many relationship between users and stocks)
+- User portfolios (持倉管理 - quantity, avg_cost, total_cost, profit/loss calculation)
+- Transactions (交易記錄 - BUY/SELL with fee and tax tracking)
 
 **Airflow DAGs:**
 - Daily stock data collection from Yahoo Finance
@@ -333,6 +335,38 @@ Users can manage personal stock watchlists:
 - `DELETE /api/v1/watchlist/{stock_id}` - Remove from watchlist (protected)
 - `GET /api/v1/watchlist/check/{stock_id}` - Check if in watchlist (protected)
 - `GET /api/v1/watchlist/popular` - Get popular stocks (public)
+
+### Portfolio Management Feature
+Users can manage their stock portfolios with detailed transaction tracking and profit/loss calculation:
+
+**Features:**
+- Add buy/sell transactions with price, quantity, fee, and tax
+- Automatic portfolio position calculation (average cost, quantity)
+- Real-time profit/loss calculation based on current price
+- Transaction history with filtering by stock, type, and date range
+- Portfolio summary with total value and total profit/loss
+- Support for partial sells and complete liquidation
+
+**Backend Implementation:**
+- `domain/models/user_portfolio.py` - Portfolio model with profit/loss calculations
+- `domain/models/transaction.py` - Transaction model with BUY/SELL tracking
+- `api/routers/v1/portfolio.py` - Portfolio and transaction management endpoints
+- `api/schemas/portfolio.py` - Pydantic schemas for requests and responses
+- Database tables: `user_portfolios`, `transactions`
+
+**API Endpoints:**
+- `GET /api/v1/portfolio/` - Get user's portfolio list with profit/loss (protected)
+- `GET /api/v1/portfolio/summary` - Get portfolio summary statistics (protected)
+- `GET /api/v1/portfolio/{portfolio_id}` - Get portfolio detail (protected)
+- `DELETE /api/v1/portfolio/{portfolio_id}` - Delete portfolio (liquidate position) (protected)
+- `POST /api/v1/portfolio/transactions` - Create transaction (BUY/SELL) (protected)
+- `GET /api/v1/portfolio/transactions` - Get transaction history (protected)
+- `GET /api/v1/portfolio/transactions/summary` - Get transaction statistics (protected)
+
+**Stock API Enhancement:**
+- `GET /api/v1/stocks/` - Returns `is_watchlist` and `is_portfolio` boolean flags
+- One stock can be both in watchlist and portfolio simultaneously
+- Flags are user-specific (requires optional authentication)
 
 ## Testing Strategy
 

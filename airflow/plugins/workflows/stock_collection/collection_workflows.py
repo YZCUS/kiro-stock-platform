@@ -9,6 +9,17 @@ def decide_collection_strategy(**context):
     return 'try_main_collection'  # 總是先嘗試主要路徑
 
 
+def _get_market_from_context(context):
+    """從 context 中獲取市場類型"""
+    ti = context.get('task_instance') or context.get('ti')
+    if ti:
+        market = ti.xcom_pull(key='market')
+        if market:
+            return market
+    # 預設返回 None，由調用者決定如何處理
+    return None
+
+
 # 嘗試主要收集流程的包裝函數
 def try_main_collection_workflow(**context):
     """嘗試執行主要收集流程，失敗時標記需要備援"""
@@ -614,3 +625,364 @@ def execute_fallback_collection(**context):
 # BranchPythonOperator 會跳過未選擇的路徑，因此總有一條路徑會是 skipped 狀態
 
 # 數據品質驗證（簡化版本 - 只檢查前5支股票）
+
+
+# ========== 市場專屬收集函數 ==========
+
+def _extract_stocks_list(stocks_data, market):
+    """提取並過濾股票清單
+
+    Args:
+        stocks_data: API 返回的股票數據
+        market: 市場類型 ('TW' 或 'US')
+
+    Returns:
+        list: 過濾後的股票清單
+    """
+    stocks_list = []
+    if isinstance(stocks_data, dict):
+        if 'items' in stocks_data:
+            stocks_list = stocks_data['items']
+        elif 'data' in stocks_data:
+            stocks_list = stocks_data['data']
+        else:
+            stocks_list = stocks_data if isinstance(stocks_data, list) else []
+    elif isinstance(stocks_data, list):
+        stocks_list = stocks_data
+
+    # 過濾只保留指定市場的股票
+    if market:
+        stocks_list = [s for s in stocks_list if s.get('market') == market]
+
+    return stocks_list
+
+
+def _extract_collection_statistics(collection_data, market_name=''):
+    """提取收集統計信息
+
+    Args:
+        collection_data: API 返回的收集數據
+        market_name: 市場名稱（用於日誌）
+
+    Returns:
+        tuple: (total_stocks, success_count, error_count, total_data_saved, api_message)
+    """
+    if isinstance(collection_data, dict):
+        total_stocks = collection_data.get('total_stocks', 0)
+        success_count = collection_data.get('success_count', 0)
+        error_count = collection_data.get('error_count', 0)
+        total_data_saved = collection_data.get('total_data_saved', 0)
+        api_message = collection_data.get('message', '')
+    elif isinstance(collection_data, list):
+        list_length = len(collection_data)
+        total_stocks = list_length
+        success_count = list_length
+        error_count = 0
+        total_data_saved = list_length
+        api_message = f'收集到 {list_length} 項{market_name}數據（list格式）'
+    else:
+        total_stocks = 0
+        success_count = 0
+        error_count = 0
+        total_data_saved = 0
+        api_message = f'API響應格式異常: {type(collection_data)}'
+
+    return total_stocks, success_count, error_count, total_data_saved, api_message
+
+
+def _handle_external_storage(result):
+    """處理外部存儲的情況
+
+    Args:
+        result: API 返回結果
+
+    Returns:
+        實際數據（從外部存儲檢索或直接返回）
+    """
+    if isinstance(result, dict) and result.get('external_storage'):
+        from plugins.services.storage_service import retrieve_large_data
+        return retrieve_large_data(result['reference_id'])
+    return result
+
+
+def _try_main_collection_with_market(context, market, market_name):
+    """主要收集流程的通用邏輯
+
+    Args:
+        context: Airflow context
+        market: 市場代碼 ('TW' 或 'US')
+        market_name: 市場名稱（用於日誌）
+
+    Returns:
+        dict: 收集結果
+    """
+    from plugins.operators.api_operator import APICallOperator
+
+    print(f"嘗試{market_name}主要收集流程: 先獲取{market_name}清單，再收集數據...")
+
+    # 步驟1: 獲取活躍股票清單
+    get_stocks_operator = APICallOperator(
+        task_id=f"main_get_{market.lower()}_stocks",
+        endpoint="/stocks/active",
+        method="GET",
+        params={'market': market}
+    )
+
+    stocks_result = get_stocks_operator.execute(context)
+    stocks_data = _handle_external_storage(stocks_result)
+
+    # 提取並過濾股票清單
+    stocks_list = _extract_stocks_list(stocks_data, market)
+
+    if not stocks_list:
+        raise ValueError(f"獲取到的{market_name}清單為空")
+
+    stocks_count = len(stocks_list)
+    print(f"獲取到 {stocks_count} 支活躍{market_name}")
+
+    # 轉換股票清單格式
+    formatted_stocks = [
+        {"symbol": stock.get("symbol"), "market": market}
+        for stock in stocks_list
+    ]
+
+    # 步驟2: 基於股票清單收集數據
+    collection_strategy = 'batch'
+    actual_stocks_fetched = stocks_count
+
+    try:
+        # 嘗試使用批次端點
+        collect_operator = APICallOperator(
+            task_id=f"main_collect_{market.lower()}_stocks",
+            endpoint="/stocks/collect-batch",
+            method="POST",
+            payload={
+                'stocks': formatted_stocks,
+                'use_stock_list': True
+            }
+        )
+        collection_result = collect_operator.execute(context)
+        print(f"成功使用批次收集策略（{market_name}）")
+
+    except Exception as batch_error:
+        print(f"批次端點不可用，{market_name}策略回退到collect-all: {batch_error}")
+        collection_strategy = 'collect_all_fallback'
+
+        # 回退到collect-all端點
+        collect_operator = APICallOperator(
+            task_id=f"main_collect_{market.lower()}_all_fallback",
+            endpoint="/stocks/collect-all",
+            method="POST",
+            params={'market': market}
+        )
+        collection_result = collect_operator.execute(context)
+        actual_stocks_fetched = None
+        print(f"已回退到全{market_name}收集策略")
+
+    # 處理收集結果
+    collection_data = _handle_external_storage(collection_result)
+
+    # 提取統計信息
+    total_stocks, success_count, error_count, total_data_saved, api_message = \
+        _extract_collection_statistics(collection_data, market_name)
+
+    # 使用強健的成功判斷邏輯
+    has_meaningful_stats = (total_stocks > 0 or success_count > 0 or
+                           'total_stocks' in collection_data or 'success_count' in collection_data)
+    api_success, success_reason = determine_api_success(collection_data, has_meaningful_stats)
+
+    if collection_strategy == 'collect_all_fallback':
+        actual_stocks_fetched = max(total_stocks, 0)
+
+    if actual_stocks_fetched is None:
+        actual_stocks_fetched = total_stocks if total_stocks > 0 else 0
+
+    print(f"{market_name}主要收集完成: 目標 {actual_stocks_fetched} 支，實際收集 {total_stocks} 支")
+    print(f"API成功判斷: {api_success} - {success_reason}")
+
+    if not api_success:
+        error_msg = f"{market_name}API收集失敗: {success_reason} | 原始消息: {api_message}"
+        print(error_msg)
+        raise Exception(error_msg)
+
+    return {
+        'strategy': 'main',
+        'status': 'success',
+        'message': f'{market_name}主要收集流程完成',
+        'market': market,
+        'stocks_fetched': actual_stocks_fetched,
+        'total_stocks': total_stocks,
+        'success_count': success_count,
+        'error_count': error_count,
+        'total_data_saved': total_data_saved,
+        'collection_strategy': collection_strategy,
+        'api_success': api_success,
+        'api_message': api_message[:200] if api_message else '',
+        'original_result': collection_result if isinstance(collection_result, dict) and collection_result.get('external_storage') else None
+    }
+
+
+def _execute_fallback_with_market(context, market, market_name):
+    """備援收集流程的通用邏輯
+
+    Args:
+        context: Airflow context
+        market: 市場代碼 ('TW' 或 'US')
+        market_name: 市場名稱（用於日誌）
+
+    Returns:
+        dict: 收集結果
+    """
+    from plugins.operators.api_operator import APICallOperator
+
+    print(f"執行{market_name}備援數據收集流程: 直接收集所有活躍{market_name}...")
+
+    # 備援策略：直接調用collect-all API
+    collect_all_operator = APICallOperator(
+        task_id=f"fallback_collect_{market.lower()}_all",
+        endpoint="/stocks/collect-all",
+        method="POST",
+        params={'market': market}
+    )
+
+    collection_result = collect_all_operator.execute(context)
+    collection_data = _handle_external_storage(collection_result)
+
+    # 提取統計信息
+    total_stocks, success_count, error_count, total_data_saved, api_message = \
+        _extract_collection_statistics(collection_data, market_name)
+
+    # 使用強健的成功判斷邏輯
+    has_meaningful_stats = (total_stocks > 0 or success_count > 0 or
+                           'total_stocks' in collection_data or 'success_count' in collection_data)
+    api_success, success_reason = determine_api_success(collection_data, has_meaningful_stats)
+
+    print(f"{market_name}備援收集完成: 收集 {total_stocks} 支{market_name}")
+    print(f"API成功判斷: {api_success} - {success_reason}")
+
+    if not api_success:
+        error_msg = f"{market_name}API收集失敗: {success_reason} | 原始消息: {api_message}"
+        print(error_msg)
+        raise Exception(error_msg)
+
+    return {
+        'strategy': 'fallback',
+        'status': 'success',
+        'message': f'{market_name}備援收集流程完成',
+        'market': market,
+        'stocks_fetched': total_stocks,
+        'total_stocks': total_stocks,
+        'success_count': success_count,
+        'error_count': error_count,
+        'total_data_saved': total_data_saved,
+        'api_success': api_success,
+        'api_message': api_message[:200] if api_message else '',
+        'original_result': collection_result if isinstance(collection_result, dict) and collection_result.get('external_storage') else None
+    }
+
+
+def try_main_collection_workflow_tw(**context):
+    """台股主要收集流程 - 只收集 market='TW' 的股票"""
+    try:
+        return _try_main_collection_with_market(context, 'TW', '台股')
+    except Exception as e:
+        error_msg = str(e)
+        print(f"台股主要收集流程失敗: {error_msg}")
+        raise Exception(f"台股主要收集暫時失敗: {error_msg}")
+
+
+def try_main_collection_workflow_us(**context):
+    """美股主要收集流程 - 只收集 market='US' 的股票"""
+    try:
+        return _try_main_collection_with_market(context, 'US', '美股')
+    except Exception as e:
+        error_msg = str(e)
+        print(f"美股主要收集流程失敗: {error_msg}")
+        raise Exception(f"美股主要收集暫時失敗: {error_msg}")
+
+
+def execute_fallback_collection_tw(**context):
+    """執行台股備援數據收集"""
+    try:
+        return _execute_fallback_with_market(context, 'TW', '台股')
+    except Exception as e:
+        print(f"台股備援收集也失敗: {e}")
+        raise
+
+
+def execute_fallback_collection_us(**context):
+    """執行美股備援數據收集"""
+    try:
+        return _execute_fallback_with_market(context, 'US', '美股')
+    except Exception as e:
+        print(f"美股備援收集也失敗: {e}")
+        raise
+
+
+# 輔助函數：API 成功判斷邏輯
+def determine_api_success(data, has_stats):
+    """判斷API是否成功，使用多重檢查機制，避免空結果誤判為成功"""
+    # 處理 list 格式響應（常見於 collect-all 端點）
+    if isinstance(data, list):
+        if len(data) > 0:
+            return True, f"成功收集 {len(data)} 項數據（list格式）"
+        else:
+            return False, "空的list響應，無數據收集"
+
+    # 處理非 dict 格式的其他類型
+    if not isinstance(data, dict):
+        return False, f"無效的響應格式: {type(data)}"
+
+    # 方法1：檢查明確的success欄位
+    explicit_success = data.get('success')
+    if explicit_success is not None:
+        return bool(explicit_success), data.get('message', '')
+
+    # 方法2：檢查是否有錯誤欄位
+    if 'error' in data or 'errors' in data:
+        errors = data.get('error') or data.get('errors', [])
+        if errors:  # 有錯誤內容
+            error_msg = str(errors) if not isinstance(errors, list) else f"{len(errors)} errors"
+            return False, f"檢測到錯誤: {error_msg}"
+
+    # 方法3：檢查統計欄位是否合理（必要欄位存在且有意義）
+    if has_stats:
+        total_stocks = data.get('total_stocks', 0)
+        success_count = data.get('success_count', 0)
+        # 如果有統計數據，檢查是否有實際收集到數據
+        if total_stocks > 0 or success_count > 0:
+            return True, f"成功處理 {total_stocks} 支股票（成功: {success_count}）"
+        elif total_stocks == 0 and success_count == 0:
+            # 統計欄位存在但全為0，可能是空結果
+            return False, f"無數據收集（total_stocks={total_stocks}, success_count={success_count}）"
+
+    # 方法4：檢查是否有資料內容（非空的主要欄位）
+    data_fields = ['items', 'data', 'results', 'stocks']
+    for field in data_fields:
+        if field in data:
+            field_data = data[field]
+            if field_data and len(field_data) > 0:
+                return True, f"檢測到數據內容: {field} ({len(field_data)} 項)"
+            else:
+                # 欄位存在但為空
+                return False, f"數據欄位為空: {field}"
+
+    # 方法5：預設判斷 - 非空響應但需要檢查是否有意義
+    if len(data) > 0:
+        # 檢查是否所有統計數字都是0（可能是空結果）
+        numeric_fields = ['total_stocks', 'success_count', 'total_data_saved', 'count', 'total']
+        all_zero = True
+        has_numeric = False
+        for field in numeric_fields:
+            if field in data:
+                has_numeric = True
+                if data[field] != 0:
+                    all_zero = False
+                    break
+
+        if has_numeric and all_zero:
+            return False, "所有統計數字為0，可能無實際數據"
+        else:
+            return True, "預設成功（無明確錯誤指示且有非零數據）"
+
+    return False, "空的或無效的響應"

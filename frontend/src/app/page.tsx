@@ -24,7 +24,7 @@ export default function HomePage() {
         <h1 className="text-5xl font-bold text-gray-900 mb-6 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
           股票分析平台
         </h1>
-        <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+        <p className="text-xl text-gray-600 max-w-3xl mx-auto">
           自動化股票數據收集與技術分析平台，支援台股和美股市場的即時監控與分析
         </p>
       </div>

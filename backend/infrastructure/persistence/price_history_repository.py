@@ -95,29 +95,41 @@ class PriceHistoryRepository(IPriceHistoryRepository):
         db: AsyncSession,
         price_data: List[dict]
     ) -> List[PriceHistory]:
-        """批量創建價格歷史記錄"""
-        price_objects = []
+        """批量創建價格歷史記錄，使用 UPSERT 處理重複數據"""
+        from sqlalchemy.dialects.postgresql import insert
 
-        for data in price_data:
-            price_obj = PriceHistory(
-                stock_id=data['stock_id'],
-                date=data['date'],
-                open_price=data['open_price'],
-                high_price=data['high_price'],
-                low_price=data['low_price'],
-                close_price=data['close_price'],
-                volume=data.get('volume', 0),
-                adjusted_close=data.get('adjusted_close')
-            )
-            price_objects.append(price_obj)
+        if not price_data:
+            return []
 
-        db.add_all(price_objects)
+        # 使用 PostgreSQL 的 INSERT ... ON CONFLICT DO UPDATE
+        stmt = insert(PriceHistory).values(price_data)
+
+        # 定義更新策略：當 (stock_id, date) 重複時更新價格數據
+        stmt = stmt.on_conflict_do_update(
+            index_elements=['stock_id', 'date'],  # 唯一約束的欄位
+            set_={
+                'open_price': stmt.excluded.open_price,
+                'high_price': stmt.excluded.high_price,
+                'low_price': stmt.excluded.low_price,
+                'close_price': stmt.excluded.close_price,
+                'volume': stmt.excluded.volume,
+                'adjusted_close': stmt.excluded.adjusted_close,
+            }
+        )
+
+        await db.execute(stmt)
         await db.commit()
 
-        for obj in price_objects:
-            await db.refresh(obj)
+        # 查詢插入/更新的記錄
+        stock_ids = [data['stock_id'] for data in price_data]
+        dates = [data['date'] for data in price_data]
 
-        return price_objects
+        query = select(PriceHistory).where(
+            PriceHistory.stock_id.in_(stock_ids),
+            PriceHistory.date.in_(dates)
+        )
+        result = await db.execute(query)
+        return list(result.scalars().all())
 
     async def get_price_changes(
         self,

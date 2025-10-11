@@ -51,9 +51,9 @@ export default function Navigation() {
             {isAuthenticated ? (
               <>
                 <Button variant="ghost" size="sm" asChild>
-                  <Link href="/watchlist" className="flex items-center gap-1">
+                  <Link href="/portfolio" className="flex items-center gap-1">
                     <Star className="w-4 h-4" />
-                    自選股
+                    持倉管理
                   </Link>
                 </Button>
                 <div className="border-l border-gray-300 ml-2 pl-2 flex items-center gap-2">

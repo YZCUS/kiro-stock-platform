@@ -5,9 +5,18 @@ Airflow DAG 驗證器模塊
 """
 
 
-def check_trading_day(**context):
-    """檢查是否為交易日 - 使用台北時區"""
-    from plugins.common.date_utils import is_trading_day, get_taipei_today
+def check_trading_day_tw(**context):
+    """檢查是否為台股交易日 - 使用台北時區，返回分支決策而不拋出異常
+
+    邏輯：
+    1. 如果今天是交易日 → 執行數據收集
+    2. 如果今天不是交易日 → 檢查最近交易日的數據是否存在
+       - 如果數據不存在 → 補抓最近交易日的數據
+       - 如果數據存在 → 跳過收集
+    """
+    from plugins.common.date_utils import is_trading_day, get_taipei_today, get_last_trading_day
+    import os
+    import requests
 
     # 使用 context 中的執行日期，或台北時區的當前日期
     execution_date = context.get('execution_date')
@@ -17,10 +26,210 @@ def check_trading_day(**context):
     else:
         check_date = get_taipei_today()
 
-    if not is_trading_day(check_date):
-        raise Exception(f"今天不是交易日: {check_date}")
+    trading_day = is_trading_day(check_date)
 
-    return {'is_trading_day': True, 'date': check_date.isoformat()}
+    # 將結果推送到 XCom 供後續任務使用
+    context['ti'].xcom_push(key='is_trading_day', value=trading_day)
+    context['ti'].xcom_push(key='check_date', value=check_date.isoformat())
+    context['ti'].xcom_push(key='market', value='TW')
+
+    if trading_day:
+        print(f"✓ 今天是台股交易日: {check_date}，繼續執行數據收集")
+        return 'check_market_status'  # 繼續下一步
+    else:
+        # 今天不是交易日，檢查最近交易日的數據
+        last_trading_day = get_last_trading_day(check_date)
+        print(f"✗ 今天不是台股交易日: {check_date}")
+        print(f"ℹ 最近的交易日: {last_trading_day}")
+
+        # 檢查最近交易日的數據是否存在
+        try:
+            backend_url = os.getenv('BACKEND_API_URL', 'http://backend:8000/api/v1')
+
+            # 查詢是否有該日期的台股價格數據
+            response = requests.get(
+                f"{backend_url}/stocks/prices/data-exists",
+                params={'date': last_trading_day.isoformat(), 'market': 'TW'},
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                has_data = data.get('has_data', False)
+                stock_count = data.get('stock_count', 0)
+
+                if has_data and stock_count > 0:
+                    print(f"✓ 最近交易日 {last_trading_day} 已有 {stock_count} 筆台股價格數據，跳過收集")
+                    return 'skip_collection'
+                else:
+                    print(f"✗ 最近交易日 {last_trading_day} 沒有台股價格數據，需要補抓")
+                    # 將最近交易日推送到 XCom，供收集任務使用
+                    context['ti'].xcom_push(key='collection_date', value=last_trading_day.isoformat())
+                    return 'check_market_status'  # 執行數據收集
+            else:
+                print(f"⚠ 無法檢查數據狀態 (HTTP {response.status_code})，為安全起見執行數據收集")
+                context['ti'].xcom_push(key='collection_date', value=last_trading_day.isoformat())
+                return 'check_market_status'
+
+        except Exception as e:
+            print(f"⚠ 檢查數據時發生錯誤: {e}，為安全起見執行數據收集")
+            context['ti'].xcom_push(key='collection_date', value=last_trading_day.isoformat())
+            return 'check_market_status'
+
+
+def check_trading_day_us(**context):
+    """檢查是否為美股交易日 - 使用美東時區，返回分支決策而不拋出異常
+
+    邏輯：
+    1. 如果今天是美股交易日 → 執行數據收集
+    2. 如果今天不是交易日 → 檢查最近交易日的數據是否存在
+       - 如果數據不存在 → 補抓最近交易日的數據
+       - 如果數據存在 → 跳過收集
+
+    注意：美股交易日檢查使用美東時區，週一到週五為交易日（不含美國聯邦假日）
+    """
+    from plugins.common.date_utils import get_taipei_today, get_last_trading_day
+    import os
+    import requests
+    from datetime import timedelta
+
+    # 使用 context 中的執行日期，或台北時區的當前日期
+    execution_date = context.get('execution_date')
+    if execution_date:
+        # 轉換為台北時區的日期
+        check_date = execution_date.in_timezone('Asia/Taipei').date()
+    else:
+        check_date = get_taipei_today()
+
+    # 美股交易日檢查：台北時間週二到週六早上5點 對應 美東週一到週五收盤
+    # 因此需要檢查前一天是否為美股交易日
+    # 台北週二早上 = 美東週一收盤，所以檢查的是美東週一
+    us_check_date = check_date - timedelta(days=1)
+
+    # 簡化版美股交易日檢查：週一到週五（不考慮美國假日）
+    is_weekday = us_check_date.weekday() < 5  # 0-4 表示週一到週五
+
+    # 將結果推送到 XCom 供後續任務使用
+    context['ti'].xcom_push(key='is_trading_day', value=is_weekday)
+    context['ti'].xcom_push(key='check_date', value=us_check_date.isoformat())
+    context['ti'].xcom_push(key='market', value='US')
+
+    if is_weekday:
+        print(f"✓ 美東 {us_check_date} 是美股交易日 (台北時間 {check_date})，繼續執行數據收集")
+        return 'check_market_status'  # 繼續下一步
+    else:
+        # 今天不是交易日，檢查最近交易日的數據
+        # 找到上一個工作日
+        days_back = 1 if us_check_date.weekday() == 5 else 2  # 週六往回1天，週日往回2天
+        last_us_trading_day = us_check_date - timedelta(days=days_back)
+
+        print(f"✗ 美東 {us_check_date} 不是美股交易日")
+        print(f"ℹ 最近的美股交易日: {last_us_trading_day}")
+
+        # 檢查最近交易日的數據是否存在
+        try:
+            backend_url = os.getenv('BACKEND_API_URL', 'http://backend:8000/api/v1')
+
+            # 查詢是否有該日期的美股價格數據
+            response = requests.get(
+                f"{backend_url}/stocks/prices/data-exists",
+                params={'date': last_us_trading_day.isoformat(), 'market': 'US'},
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                has_data = data.get('has_data', False)
+                stock_count = data.get('stock_count', 0)
+
+                if has_data and stock_count > 0:
+                    print(f"✓ 最近交易日 {last_us_trading_day} 已有 {stock_count} 筆美股價格數據，跳過收集")
+                    return 'skip_collection'
+                else:
+                    print(f"✗ 最近交易日 {last_us_trading_day} 沒有美股價格數據，需要補抓")
+                    # 將最近交易日推送到 XCom，供收集任務使用
+                    context['ti'].xcom_push(key='collection_date', value=last_us_trading_day.isoformat())
+                    return 'check_market_status'  # 執行數據收集
+            else:
+                print(f"⚠ 無法檢查數據狀態 (HTTP {response.status_code})，為安全起見執行數據收集")
+                context['ti'].xcom_push(key='collection_date', value=last_us_trading_day.isoformat())
+                return 'check_market_status'
+
+        except Exception as e:
+            print(f"⚠ 檢查數據時發生錯誤: {e}，為安全起見執行數據收集")
+            context['ti'].xcom_push(key='collection_date', value=last_us_trading_day.isoformat())
+            return 'check_market_status'
+
+
+def check_trading_day(**context):
+    """檢查是否為交易日 - 使用台北時區，返回分支決策而不拋出異常
+
+    邏輯：
+    1. 如果今天是交易日 → 執行數據收集
+    2. 如果今天不是交易日 → 檢查最近交易日的數據是否存在
+       - 如果數據不存在 → 補抓最近交易日的數據
+       - 如果數據存在 → 跳過收集
+    """
+    from plugins.common.date_utils import is_trading_day, get_taipei_today, get_last_trading_day
+    import os
+    import requests
+
+    # 使用 context 中的執行日期，或台北時區的當前日期
+    execution_date = context.get('execution_date')
+    if execution_date:
+        # 轉換為台北時區的日期
+        check_date = execution_date.in_timezone('Asia/Taipei').date()
+    else:
+        check_date = get_taipei_today()
+
+    trading_day = is_trading_day(check_date)
+
+    # 將結果推送到 XCom 供後續任務使用
+    context['ti'].xcom_push(key='is_trading_day', value=trading_day)
+    context['ti'].xcom_push(key='check_date', value=check_date.isoformat())
+
+    if trading_day:
+        print(f"✓ 今天是交易日: {check_date}，繼續執行數據收集")
+        return 'check_market_status'  # 繼續下一步
+    else:
+        # 今天不是交易日，檢查最近交易日的數據
+        last_trading_day = get_last_trading_day(check_date)
+        print(f"✗ 今天不是交易日: {check_date}")
+        print(f"ℹ 最近的交易日: {last_trading_day}")
+
+        # 檢查最近交易日的數據是否存在
+        try:
+            backend_url = os.getenv('BACKEND_API_URL', 'http://backend:8000/api/v1')
+
+            # 查詢是否有該日期的價格數據
+            response = requests.get(
+                f"{backend_url}/stocks/prices/data-exists",
+                params={'date': last_trading_day.isoformat()},
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                has_data = data.get('has_data', False)
+                stock_count = data.get('stock_count', 0)
+
+                if has_data and stock_count > 0:
+                    print(f"✓ 最近交易日 {last_trading_day} 已有 {stock_count} 筆價格數據，跳過收集")
+                    return 'skip_collection'
+                else:
+                    print(f"✗ 最近交易日 {last_trading_day} 沒有價格數據，需要補抓")
+                    # 將最近交易日推送到 XCom，供收集任務使用
+                    context['ti'].xcom_push(key='collection_date', value=last_trading_day.isoformat())
+                    return 'check_market_status'  # 執行數據收集
+            else:
+                print(f"⚠ 無法檢查數據狀態 (HTTP {response.status_code})，為安全起見執行數據收集")
+                context['ti'].xcom_push(key='collection_date', value=last_trading_day.isoformat())
+                return 'check_market_status'
+
+        except Exception as e:
+            print(f"⚠ 檢查數據時發生錯誤: {e}，為安全起見執行數據收集")
+            context['ti'].xcom_push(key='collection_date', value=last_trading_day.isoformat())
+            return 'check_market_status'
 
 
 def check_market_status(**context):

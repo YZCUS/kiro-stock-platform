@@ -3,14 +3,18 @@
  */
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
-import { useAppDispatch } from '../../store';
+import { useAppDispatch, useAppSelector } from '../../store';
 import { addToast } from '../../store/slices/uiSlice';
+import { fetchListStocks, addStockToList, removeStockFromList } from '../../store/slices/stockListSlice';
 import { useStocks, useDeleteStock, useCreateStock } from '../../hooks/useStocks';
 import { StockFilter } from '../../types';
 import StocksApiService from '../../services/stocksApi';
 import ConfirmDialog from '../ui/ConfirmDialog';
+import TransactionModal from '../Portfolio/TransactionModal';
+import { StockListSelector } from '../StockList';
+import { ShoppingCart, TrendingDown, BarChart3, Trash2 } from 'lucide-react';
 
 export interface StockManagementPageProps {}
 
@@ -31,6 +35,27 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
     stockName: '',
   });
   const [stockSymbol, setStockSymbol] = useState('');
+  const [viewMode, setViewMode] = useState<'all' | 'portfolio' | 'watchlist'>('all');
+  const [currentListId, setCurrentListId] = useState<number | null>(null);
+  const [transactionModal, setTransactionModal] = useState<{
+    isOpen: boolean;
+    stock: any | null;
+    type: 'BUY' | 'SELL';
+  }>({
+    isOpen: false,
+    stock: null,
+    type: 'BUY'
+  });
+
+  // 從 Redux 獲取清單股票
+  const { currentListStocks } = useAppSelector((state) => state.stockList);
+
+  // 當清單改變時，載入清單中的股票
+  useEffect(() => {
+    if (currentListId && viewMode === 'all') {
+      dispatch(fetchListStocks(currentListId));
+    }
+  }, [currentListId, viewMode, dispatch]);
 
   // 構建查詢參數
   const queryParams = useMemo(() => {
@@ -71,12 +96,24 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
 
   // 使用 React Query 新增 mutation
   const createStockMutation = useCreateStock({
-    onSuccess: async () => {
+    onSuccess: async (newStock) => {
       dispatch(addToast({
         type: 'success',
         title: '成功',
         message: '已成功新增股票',
       }));
+
+      // 如果有選中的清單，自動添加到清單
+      if (currentListId && newStock?.id) {
+        try {
+          await dispatch(addStockToList({
+            listId: currentListId,
+            data: { stock_id: newStock.id }
+          })).unwrap();
+        } catch (error) {
+          console.error('添加股票到清單失敗:', error);
+        }
+      }
 
       // 延遲一下讓後端有時間處理
       setTimeout(async () => {
@@ -108,8 +145,21 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
     },
   });
 
-  // 從響應中提取數據
-  const stocks = stocksResponse?.items || [];
+  // 從響應中提取數據並根據 viewMode 和清單過濾
+  const allStocks = stocksResponse?.items || [];
+  const stocks = useMemo(() => {
+    if (viewMode === 'portfolio') {
+      return allStocks.filter(stock => stock.is_portfolio);
+    } else if (viewMode === 'watchlist') {
+      return allStocks.filter(stock => stock.is_watchlist);
+    } else if (viewMode === 'all' && currentListId) {
+      // 根據清單中的股票 ID 過濾
+      const listStockIds = currentListStocks.map(item => item.stock_id);
+      return allStocks.filter(stock => listStockIds.includes(stock.id));
+    }
+    return allStocks;
+  }, [allStocks, viewMode, currentListId, currentListStocks]);
+
   const pagination = {
     page: stocksResponse?.page || 1,
     pageSize: stocksResponse?.per_page || 20,
@@ -128,11 +178,42 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
     });
   };
 
-  // 確認刪除
-  const confirmDelete = () => {
-    if (deleteConfirm.stockId) {
+  // 確認刪除/移除
+  const confirmDelete = async () => {
+    if (!deleteConfirm.stockId) {
+      return;
+    }
+
+    // 如果在清單模式，從清單移除；否則刪除股票
+    if (viewMode === 'all' && currentListId) {
+      try {
+        await dispatch(removeStockFromList({
+          listId: currentListId,
+          stockId: deleteConfirm.stockId
+        })).unwrap();
+
+        dispatch(addToast({
+          type: 'success',
+          title: '成功',
+          message: '已從清單中移除股票'
+        }));
+
+        // 重新載入清單股票
+        if (currentListId) {
+          dispatch(fetchListStocks(currentListId));
+        }
+      } catch (error: any) {
+        dispatch(addToast({
+          type: 'error',
+          title: '錯誤',
+          message: error || '移除失敗'
+        }));
+      }
+    } else {
+      // 從系統中刪除股票
       deleteStockMutation.mutate(deleteConfirm.stockId);
     }
+
     setDeleteConfirm({ isOpen: false, stockId: null, stockName: '' });
   };
 
@@ -286,10 +367,29 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
         </p>
       </div>
 
+      {/* 清單選擇器 */}
+      <div className="bg-white shadow rounded-lg p-6 mb-6">
+        <div className="flex items-center justify-between">
+          <StockListSelector onListChange={setCurrentListId} />
+        </div>
+      </div>
+
       {/* 搜尋和新增區域 */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-medium text-gray-900">股票列表</h2>
+          <div className="flex items-center gap-4">
+            <h2 className="text-lg font-medium text-gray-900">股票列表</h2>
+            {/* 視圖切換下拉選單 */}
+            <select
+              value={viewMode}
+              onChange={(e) => setViewMode(e.target.value as 'all' | 'portfolio' | 'watchlist')}
+              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">清單股票</option>
+              <option value="portfolio">我的持倉</option>
+              <option value="watchlist">自選股</option>
+            </select>
+          </div>
           <div className="flex gap-2">
             <button
               onClick={handleRefreshWithBackfill}
@@ -386,17 +486,37 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
                       <span className="text-gray-400">---</span>
                     )}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 space-x-2">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
+                    <button
+                      onClick={() => setTransactionModal({ isOpen: true, stock, type: 'BUY' })}
+                      className="text-green-600 hover:text-green-800 font-medium inline-flex items-center gap-1"
+                      title="買入"
+                    >
+                      <ShoppingCart className="w-3.5 h-3.5" />
+                      買入
+                    </button>
+                    <button
+                      onClick={() => setTransactionModal({ isOpen: true, stock, type: 'SELL' })}
+                      className="text-orange-600 hover:text-orange-800 font-medium inline-flex items-center gap-1"
+                      title="賣出"
+                    >
+                      <TrendingDown className="w-3.5 h-3.5" />
+                      賣出
+                    </button>
                     <Link
                       href={`/charts?stock=${stock.id}`}
-                      className="text-blue-600 hover:text-blue-800 font-medium"
+                      className="text-blue-600 hover:text-blue-800 font-medium inline-flex items-center gap-1"
+                      title="查看圖表"
                     >
-                      查看
+                      <BarChart3 className="w-3.5 h-3.5" />
+                      圖表
                     </Link>
                     <button
                       onClick={() => handleDeleteStock(stock.id, stock.name)}
-                      className="text-red-600 hover:text-red-800 font-medium"
+                      className="text-red-600 hover:text-red-800 font-medium inline-flex items-center gap-1"
+                      title="移除股票"
                     >
+                      <Trash2 className="w-3.5 h-3.5" />
                       移除
                     </button>
                   </td>
@@ -642,13 +762,29 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
       {/* 刪除確認對話框 */}
       <ConfirmDialog
         isOpen={deleteConfirm.isOpen}
-        title="確認移除股票"
-        message={`確定要移除股票「${deleteConfirm.stockName}」嗎？此操作無法復原。`}
-        confirmText="移除"
+        title={viewMode === 'all' && currentListId ? '確認從清單移除' : '確認刪除股票'}
+        message={
+          viewMode === 'all' && currentListId
+            ? `確定要從清單中移除股票「${deleteConfirm.stockName}」嗎？股票本身不會被刪除。`
+            : `確定要刪除股票「${deleteConfirm.stockName}」嗎？此操作無法復原。`
+        }
+        confirmText="確定"
         cancelText="取消"
         type="danger"
         onConfirm={confirmDelete}
         onCancel={cancelDelete}
+      />
+
+      {/* 交易 Modal */}
+      <TransactionModal
+        isOpen={transactionModal.isOpen}
+        onClose={() => setTransactionModal({ isOpen: false, stock: null, type: 'BUY' })}
+        stock={transactionModal.stock}
+        transactionType={transactionModal.type}
+        onSuccess={() => {
+          // 交易成功後重新載入列表
+          refetch();
+        }}
       />
     </div>
   );

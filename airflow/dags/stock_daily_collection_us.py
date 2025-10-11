@@ -1,8 +1,8 @@
 """
-每日台股數據收集 DAG - API版本（模塊化重構）
+每日美股數據收集 DAG - API版本（模塊化重構）
 
-執行時間：每交易日 16:00 (台北時間，台股收盤後)
-功能：通過API調用Backend服務收集台股數據
+執行時間：每交易日 05:00 (台北時間，對應美東 16:00 收盤)
+功能：通過API調用Backend服務收集美股數據
 """
 from datetime import datetime, timedelta
 
@@ -17,15 +17,15 @@ from plugins.workflows.stock_collection import (
     handle_task_failure,
     handle_task_retry,
     # Validators
-    check_trading_day_tw,
+    check_trading_day_us,
     check_market_status,
     verify_task_dependencies,
     validate_data_quality,
     # Collection workflows
     decide_collection_strategy,
-    try_main_collection_workflow_tw,
+    try_main_collection_workflow_us,
     decide_next_step,
-    execute_fallback_collection_tw,
+    execute_fallback_collection_us,
     # Notifications
     send_completion_notification,
     # Cleanup
@@ -34,12 +34,12 @@ from plugins.workflows.stock_collection import (
 
 # DAG配置
 dag_config = {
-    'dag_id': 'daily_stock_collection_tw_api',
-    'description': '每日台股數據收集工作流程 - API版本',
-    'schedule_interval': '0 16 * * 1-5',  # 週一到週五下午4點
+    'dag_id': 'daily_stock_collection_us_api',
+    'description': '每日美股數據收集工作流程 - API版本',
+    'schedule_interval': '0 5 * * 2-6',  # 週二到週六早上5點 (對應美股週一到週五收盤)
     'max_active_runs': 1,
     'catchup': False,  # 移至 DAG 層級，避免補跑歷史排程
-    'tags': ['stock-data', 'daily', 'api', 'tw-market'],
+    'tags': ['stock-data', 'daily', 'api', 'us-market'],
     'default_args': {
         'owner': 'stock-analysis-platform',
         'depends_on_past': False,
@@ -59,10 +59,10 @@ dag = DAG(**dag_config)
 
 # ========== 任務定義 ==========
 
-# 檢查台股交易日（使用分支決策）
+# 檢查美股交易日（使用分支決策）
 check_trading_day_task = BranchPythonOperator(
-    task_id='check_trading_day_tw',
-    python_callable=check_trading_day_tw,
+    task_id='check_trading_day_us',
+    python_callable=check_trading_day_us,
     dag=dag
 )
 
@@ -86,10 +86,10 @@ branch_task = BranchPythonOperator(
     dag=dag
 )
 
-# 主要收集任務 - 台股
+# 主要收集任務 - 美股
 try_main_collection_task = PythonOperator(
     task_id='try_main_collection',
-    python_callable=try_main_collection_workflow_tw,
+    python_callable=try_main_collection_workflow_us,
     dag=dag
 )
 
@@ -106,10 +106,10 @@ collection_success_task = EmptyOperator(
     dag=dag
 )
 
-# 備援收集任務 - 台股
+# 備援收集任務 - 美股
 fallback_collection_task = PythonOperator(
     task_id='execute_fallback_collection',
-    python_callable=execute_fallback_collection_tw,
+    python_callable=execute_fallback_collection_us,
     dag=dag
 )
 
@@ -151,7 +151,7 @@ cleanup_storage_task = PythonOperator(
 
 # ========== 任務依賴關係 ==========
 
-# 第一層分支：檢查是否為台股交易日
+# 第一層分支：檢查是否為美股交易日
 check_trading_day_task >> [check_market_status_task, skip_collection_task]
 
 # 交易日流程：檢查市場狀態後進入收集策略分支

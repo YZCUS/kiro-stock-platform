@@ -21,6 +21,8 @@ export interface Stock {
   created_at: string;
   updated_at: string;
   latest_price?: LatestPriceInfo | null;
+  is_watchlist?: boolean;  // 是否在自選股中
+  is_portfolio?: boolean;  // 是否在持倉中
 }
 
 export interface PriceData {
@@ -297,4 +299,200 @@ export interface IndicatorsResponse {
     };
     last_update?: string;
   };
+}
+
+// =============================================================================
+// Portfolio Management Types (持倉管理類型)
+// =============================================================================
+
+// 持倉類型
+export interface Portfolio {
+  id: number;
+  user_id: string;
+  stock_id: number;
+  stock_symbol?: string;
+  stock_name?: string;
+  quantity: number;
+  avg_cost: number;
+  total_cost: number;
+  current_price?: number | null;
+  current_value?: number | null;
+  profit_loss?: number | null;
+  profit_loss_percent?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// 持倉列表響應
+export interface PortfolioListResponse {
+  items: Portfolio[];
+  total: number;
+  total_cost: number;
+  total_current_value: number;
+  total_profit_loss: number;
+  total_profit_loss_percent: number;
+}
+
+// 持倉摘要
+export interface PortfolioSummary {
+  total_cost: number;
+  total_current_value: number;
+  total_profit_loss: number;
+  total_profit_loss_percent: number;
+  portfolio_count: number;
+}
+
+// 交易類型（買入/賣出）
+export type TransactionType = 'BUY' | 'SELL';
+
+// 交易記錄
+export interface Transaction {
+  id: number;
+  user_id: string;
+  portfolio_id: number | null;  // 清倉後為 null
+  stock_id: number;
+  stock_symbol?: string;
+  stock_name?: string;
+  transaction_type: TransactionType;
+  quantity: number;
+  price: number;
+  fee: number;
+  tax: number;
+  total: number;
+  transaction_date: string;
+  note?: string | null;
+  created_at: string;
+}
+
+// 交易創建請求
+export interface TransactionCreateRequest {
+  stock_id: number;
+  transaction_type: TransactionType;
+  quantity: number;
+  price: number;
+  fee?: number;
+  tax?: number;
+  transaction_date: string;
+  note?: string;
+}
+
+// 交易列表響應
+export interface TransactionListResponse {
+  items: Transaction[];
+  total: number;
+  page: number;
+  per_page: number;
+  total_pages: number;
+}
+
+// 交易摘要統計
+export interface TransactionSummary {
+  total_transactions: number;
+  buy_count: number;
+  sell_count: number;
+  total_buy_amount: number;
+  total_sell_amount: number;
+  total_fee: number;
+  total_tax: number;
+  net_amount: number;
+}
+
+// 交易篩選條件
+export interface TransactionFilter {
+  stock_id?: number;
+  transaction_type?: TransactionType;
+  start_date?: string;
+  end_date?: string;
+  page?: number;
+  per_page?: number;
+}
+
+// 交易類型工具函數
+export const TransactionTypeUtils = {
+  /**
+   * 獲取交易類型顯示名稱
+   */
+  getDisplayName(type: TransactionType): string {
+    return type === 'BUY' ? '買入' : '賣出';
+  },
+
+  /**
+   * 獲取交易類型顏色
+   */
+  getColor(type: TransactionType): 'green' | 'red' {
+    return type === 'BUY' ? 'green' : 'red';
+  },
+
+  /**
+   * 獲取交易類型圖標
+   */
+  getIcon(type: TransactionType): string {
+    return type === 'BUY' ? '↑' : '↓';
+  }
+};
+
+// =============================================================================
+// 股票清單相關類型
+// =============================================================================
+
+// 股票清單
+export interface StockList {
+  id: number;
+  user_id: string;
+  name: string;
+  description?: string | null;
+  is_default: boolean;
+  stocks_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// 創建股票清單請求
+export interface StockListCreateRequest {
+  name: string;
+  description?: string;
+  is_default?: boolean;
+}
+
+// 更新股票清單請求
+export interface StockListUpdateRequest {
+  name?: string;
+  description?: string;
+  is_default?: boolean;
+}
+
+// 股票清單列表響應
+export interface StockListListResponse {
+  items: StockList[];
+  total: number;
+}
+
+// 清單項目
+export interface StockListItem {
+  id: number;
+  list_id: number;
+  stock_id: number;
+  stock_symbol?: string | null;
+  stock_name?: string | null;
+  note?: string | null;
+  created_at: string;
+}
+
+// 添加股票到清單請求
+export interface StockListItemAddRequest {
+  stock_id: number;
+  note?: string;
+}
+
+// 批量添加股票請求
+export interface StockListItemBatchAddRequest {
+  stock_ids: number[];
+}
+
+// 清單項目列表響應
+export interface StockListItemListResponse {
+  items: StockListItem[];
+  total: number;
+  list_id: number;
+  list_name: string;
 }

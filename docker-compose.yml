@@ -88,7 +88,7 @@ services:
       - BACKEND_API_URL=http://backend:8000/api/v1
       - PYTHONPATH=/opt/airflow/dags:/opt/airflow:/opt/airflow/backend
     ports:
-      - "8081:8080"
+      - "8080:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs

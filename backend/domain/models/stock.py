@@ -49,8 +49,22 @@ class Stock(BaseModel, TimestampMixin):
     )
     
     user_watchlists = relationship(
-        "UserWatchlist", 
-        back_populates="stock", 
+        "UserWatchlist",
+        back_populates="stock",
+        cascade="all, delete-orphan",
+        lazy="dynamic"
+    )
+
+    user_portfolios = relationship(
+        "UserPortfolio",
+        back_populates="stock",
+        cascade="all, delete-orphan",
+        lazy="dynamic"
+    )
+
+    transactions = relationship(
+        "Transaction",
+        back_populates="stock",
         cascade="all, delete-orphan",
         lazy="dynamic"
     )

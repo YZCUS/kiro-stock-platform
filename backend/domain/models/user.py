@@ -25,6 +25,9 @@ class User(BaseModel, TimestampMixin):
 
     # 關聯關係
     watchlists = relationship("UserWatchlist", back_populates="user", cascade="all, delete-orphan")
+    portfolios = relationship("UserPortfolio", back_populates="user", cascade="all, delete-orphan")
+    transactions = relationship("Transaction", back_populates="user", cascade="all, delete-orphan")
+    stock_lists = relationship("UserStockList", back_populates="user", cascade="all, delete-orphan")
 
     __table_args__ = (
         {'comment': '用戶表'}
