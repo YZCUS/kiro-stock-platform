@@ -13,8 +13,8 @@ import { StockFilter } from '../../types';
 import StocksApiService from '../../services/stocksApi';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import TransactionModal from '../Portfolio/TransactionModal';
-import { StockListSelector } from '../StockList';
 import { ShoppingCart, TrendingDown, BarChart3, Trash2 } from 'lucide-react';
+import UnifiedStockSelector from './UnifiedStockSelector';
 
 export interface StockManagementPageProps {}
 
@@ -35,7 +35,7 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
     stockName: '',
   });
   const [stockSymbol, setStockSymbol] = useState('');
-  const [viewMode, setViewMode] = useState<'all' | 'portfolio' | 'watchlist'>('all');
+  const [viewMode, setViewMode] = useState<'all' | 'portfolio'>('all');
   const [currentListId, setCurrentListId] = useState<number | null>(null);
   const [transactionModal, setTransactionModal] = useState<{
     isOpen: boolean;
@@ -150,8 +150,6 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
   const stocks = useMemo(() => {
     if (viewMode === 'portfolio') {
       return allStocks.filter(stock => stock.is_portfolio);
-    } else if (viewMode === 'watchlist') {
-      return allStocks.filter(stock => stock.is_watchlist);
     } else if (viewMode === 'all' && currentListId) {
       // 根據清單中的股票 ID 過濾
       const listStockIds = currentListStocks.map(item => item.stock_id);
@@ -206,7 +204,7 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
         dispatch(addToast({
           type: 'error',
           title: '錯誤',
-          message: error || '移除失敗'
+          message: error?.message || error?.toString() || '移除失敗'
         }));
       }
     } else {
@@ -367,28 +365,17 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
         </p>
       </div>
 
-      {/* 清單選擇器 */}
-      <div className="bg-white shadow rounded-lg p-6 mb-6">
-        <div className="flex items-center justify-between">
-          <StockListSelector onListChange={setCurrentListId} />
-        </div>
-      </div>
-
       {/* 搜尋和新增區域 */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
             <h2 className="text-lg font-medium text-gray-900">股票列表</h2>
-            {/* 視圖切換下拉選單 */}
-            <select
-              value={viewMode}
-              onChange={(e) => setViewMode(e.target.value as 'all' | 'portfolio' | 'watchlist')}
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">清單股票</option>
-              <option value="portfolio">我的持倉</option>
-              <option value="watchlist">自選股</option>
-            </select>
+            {/* 統一選擇器 - 整合清單和視圖模式 */}
+            <UnifiedStockSelector
+              onListChange={setCurrentListId}
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+            />
           </div>
           <div className="flex gap-2">
             <button
@@ -641,8 +628,11 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center">
             <div className="flex-1">
-              <p className="text-sm font-medium text-gray-600">追蹤股票總數</p>
-              <p className="text-2xl font-bold text-gray-900">{pagination.total}</p>
+              <p className="text-sm font-medium text-gray-600">
+                {viewMode === 'all' && currentListId ? '當前清單股票數' :
+                 viewMode === 'portfolio' ? '持倉股票數' : '追蹤股票總數'}
+              </p>
+              <p className="text-2xl font-bold text-gray-900">{stocks.length}</p>
             </div>
           </div>
         </div>

@@ -3,7 +3,7 @@
  */
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAppDispatch, useAppSelector } from '@/store';
 import {
   fetchStockLists,
@@ -14,7 +14,7 @@ import {
 } from '@/store/slices/stockListSlice';
 import { addToast } from '@/store/slices/uiSlice';
 import { Button } from '@/components/ui/button';
-import { Plus, Edit2, Trash2, Check } from 'lucide-react';
+import { Plus, Edit2, Trash2, ChevronDown, Check } from 'lucide-react';
 import StockListModal from './StockListModal';
 
 interface StockListSelectorProps {
@@ -28,6 +28,8 @@ export default function StockListSelector({ onListChange }: StockListSelectorPro
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingList, setEditingList] = useState<any>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // 載入清單
   useEffect(() => {
@@ -45,17 +47,31 @@ export default function StockListSelector({ onListChange }: StockListSelectorPro
     }
   }, [lists, currentList, dispatch, onListChange]);
 
+  // 點擊外部關閉下拉選單
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const handleSelectList = (listId: number) => {
     const selectedList = lists.find(l => l.id === listId);
     if (selectedList) {
       dispatch(setCurrentList(selectedList));
       onListChange?.(listId);
+      setIsDropdownOpen(false);
     }
   };
 
   const handleCreateList = () => {
     setEditingList(null);
     setIsModalOpen(true);
+    setIsDropdownOpen(false);
   };
 
   const handleEditList = (list: any) => {
@@ -134,68 +150,93 @@ export default function StockListSelector({ onListChange }: StockListSelectorPro
 
   return (
     <div className="flex items-center gap-3">
-      {/* 清單選擇下拉選單 */}
-      <div className="relative">
-        <select
-          value={currentList?.id || ''}
-          onChange={(e) => handleSelectList(parseInt(e.target.value))}
-          className="appearance-none bg-white border border-gray-300 rounded-md pl-3 pr-10 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[200px]"
+      {/* 自定義下拉選單 */}
+      <div className="relative" ref={dropdownRef}>
+        <button
+          onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+          className="flex items-center justify-between bg-white border border-gray-300 rounded-md pl-3 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[220px] hover:bg-gray-50"
           disabled={loading}
         >
-          {lists.length === 0 && (
-            <option value="">載入中...</option>
-          )}
-          {lists.map((list) => (
-            <option key={list.id} value={list.id}>
-              {list.name} ({list.stocks_count})
-              {list.is_default && ' ⭐'}
-            </option>
-          ))}
-        </select>
-        <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
-          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </div>
+          <span className="truncate">
+            {loading ? '載入中...' :
+             currentList ? `${currentList.name} (${currentList.stocks_count})${currentList.is_default ? ' ⭐' : ''}` :
+             lists.length === 0 ? '暫無清單' : '請選擇清單'}
+          </span>
+          <ChevronDown className={`w-4 h-4 ml-2 transition-transform ${isDropdownOpen ? 'transform rotate-180' : ''}`} />
+        </button>
+
+        {/* 下拉選單內容 */}
+        {isDropdownOpen && (
+          <div className="absolute z-50 mt-1 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-80 overflow-auto">
+            {/* 清單列表 */}
+            {lists.length > 0 ? (
+              <div className="py-1">
+                {lists.map((list) => (
+                  <button
+                    key={list.id}
+                    onClick={() => handleSelectList(list.id)}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center justify-between ${
+                      currentList?.id === list.id ? 'bg-blue-50 text-blue-600' : 'text-gray-900'
+                    }`}
+                  >
+                    <span className="truncate">
+                      {list.name} ({list.stocks_count})
+                      {list.is_default && ' ⭐'}
+                    </span>
+                    {currentList?.id === list.id && (
+                      <Check className="w-4 h-4 flex-shrink-0 ml-2" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="py-3 px-3 text-sm text-gray-500 text-center">
+                {loading ? '載入中...' : '暫無清單'}
+              </div>
+            )}
+
+            {/* 分隔線 */}
+            {!loading && <div className="border-t border-gray-200"></div>}
+
+            {/* 新建清單選項 */}
+            {!loading && (
+              <button
+                onClick={handleCreateList}
+                className="w-full text-left px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2 font-medium"
+              >
+                <Plus className="w-4 h-4" />
+                新建清單
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 清單操作按鈕 */}
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={handleCreateList}
-          title="新建清單"
-        >
-          <Plus className="w-4 h-4 mr-1" />
-          新建
-        </Button>
+      {currentList && (
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleEditList(currentList)}
+            title="編輯清單"
+          >
+            <Edit2 className="w-4 h-4" />
+          </Button>
 
-        {currentList && (
-          <>
+          {lists.length > 1 && (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => handleEditList(currentList)}
-              title="編輯清單"
+              onClick={() => handleDeleteList(currentList.id, currentList.name)}
+              title="刪除清單"
+              className="text-red-600 hover:text-red-700 hover:border-red-300"
             >
-              <Edit2 className="w-4 h-4" />
+              <Trash2 className="w-4 h-4" />
             </Button>
-
-            {lists.length > 1 && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleDeleteList(currentList.id, currentList.name)}
-                title="刪除清單"
-                className="text-red-600 hover:text-red-700 hover:border-red-300"
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            )}
-          </>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* 清單詳情提示 */}
       {currentList && currentList.description && (
