@@ -3,6 +3,7 @@
  */
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import type {
+  Stock,
   StockList,
   StockListCreateRequest,
   StockListUpdateRequest,
@@ -16,7 +17,7 @@ import * as stockListApi from '@/services/stockListApi';
 interface StockListState {
   lists: StockList[];
   currentList: StockList | null;
-  currentListStocks: StockListItem[];
+  currentListStocks: Stock[];  // 改為 Stock[] 以包含完整股票信息和價格
   loading: boolean;
   error: string | null;
 }
@@ -271,11 +272,16 @@ const stockListSlice = createSlice({
     // 添加股票
     builder
       .addCase(addStockToList.fulfilled, (state, action) => {
-        state.currentListStocks.push(action.payload);
-        // 更新清單的股票數量
+        // 注意：action.payload 是 StockListItem，但我們需要重新獲取列表來得到完整的 Stock 對象
+        // 這裡只更新清單的股票數量，實際的股票數據會通過 fetchListStocks 重新獲取
         const list = state.lists.find(l => l.id === action.payload.list_id);
         if (list) {
           list.stocks_count += 1;
+
+          // 如果是當前清單，也更新 currentList
+          if (state.currentList?.id === action.payload.list_id) {
+            state.currentList.stocks_count += 1;
+          }
         }
       });
 
@@ -283,11 +289,17 @@ const stockListSlice = createSlice({
     builder
       .addCase(removeStockFromList.fulfilled, (state, action) => {
         const { listId, stockId } = action.payload;
-        state.currentListStocks = state.currentListStocks.filter(item => item.stock_id !== stockId);
+        // 從 currentListStocks（Stock[]）中過濾掉被移除的股票
+        state.currentListStocks = state.currentListStocks.filter(stock => stock.id !== stockId);
         // 更新清單的股票數量
         const list = state.lists.find(l => l.id === listId);
         if (list) {
           list.stocks_count = Math.max(0, list.stocks_count - 1);
+
+          // 如果是當前清單，也更新 currentList
+          if (state.currentList?.id === listId) {
+            state.currentList.stocks_count = Math.max(0, state.currentList.stocks_count - 1);
+          }
         }
       });
   },

@@ -34,7 +34,7 @@ export default function LoginPage() {
         user: response.user,
         token: response.access_token,
       }));
-      router.push('/dashboard');
+      router.push('/');
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || '登入失敗，請檢查您的帳號密碼';
       setError(errorMsg);

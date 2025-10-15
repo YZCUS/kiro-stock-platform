@@ -32,22 +32,17 @@ export default function UnifiedStockSelector({
   const { lists, currentList, loading } = useAppSelector((state) => state.stockList);
   const { isAuthenticated } = useAppSelector((state) => state.auth);
 
-  // Debug: 監控 lists 變化
-  useEffect(() => {
-    console.log('📋 清單更新:', lists.length, '個清單', lists.map(l => l.name));
-  }, [lists]);
-
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // 載入清單
+  // 載入清單 - 只要已認證就載入
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && lists.length === 0 && !loading) {
       dispatch(fetchStockLists());
     }
-  }, [isAuthenticated, dispatch]);
+  }, [isAuthenticated, lists.length, loading, dispatch]);
 
   // 設置預設清單
   useEffect(() => {

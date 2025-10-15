@@ -168,10 +168,10 @@ export default function TransactionModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-        {/* Header */}
-        <div className={`px-6 py-4 border-b ${transactionType === 'BUY' ? 'bg-green-50' : 'bg-red-50'}`}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] flex flex-col">
+        {/* Header - 固定不滾動 */}
+        <div className={`px-6 py-4 border-b ${transactionType === 'BUY' ? 'bg-green-50' : 'bg-red-50'} flex-shrink-0`}>
           <div className="flex justify-between items-center">
             <div>
               <h2 className={`text-xl font-bold ${transactionType === 'BUY' ? 'text-green-700' : 'text-red-700'}`}>
@@ -187,8 +187,9 @@ export default function TransactionModal({
           </div>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        {/* Form - 可滾動區域 */}
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
+          <div className="p-6 space-y-4">
           {/* 賣出時的庫存警告 */}
           {transactionType === 'SELL' && availableQuantity === 0 && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
@@ -347,6 +348,7 @@ export default function TransactionModal({
             >
               {isSubmitting ? '處理中...' : `確認${transactionType === 'BUY' ? '買入' : '賣出'}`}
             </Button>
+          </div>
           </div>
         </form>
       </div>

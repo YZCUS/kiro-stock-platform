@@ -123,7 +123,7 @@ export default function StockListEditModal({ isOpen, onClose, list }: StockListE
     try {
       // 更新清單名稱和描述
       await dispatch(updateStockList({
-        id: list.id,
+        listId: list.id,
         data: {
           name: listName.trim(),
           description: description.trim() || undefined

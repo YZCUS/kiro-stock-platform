@@ -489,9 +489,9 @@ export interface StockListItemBatchAddRequest {
   stock_ids: number[];
 }
 
-// 清單項目列表響應
+// 清單項目列表響應（包含完整的股票信息和最新價格）
 export interface StockListItemListResponse {
-  items: StockListItem[];
+  items: Stock[];  // 現在返回完整的 Stock 對象（包含 latest_price）
   total: number;
   list_id: number;
   list_name: string;

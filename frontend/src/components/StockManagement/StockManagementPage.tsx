@@ -9,6 +9,7 @@ import { useAppDispatch, useAppSelector } from '../../store';
 import { addToast } from '../../store/slices/uiSlice';
 import { fetchListStocks, addStockToList, removeStockFromList } from '../../store/slices/stockListSlice';
 import { useStocks, useDeleteStock, useCreateStock } from '../../hooks/useStocks';
+import { useStockValidation } from '../../hooks/useStockValidation';
 import { StockFilter } from '../../types';
 import StocksApiService from '../../services/stocksApi';
 import ConfirmDialog from '../ui/ConfirmDialog';
@@ -49,6 +50,9 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
 
   // 從 Redux 獲取清單股票
   const { currentListStocks } = useAppSelector((state) => state.stockList);
+
+  // 股號驗證 Hook
+  const { isValidating, validationError, validatedStock, validate, reset: resetValidation } = useStockValidation();
 
   // 當清單改變時，載入清單中的股票
   useEffect(() => {
@@ -103,38 +107,29 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
         message: '已成功新增股票',
       }));
 
-      // 如果有選中的清單，自動添加到清單
+      // 如果有選中的清單，自動添加到清單並重新獲取清單股票（包含最新價格）
       if (currentListId && newStock?.id) {
         try {
           await dispatch(addStockToList({
             listId: currentListId,
             data: { stock_id: newStock.id }
           })).unwrap();
+
+          // 重新獲取清單股票（包含最新價格）
+          await dispatch(fetchListStocks(currentListId));
+
+          dispatch(addToast({
+            type: 'success',
+            title: '成功',
+            message: '已添加到清單',
+          }));
         } catch (error) {
           console.error('添加股票到清單失敗:', error);
         }
+      } else {
+        // 如果不在清單視圖，刷新所有股票列表
+        await refetch();
       }
-
-      // 延遲一下讓後端有時間處理
-      setTimeout(async () => {
-        try {
-          // 自動回填新增股票的價格數據
-          const backfillResult = await StocksApiService.backfillMissingPrices();
-
-          if (backfillResult.total_stocks > 0) {
-            dispatch(addToast({
-              type: 'success',
-              title: '已自動回填',
-              message: `成功回填 ${backfillResult.successful} 個股票的價格數據`,
-            }));
-          }
-        } catch (error) {
-          console.error('Auto-backfill failed:', error);
-        } finally {
-          // 無論回填是否成功，都刷新列表
-          await refetch();
-        }
-      }, 500);
     },
     onError: (error: any) => {
       dispatch(addToast({
@@ -149,11 +144,11 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
   const allStocks = stocksResponse?.items || [];
   const stocks = useMemo(() => {
     if (viewMode === 'portfolio') {
+      // 持倉視圖：從所有股票中過濾
       return allStocks.filter(stock => stock.is_portfolio);
     } else if (viewMode === 'all' && currentListId) {
-      // 根據清單中的股票 ID 過濾
-      const listStockIds = currentListStocks.map(item => item.stock_id);
-      return allStocks.filter(stock => listStockIds.includes(stock.id));
+      // 清單視圖：直接使用 Redux 中的 currentListStocks（已包含完整 Stock 對象和 latest_price）
+      return currentListStocks;
     }
     return allStocks;
   }, [allStocks, viewMode, currentListId, currentListStocks]);
@@ -182,7 +177,7 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
       return;
     }
 
-    // 如果在清單模式，從清單移除；否則刪除股票
+    // 只在清單模式允許移除股票
     if (viewMode === 'all' && currentListId) {
       try {
         await dispatch(removeStockFromList({
@@ -207,9 +202,13 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
           message: error?.message || error?.toString() || '移除失敗'
         }));
       }
-    } else {
-      // 從系統中刪除股票
-      deleteStockMutation.mutate(deleteConfirm.stockId);
+    } else if (viewMode === 'portfolio') {
+      // 持倉不允許直接刪除，應該通過賣出交易
+      dispatch(addToast({
+        type: 'warning',
+        title: '提示',
+        message: '持倉股票請使用「賣出」功能來清倉，不能直接移除'
+      }));
     }
 
     setDeleteConfirm({ isOpen: false, stockId: null, stockName: '' });
@@ -231,39 +230,36 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
     setPage(newPage);
   };
 
-  // 處理重新載入並自動回填缺失價格
+  // 處理重新載入並刷新所有股票價格
   const handleRefreshWithBackfill = async () => {
     setIsBackfilling(true);
 
     try {
-      // 先檢查是否有缺失價格的股票並回填
-      const backfillResult = await StocksApiService.backfillMissingPrices();
+      // 刷新所有活躍股票的最新價格數據
+      const refreshResult = await StocksApiService.refreshAllStockPrices();
 
-      if (!backfillResult || !backfillResult.success) {
-        throw new Error('回填結果無效');
+      if (!refreshResult || !refreshResult.success) {
+        throw new Error('刷新結果無效');
       }
 
-      // 如果所有股票都有價格，只刷新列表並顯示成功訊息
-      if (backfillResult.total_stocks === 0) {
-        await refetch();
+      // 顯示刷新成功訊息
+      if (refreshResult.successful > 0) {
         dispatch(addToast({
           type: 'success',
+          title: '刷新完成',
+          message: `成功刷新 ${refreshResult.successful} 個股票的價格數據`,
+        }));
+      } else {
+        dispatch(addToast({
+          type: 'info',
           title: '已更新',
           message: '股票列表已刷新',
         }));
-        return;
       }
 
-      // 如果有回填成功的股票
-      dispatch(addToast({
-        type: 'success',
-        title: '回填完成',
-        message: `成功回填 ${backfillResult.successful} 個股票的價格數據`,
-      }));
-
       // 顯示失敗的股票（如果有）
-      if (backfillResult.failed > 0) {
-        const failedSymbols = backfillResult.results
+      if (refreshResult.failed > 0) {
+        const failedSymbols = refreshResult.results
           .filter(r => !r.success)
           .map(r => r.symbol)
           .join(', ');
@@ -271,12 +267,18 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
         dispatch(addToast({
           type: 'warning',
           title: '部分失敗',
-          message: `${backfillResult.failed} 個股票回填失敗: ${failedSymbols}`,
+          message: `${refreshResult.failed} 個股票刷新失敗: ${failedSymbols}`,
         }));
       }
 
-      // 回填後重新載入列表
-      await refetch();
+      // 刷新後重新載入列表
+      if (viewMode === 'all' && currentListId) {
+        // 如果在清單視圖，重新獲取清單股票（包含最新價格）
+        await dispatch(fetchListStocks(currentListId));
+      } else {
+        // 否則刷新全局股票列表
+        await refetch();
+      }
 
     } catch (error: any) {
       console.error('❌ 操作失敗:', error);
@@ -317,7 +319,7 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
   };
 
   // 處理新增股票
-  const handleAddStock = () => {
+  const handleAddStock = async () => {
     const trimmedSymbol = stockSymbol.trim();
 
     if (!trimmedSymbol) {
@@ -339,19 +341,100 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
       return;
     }
 
-    // 自動識別市場
-    const market = detectMarket(trimmedSymbol);
-    const formattedSymbol = formatSymbol(trimmedSymbol, market);
+    try {
+      // 使用驗證 API 驗證股票代號
+      const validationResult = await validate(trimmedSymbol);
 
-    // 提交到後端（後端會自動查詢公司名稱）
-    createStockMutation.mutate({
-      symbol: formattedSymbol,
-      market: market,
-    });
+      if (!validationResult) {
+        // 驗證失敗
+        dispatch(addToast({
+          type: 'error',
+          title: '驗證失敗',
+          message: validationError || '無效的股票代號',
+        }));
+        return;
+      }
 
-    // 成功後清空輸入（在 mutation onSuccess 中處理）
-    setStockSymbol('');
-    setShowAddModal(false);
+      // 驗證成功，使用驗證結果
+      const { symbol: formattedSymbol, market, name } = validationResult;
+
+      // 先檢查股票是否已經存在於資料庫中
+      const existingStocksResponse = await StocksApiService.getStocks({
+        search: formattedSymbol,
+        page: 1,
+        pageSize: 20
+      });
+
+      let stockToAdd = null;
+
+      // 檢查搜尋結果中是否有完全匹配的股票
+      if (existingStocksResponse?.items?.length > 0) {
+        stockToAdd = existingStocksResponse.items.find(
+          (s: any) => s.symbol === formattedSymbol && s.market === market
+        );
+      }
+
+      if (stockToAdd) {
+        // 股票已存在，直接添加到清單
+        if (currentListId) {
+          try {
+            await dispatch(addStockToList({
+              listId: currentListId,
+              data: { stock_id: stockToAdd.id }
+            })).unwrap();
+
+            dispatch(addToast({
+              type: 'success',
+              title: '成功',
+              message: `已將 ${name} (${formattedSymbol}) 添加到清單`,
+            }));
+
+            // 刷新清單
+            dispatch(fetchListStocks(currentListId));
+          } catch (error: any) {
+            // 檢查是否是重複添加的錯誤
+            const errorMsg = error?.message || error?.toString() || '';
+            if (errorMsg.includes('已存在') || errorMsg.includes('已在清單中')) {
+              dispatch(addToast({
+                type: 'warning',
+                title: '提示',
+                message: '該股票已在此清單中',
+              }));
+            } else {
+              dispatch(addToast({
+                type: 'error',
+                title: '錯誤',
+                message: errorMsg || '添加股票到清單失敗',
+              }));
+            }
+          }
+        } else {
+          dispatch(addToast({
+            type: 'info',
+            title: '提示',
+            message: '股票已存在於資料庫中，請選擇清單後再添加',
+          }));
+        }
+      } else {
+        // 股票不存在，創建新股票
+        createStockMutation.mutate({
+          symbol: formattedSymbol,
+          market: market as 'TW' | 'US',
+        });
+      }
+
+      // 清空輸入並關閉 modal
+      setStockSymbol('');
+      resetValidation();
+      setShowAddModal(false);
+    } catch (error) {
+      console.error('添加股票失敗:', error);
+      dispatch(addToast({
+        type: 'error',
+        title: '錯誤',
+        message: '添加股票失敗，請稍後再試',
+      }));
+    }
   };
 
   return (
@@ -387,7 +470,7 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
                 <>
                   <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
                   抓取中...
                 </>
@@ -395,12 +478,15 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
                 <>🔄 重新載入</>
               )}
             </button>
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
-            >
-              新增股票
-            </button>
+            {/* 只在清單視圖顯示新增股票按鈕，持倉視圖不允許直接新增 */}
+            {viewMode === 'all' && (
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+              >
+                新增股票
+              </button>
+            )}
           </div>
         </div>
 
@@ -491,7 +577,7 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
                       賣出
                     </button>
                     <Link
-                      href={`/charts?stock=${stock.id}`}
+                      href={`/dashboard?stock=${stock.id}`}
                       className="text-blue-600 hover:text-blue-800 font-medium inline-flex items-center gap-1"
                       title="查看圖表"
                     >

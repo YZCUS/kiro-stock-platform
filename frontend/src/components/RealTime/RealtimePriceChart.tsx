@@ -34,10 +34,25 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
     const loadHistoricalData = async () => {
       try {
         const response = await fetch(`http://localhost:8000/api/v1/stocks/${stockId}/prices?limit=100`);
+
+        if (!response.ok) {
+          console.error(`Failed to load historical data: ${response.status} ${response.statusText}`);
+          setHistoricalData([]);
+          return;
+        }
+
         const data = await response.json();
-        setHistoricalData(data);
+
+        // 驗證返回的數據是陣列
+        if (Array.isArray(data)) {
+          setHistoricalData(data);
+        } else {
+          console.error('Historical data is not an array:', data);
+          setHistoricalData([]);
+        }
       } catch (error) {
         console.error('Failed to load historical data:', error);
+        setHistoricalData([]);
       }
     };
 
@@ -118,7 +133,10 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
 
   // 載入歷史數據到圖表
   useEffect(() => {
-    if (!isInitialized || !seriesRef.current || !smaSeriesRef.current || historicalData.length === 0) return;
+    if (!isInitialized || !seriesRef.current || !smaSeriesRef.current) return;
+
+    // 嚴格檢查 historicalData 是否為有效陣列
+    if (!Array.isArray(historicalData) || historicalData.length === 0) return;
 
     try {
       // 轉換歷史數據為圖表格式

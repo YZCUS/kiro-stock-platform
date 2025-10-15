@@ -213,18 +213,129 @@ async def backfill_stock_data(
         raise HTTPException(status_code=500, detail=f"數據回填失敗: {str(e)}")
 
 
+@router.post("/refresh-all", response_model=Dict[str, Any])
+async def refresh_all_stock_prices(
+    db: AsyncSession = Depends(get_database_session),
+    data_collection_service: DataCollectionService = Depends(get_data_collection_service_clean)
+):
+    """
+    刷新所有活躍股票的最新價格數據
+
+    此端點會：
+    1. 找出所有活躍股票
+    2. 逐一更新它們的最新價格數據（最近30天）
+    3. 返回處理結果摘要
+
+    適用場景：
+    - 每日定時更新所有股票價格
+    - 手動刷新所有股票的最新數據
+    """
+    try:
+        from datetime import datetime, timedelta
+
+        logger.info("開始刷新所有活躍股票的最新價格數據")
+
+        # 查找所有活躍股票
+        query = select(Stock).where(Stock.is_active == True)
+        result = await db.execute(query)
+        active_stocks = result.scalars().all()
+
+        logger.info(f"找到 {len(active_stocks)} 個活躍股票")
+
+        if not active_stocks:
+            return {
+                "success": True,
+                "message": "沒有活躍股票需要更新",
+                "total_stocks": 0,
+                "successful": 0,
+                "failed": 0,
+                "results": []
+            }
+
+        # 計算開始日期（最近30天）
+        start_date = (datetime.now() - timedelta(days=30)).date()
+
+        # 逐一刷新數據
+        results = []
+        successful = 0
+        failed = 0
+
+        for stock in active_stocks:
+            try:
+                logger.info(f"正在刷新股票: {stock.symbol} ({stock.name})")
+
+                collect_result = await data_collection_service.collect_stock_data(
+                    db=db,
+                    stock_id=stock.id,
+                    start_date=start_date,
+                    end_date=None  # 到今天
+                )
+
+                if collect_result.status == collect_result.status.SUCCESS:
+                    successful += 1
+                    results.append({
+                        "stock_id": stock.id,
+                        "symbol": stock.symbol,
+                        "name": stock.name,
+                        "success": True,
+                        "data_points": collect_result.records_collected,
+                        "message": "成功刷新數據"
+                    })
+                else:
+                    failed += 1
+                    results.append({
+                        "stock_id": stock.id,
+                        "symbol": stock.symbol,
+                        "name": stock.name,
+                        "success": False,
+                        "data_points": 0,
+                        "message": f"刷新失敗: {collect_result.status.value}",
+                        "errors": collect_result.errors
+                    })
+
+            except Exception as e:
+                failed += 1
+                logger.error(f"刷新股票 {stock.symbol} 時發生錯誤: {str(e)}")
+                results.append({
+                    "stock_id": stock.id,
+                    "symbol": stock.symbol,
+                    "name": stock.name,
+                    "success": False,
+                    "data_points": 0,
+                    "message": f"錯誤: {str(e)}"
+                })
+
+        logger.info(f"批量刷新完成: 成功 {successful}, 失敗 {failed}")
+
+        return {
+            "success": True,
+            "message": f"批量刷新完成：成功 {successful} 個，失敗 {failed} 個",
+            "total_stocks": len(active_stocks),
+            "successful": successful,
+            "failed": failed,
+            "results": results
+        }
+
+    except Exception as e:
+        logger.error(f"批量刷新失敗: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"批量刷新失敗: {str(e)}")
+
+
 @router.post("/backfill-missing", response_model=Dict[str, Any])
 async def backfill_missing_prices(
     db: AsyncSession = Depends(get_database_session),
     data_collection_service: DataCollectionService = Depends(get_data_collection_service_clean)
 ):
     """
-    自動回填所有缺失價格的股票數據
+    自動回填所有缺失價格的股票數據（僅針對完全沒有數據的股票）
 
     此端點會：
     1. 找出所有沒有價格數據的活躍股票
     2. 逐一抓取它們的歷史價格數據
     3. 返回處理結果摘要
+
+    注意：此端點只處理完全沒有價格數據的股票。
+    如需更新已有數據的股票，請使用 /refresh-all 端點。
     """
     try:
         logger.info("開始批量回填缺失的股票價格數據")

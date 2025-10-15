@@ -1,7 +1,8 @@
 """
 每日美股數據收集 DAG - API版本（模塊化重構）
 
-執行時間：每交易日 05:00 (台北時間，對應美東 16:00 收盤)
+執行時間：每交易日台北時間 05:00 (UTC 21:00 前一天)
+         對應美東時間 17:00 (收盤後 1 小時，確保 Yahoo Finance 數據已更新)
 功能：通過API調用Backend服務收集美股數據
 """
 from datetime import datetime, timedelta
@@ -36,7 +37,7 @@ from plugins.workflows.stock_collection import (
 dag_config = {
     'dag_id': 'daily_stock_collection_us_api',
     'description': '每日美股數據收集工作流程 - API版本',
-    'schedule_interval': '0 5 * * 2-6',  # 週二到週六早上5點 (對應美股週一到週五收盤)
+    'schedule_interval': '0 21 * * 1-5',  # UTC 週一到週五 21:00 = 台北時間週二到週六 05:00
     'max_active_runs': 1,
     'catchup': False,  # 移至 DAG 層級，避免補跑歷史排程
     'tags': ['stock-data', 'daily', 'api', 'us-market'],

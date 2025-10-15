@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAppSelector, useAppDispatch } from '@/store';
 import { logout } from '@/store/slices/authSlice';
 import { Button } from '@/components/ui/button';
@@ -10,12 +10,21 @@ import WebSocketStatus from './ui/WebSocketStatus';
 
 export default function Navigation() {
   const router = useRouter();
+  const pathname = usePathname();
   const dispatch = useAppDispatch();
   const { isAuthenticated, user } = useAppSelector((state) => state.auth);
 
   const handleLogout = () => {
     dispatch(logout());
     router.push('/');
+  };
+
+  // Handle navigation with refresh on same page click
+  const handleNavClick = (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (pathname === href) {
+      e.preventDefault();
+      router.refresh();
+    }
   };
 
   return (
@@ -30,28 +39,25 @@ export default function Navigation() {
           </div>
           <div className="flex items-center space-x-1">
             <Button variant="ghost" size="sm" asChild>
-              <Link href="/">首頁</Link>
+              <Link href="/" onClick={(e) => handleNavClick(e, '/')}>首頁</Link>
             </Button>
             <Button variant="ghost" size="sm" asChild>
-              <Link href="/stocks">股票管理</Link>
+              <Link href="/stocks" onClick={(e) => handleNavClick(e, '/stocks')}>股票管理</Link>
             </Button>
             <Button variant="ghost" size="sm" asChild>
-              <Link href="/charts">圖表分析</Link>
+              <Link href="/dashboard" onClick={(e) => handleNavClick(e, '/dashboard')}>即時分析</Link>
             </Button>
             <Button variant="ghost" size="sm" asChild>
-              <Link href="/dashboard">即時儀表板</Link>
+              <Link href="/signals" onClick={(e) => handleNavClick(e, '/signals')}>交易信號</Link>
             </Button>
             <Button variant="ghost" size="sm" asChild>
-              <Link href="/signals">交易信號</Link>
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/system">系統狀態</Link>
+              <Link href="/system" onClick={(e) => handleNavClick(e, '/system')}>系統狀態</Link>
             </Button>
 
             {isAuthenticated ? (
               <>
                 <Button variant="ghost" size="sm" asChild>
-                  <Link href="/portfolio" className="flex items-center gap-1">
+                  <Link href="/portfolio" onClick={(e) => handleNavClick(e, '/portfolio')} className="flex items-center gap-1">
                     <Star className="w-4 h-4" />
                     持倉管理
                   </Link>

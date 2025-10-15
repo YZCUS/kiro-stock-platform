@@ -41,22 +41,31 @@ async def get_user_stock_lists(
 ):
     """獲取用戶的所有股票清單"""
     try:
-        lists = await db.run_sync(
-            lambda session: UserStockList.get_user_lists(session, current_user.id)
-        )
+        def _get_lists_with_counts(session):
+            """在同步會話中獲取清單和股票數量"""
+            lists = UserStockList.get_user_lists(session, current_user.id)
+            # 預載入 list_items 關聯以便計算數量
+            result = []
+            for lst in lists:
+                # 觸發關聯載入
+                stocks_count = len(lst.list_items)
+                result.append({
+                    'id': lst.id,
+                    'user_id': str(lst.user_id),
+                    'name': lst.name,
+                    'description': lst.description,
+                    'is_default': lst.is_default,
+                    'stocks_count': stocks_count,
+                    'created_at': lst.created_at,
+                    'updated_at': lst.updated_at
+                })
+            return result
+
+        lists_data = await db.run_sync(_get_lists_with_counts)
 
         return StockListListResponse(
-            items=[StockListResponse(
-                id=lst.id,
-                user_id=str(lst.user_id),
-                name=lst.name,
-                description=lst.description,
-                is_default=lst.is_default,
-                stocks_count=lst.get_stocks_count(),
-                created_at=lst.created_at,
-                updated_at=lst.updated_at
-            ) for lst in lists],
-            total=len(lists)
+            items=[StockListResponse(**lst_data) for lst_data in lists_data],
+            total=len(lists_data)
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"獲取清單失敗: {str(e)}")
@@ -142,13 +151,20 @@ async def get_stock_list(
         if not stock_list:
             raise HTTPException(status_code=404, detail="清單不存在")
 
+        # 在同步上下文中獲取股票數量
+        def _get_stocks_count(session):
+            lst = session.query(UserStockList).filter_by(id=list_id).first()
+            return len(lst.list_items) if lst else 0
+
+        stocks_count = await db.run_sync(_get_stocks_count)
+
         return StockListResponse(
             id=stock_list.id,
             user_id=str(stock_list.user_id),
             name=stock_list.name,
             description=stock_list.description,
             is_default=stock_list.is_default,
-            stocks_count=stock_list.get_stocks_count(),
+            stocks_count=stocks_count,
             created_at=stock_list.created_at,
             updated_at=stock_list.updated_at
         )
@@ -213,13 +229,21 @@ async def update_stock_list(
         await db.commit()
         await db.refresh(stock_list)
 
+        # 在同步上下文中獲取股票數量
+        def _get_stocks_count(session):
+            # 重新獲取以確保有關聯數據
+            lst = session.query(UserStockList).filter_by(id=list_id).first()
+            return len(lst.list_items) if lst else 0
+
+        stocks_count = await db.run_sync(_get_stocks_count)
+
         return StockListResponse(
             id=stock_list.id,
             user_id=str(stock_list.user_id),
             name=stock_list.name,
             description=stock_list.description,
             is_default=stock_list.is_default,
-            stocks_count=stock_list.get_stocks_count(),
+            stocks_count=stocks_count,
             created_at=stock_list.created_at,
             updated_at=stock_list.updated_at
         )
@@ -268,16 +292,18 @@ async def delete_stock_list(
 # 清單項目管理端點
 # =============================================================================
 
-@router.get("/{list_id}/stocks", response_model=StockListItemListResponse)
+@router.get("/{list_id}/stocks")
 async def get_list_stocks(
     list_id: int,
     db: AsyncSession = Depends(get_database_session),
     current_user: User = Depends(get_current_active_user)
 ):
-    """獲取清單中的所有股票"""
+    """獲取清單中的所有股票（包含最新價格和完整股票信息）"""
     try:
-        from sqlalchemy import select
+        from sqlalchemy import select, desc
         from sqlalchemy.orm import selectinload
+        from domain.models.price_history import PriceHistory
+        from api.schemas.stocks import StockResponse, LatestPriceInfo
 
         # 驗證清單所有權
         list_query = select(UserStockList).where(
@@ -297,23 +323,72 @@ async def get_list_stocks(
         items_result = await db.execute(items_query)
         items = items_result.scalars().all()
 
-        return StockListItemListResponse(
-            items=[StockListItemResponse(
-                id=item.id,
-                list_id=item.list_id,
-                stock_id=item.stock_id,
-                stock_symbol=item.stock.symbol if item.stock else None,
-                stock_name=item.stock.name if item.stock else None,
-                note=item.note,
-                created_at=item.created_at
-            ) for item in items],
-            total=len(items),
-            list_id=list_id,
-            list_name=stock_list.name
-        )
+        # 為每個股票構建完整的響應（包含最新價格）
+        stock_responses = []
+        for item in items:
+            if not item.stock:
+                continue
+
+            stock = item.stock
+
+            # 查詢最新兩個交易日的價格（用於計算漲跌）
+            price_query = select(PriceHistory).where(
+                PriceHistory.stock_id == stock.id
+            ).order_by(desc(PriceHistory.date)).limit(2)
+
+            price_result = await db.execute(price_query)
+            prices = price_result.scalars().all()
+
+            # 構建股票響應
+            stock_data = {
+                'id': stock.id,
+                'symbol': stock.symbol,
+                'market': stock.market,
+                'name': stock.name,
+                'is_active': stock.is_active,
+                'created_at': stock.created_at,
+                'updated_at': stock.updated_at,
+                'is_watchlist': False,
+                'is_portfolio': False,
+                'latest_price': None
+            }
+
+            # 添加最新價格信息
+            if prices and len(prices) > 0:
+                latest = prices[0]
+                close_price = float(latest.close_price) if latest.close_price else None
+
+                # 計算漲跌
+                change = None
+                change_percent = None
+                if close_price and len(prices) > 1:
+                    prev_close = float(prices[1].close_price) if prices[1].close_price else None
+                    if prev_close:
+                        change = close_price - prev_close
+                        change_percent = (change / prev_close) * 100
+
+                stock_data['latest_price'] = {
+                    'close': close_price,
+                    'change': change,
+                    'change_percent': change_percent,
+                    'date': latest.date,
+                    'volume': latest.volume
+                }
+
+            stock_responses.append(stock_data)
+
+        # 返回與前端期望的格式一致的響應
+        return {
+            'items': stock_responses,
+            'total': len(stock_responses),
+            'list_id': list_id,
+            'list_name': stock_list.name
+        }
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"獲取清單股票失敗: {str(e)}")
 
 

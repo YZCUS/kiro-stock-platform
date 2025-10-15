@@ -179,7 +179,29 @@ export class StocksApiService {
   }
 
   /**
-   * 批量回填所有缺失價格的股票數據
+   * 刷新所有活躍股票的最新價格數據
+   */
+  static async refreshAllStockPrices(): Promise<{
+    success: boolean;
+    message: string;
+    total_stocks: number;
+    successful: number;
+    failed: number;
+    results: Array<{
+      stock_id: number;
+      symbol: string;
+      name: string;
+      success: boolean;
+      data_points: number;
+      message: string;
+      errors?: string[];
+    }>;
+  }> {
+    return ApiService.post('/api/v1/stocks/refresh-all', {});
+  }
+
+  /**
+   * 批量回填所有缺失價格的股票數據（僅針對完全沒有數據的股票）
    */
   static async backfillMissingPrices(): Promise<{
     success: boolean;

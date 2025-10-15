@@ -194,6 +194,62 @@ async def get_active_stocks(
 # 股票詳情端點
 # =============================================================================
 
+@router.post("/validate")
+async def validate_stock_symbol(
+    symbol: str = Query(..., description="股票代號"),
+    market: str = Query(..., description="市場代碼 (TW/US)"),
+    data_collection_service=Depends(get_data_collection_service_clean)
+):
+    """
+    驗證股票代號是否有效
+
+    通過 Yahoo Finance API 驗證股票代號，返回股票基本信息
+    """
+    try:
+        from infrastructure.external.yfinance_wrapper import YFinanceWrapper
+
+        # 格式化股票代號
+        formatted_symbol = symbol.strip().upper()
+        if market == 'TW' and not formatted_symbol.endswith('.TW'):
+            formatted_symbol = f"{formatted_symbol}.TW"
+
+        # 使用 YFinance 驗證
+        yf_wrapper = YFinanceWrapper()
+        ticker = yf_wrapper.get_ticker(formatted_symbol)
+
+        # 獲取股票信息
+        info = ticker.info
+
+        # 檢查是否有效
+        if not info or 'symbol' not in info:
+            raise HTTPException(
+                status_code=404,
+                detail=f"股票代號 {formatted_symbol} 無效或不存在"
+            )
+
+        # 返回股票基本信息
+        return {
+            "valid": True,
+            "symbol": formatted_symbol,
+            "name": info.get('longName') or info.get('shortName') or formatted_symbol,
+            "market": market,
+            "currency": info.get('currency'),
+            "exchange": info.get('exchange'),
+            "quote_type": info.get('quoteType')
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"驗證股票代號失敗: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"驗證股票代號失敗: {str(e)}"
+        )
+
+
 @router.get("/{stock_id}", response_model=StockResponse)
 async def get_stock(
     stock_id: int,
@@ -252,17 +308,33 @@ async def get_stock_prices(
         result = await db.execute(query)
         prices = result.scalars().all()
 
-        return [
-            PriceDataResponse(
-                date=price.date,
-                open=float(price.open_price),
-                high=float(price.high_price),
-                low=float(price.low_price),
-                close=float(price.close_price),
-                volume=price.volume
-            )
-            for price in prices
-        ]
+        # 過濾掉有 NULL 值的價格數據並轉換
+        valid_prices = []
+        for price in prices:
+            try:
+                # 檢查必要欄位是否存在且不為 None
+                if all([
+                    price.date is not None,
+                    price.open_price is not None,
+                    price.high_price is not None,
+                    price.low_price is not None,
+                    price.close_price is not None
+                ]):
+                    valid_prices.append(
+                        PriceDataResponse(
+                            date=price.date,
+                            open=float(price.open_price),
+                            high=float(price.high_price),
+                            low=float(price.low_price),
+                            close=float(price.close_price),
+                            volume=price.volume if price.volume is not None else 0
+                        )
+                    )
+            except (ValueError, TypeError) as e:
+                # 跳過無法轉換的數據
+                continue
+
+        return valid_prices
 
     except HTTPException:
         raise
