@@ -439,9 +439,10 @@ class DataCollectionService:
         if not latest_price:
             return True  # 沒有數據，需要收集
 
-        # 如果最新數據距離結束日期超過1天，需要收集
+        # 如果最新數據的日期早於結束日期，需要收集
+        # 例如：latest_price.date = 2025-10-15, end_date = 2025-10-16 → days_behind = 1 → 需要收集
         days_behind = (end_date - latest_price.date).days
-        return days_behind > 1
+        return days_behind >= 1
 
     async def _perform_data_collection(
         self,
@@ -466,11 +467,13 @@ class DataCollectionService:
                     await asyncio.sleep(delay)
 
                 loop = asyncio.get_event_loop()
+                # Yahoo Finance 的 end 參數是 exclusive，需要加1天才能包含 end_date 的數據
+                end_date_inclusive = end_date + timedelta(days=1)
                 df = await loop.run_in_executor(
                     None,
                     lambda: yfinance_wrapper.get_ticker(symbol).history(
                         start=start_date.isoformat(),
-                        end=end_date.isoformat()
+                        end=end_date_inclusive.isoformat()
                     )
                 )
 

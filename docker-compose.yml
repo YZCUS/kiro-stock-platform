@@ -83,6 +83,7 @@ services:
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
       - AIRFLOW__CORE__DEFAULT_TIMEZONE=Asia/Taipei
       - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true
+      - AIRFLOW__WEBSERVER__WARN_DEPLOYMENT_EXPOSURE=False
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stock_analysis
       - REDIS_URL=redis://redis:6379
       - BACKEND_API_URL=http://backend:8000/api/v1

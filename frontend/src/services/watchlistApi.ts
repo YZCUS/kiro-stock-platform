@@ -93,3 +93,16 @@ export const getPopularStocks = async (limit: number = 10): Promise<PopularStock
   );
   return response.data;
 };
+
+/**
+ * Get watchlist statistics (all users)
+ */
+export const getWatchlistStats = async (): Promise<{
+  unique_stocks_count: number;
+  total_entries: number;
+}> => {
+  const response = await apiClient.get(
+    API_ENDPOINTS.WATCHLIST.STATS
+  );
+  return response.data;
+};

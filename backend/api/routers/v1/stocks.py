@@ -47,16 +47,15 @@ async def get_stocks(
     db: AsyncSession = Depends(get_database_session),
     stock_service=Depends(get_stock_service)
 ):
-    """取得股票清單（支援過濾和分頁，支持可選的用戶認證以顯示自選股和持倉標記）
+    """取得股票清單（支援過濾和分頁，支持可選的用戶認證以顯示持倉標記）
 
-    注意: 目前版本暫時不支持用戶認證檢查 is_watchlist 和 is_portfolio
-    所有股票的 is_watchlist 和 is_portfolio 都返回 False
+    注意: 目前版本暫時不支持用戶認證檢查 is_portfolio
+    所有股票的 is_portfolio 都返回 False
     後續版本將添加可選認證支持
     """
     try:
         from sqlalchemy import select, desc
         from domain.models.price_history import PriceHistory
-        from domain.models.user_watchlist import UserWatchlist
         from domain.models.user_portfolio import UserPortfolio
         from api.schemas.stocks import LatestPriceInfo
 
@@ -90,16 +89,8 @@ async def get_stocks(
             # 構建股票響應
             stock_data = StockResponse.model_validate(stock).model_dump()
 
-            # 檢查是否在自選股和持倉中（僅當用戶已認證時）
+            # 檢查是否在持倉中（僅當用戶已認證時）
             if current_user:
-                # 檢查自選股
-                watchlist_query = select(UserWatchlist).where(
-                    UserWatchlist.user_id == current_user.id,
-                    UserWatchlist.stock_id == stock.id
-                )
-                watchlist_result = await db.execute(watchlist_query)
-                stock_data['is_watchlist'] = watchlist_result.scalar_one_or_none() is not None
-
                 # 檢查持倉
                 portfolio_query = select(UserPortfolio).where(
                     UserPortfolio.user_id == current_user.id,
@@ -109,7 +100,6 @@ async def get_stocks(
                 stock_data['is_portfolio'] = portfolio_result.scalar_one_or_none() is not None
             else:
                 # 未認證用戶，標記為 False
-                stock_data['is_watchlist'] = False
                 stock_data['is_portfolio'] = False
 
             if prices and len(prices) > 0:

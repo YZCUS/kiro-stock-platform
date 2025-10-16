@@ -118,9 +118,16 @@ export async function ensureStockExists(
     );
     return response;
   } catch (error: any) {
-    throw new Error(
-      error.response?.data?.detail || '確保股票存在失敗'
-    );
+    // 從後端錯誤響應中提取友善的錯誤訊息
+    const detail = error.response?.data?.detail;
+
+    if (detail && typeof detail === 'string') {
+      // 後端已經提供了友善的錯誤訊息，直接使用
+      throw new Error(detail);
+    } else {
+      // 後備錯誤訊息
+      throw new Error(`查詢股票「${symbol}」失敗，請稍後再試`);
+    }
   }
 }
 

@@ -10,7 +10,6 @@ from .technical_indicator import TechnicalIndicator
 from .trading_signal import TradingSignal
 from .system_log import SystemLog
 from .user import User
-from .user_watchlist import UserWatchlist
 from .user_portfolio import UserPortfolio
 from .transaction import Transaction
 from .user_stock_list import UserStockList, UserStockListItem
@@ -22,7 +21,6 @@ __all__ = [
     'TradingSignal',
     'SystemLog',
     'User',
-    'UserWatchlist',
     'UserPortfolio',
     'Transaction',
     'UserStockList',

@@ -71,38 +71,46 @@ class WebSocketService:
         self,
         websocket: WebSocket,
         stock_id: int,
-        db: AsyncSession,
+        db: AsyncSession = None,  # db 參數變為可選，我們將創建新的 session
     ) -> None:
         """發送初始股票數據"""
-        try:
-            stock = await self.stock_service.get_stock_by_id(db, stock_id)
-        except Exception as exc:  # noqa: BLE001
-            await self.manager.send_personal_message(
-                {"type": "error", "message": f"股票不存在: {stock_id}"},
-                websocket,
-            )
-            logger.warning("無法取得股票 %s: %s", stock_id, exc)
-            return
+        # 創建新的資料庫 session 以確保能看到最新數據
+        from core.database import AsyncSessionLocal
 
-        price_data = await self.trading_signal_service.get_price_history(
-            db, stock_id=stock_id, limit=100
-        )
-        indicator_data = await self.trading_signal_service.get_indicator_history(
-            db, stock_id=stock_id, limit=50
-        )
-        signal_data = await self.trading_signal_service.get_signal_history(
-            db, stock_id=stock_id, limit=10
-        )
+        async with AsyncSessionLocal() as fresh_db:
+            try:
+                stock = await self.stock_service.get_stock_by_id(fresh_db, stock_id)
+
+                # 如果 stock 是 None，可能是事務隔離問題，直接返回錯誤但不中斷連線
+                if stock is None:
+                    logger.warning("股票 %s 暫時無法取得（可能正在創建中），跳過初始數據發送", stock_id)
+                    return
+
+            except Exception as exc:  # noqa: BLE001
+                # 捕獲所有異常，但不視為致命錯誤
+                # 某些情況下（如股票剛創建），可能會暫時無法取得
+                logger.warning("無法取得股票 %s: %s，跳過初始數據發送", stock_id, exc)
+                return
+
+            price_data = await self.trading_signal_service.get_price_history(
+                fresh_db, stock_id=stock_id, limit=100
+            )
+            indicator_data = await self.trading_signal_service.get_indicator_history(
+                fresh_db, stock_id=stock_id, limit=50
+            )
+            signal_data = await self.trading_signal_service.get_signal_history(
+                fresh_db, stock_id=stock_id, limit=10
+            )
 
         await self.manager.send_personal_message(
             {
                 "type": "initial_data",
                 "data": {
                     "stock": {
-                        "id": stock["id"],
-                        "symbol": stock["symbol"],
-                        "market": stock.get("market"),
-                        "name": stock.get("name"),
+                        "id": stock.id,
+                        "symbol": stock.symbol,
+                        "market": stock.market,
+                        "name": stock.name,
                     },
                     "prices": price_data,
                     "indicators": indicator_data,

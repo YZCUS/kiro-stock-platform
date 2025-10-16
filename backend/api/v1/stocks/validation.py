@@ -48,8 +48,8 @@ async def validate_stock_symbol(
         # 檢查是否有效
         if not info or 'symbol' not in info:
             raise HTTPException(
-                status_code=404,
-                detail=f"股票代號 {formatted_symbol} 無效或不存在"
+                status_code=400,
+                detail=f"找不到股票代號「{symbol}」，請確認股票代號是否正確"
             )
 
         # 返回股票基本信息
@@ -69,9 +69,21 @@ async def validate_stock_symbol(
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"驗證股票代號失敗: {str(e)}")
+
+        # 提供友善的錯誤訊息，不要暴露內部錯誤細節
+        error_msg = str(e).lower()
+        if ('404' in error_msg or
+            'no data found' in error_msg or
+            'no price data' in error_msg or
+            'not found' in error_msg or
+            'delisted' in error_msg):
+            detail = f"找不到股票代號「{symbol}」，請確認股票代號是否正確"
+        else:
+            detail = f"驗證股票「{symbol}」時發生錯誤，請稍後再試"
+
         raise HTTPException(
             status_code=400,
-            detail=f"驗證股票代號失敗: {str(e)}"
+            detail=detail
         )
 
 
@@ -148,8 +160,8 @@ async def ensure_stock_exists(
 
         if not info or 'symbol' not in info:
             raise HTTPException(
-                status_code=404,
-                detail=f"股票代號 {formatted_symbol} 無效或不存在"
+                status_code=400,
+                detail=f"找不到股票代號「{symbol}」，請確認股票代號是否正確"
             )
 
         # 創建新股票
@@ -223,9 +235,21 @@ async def ensure_stock_exists(
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"確保股票存在失敗: {str(e)}")
+
+        # 提供友善的錯誤訊息，不要暴露內部錯誤細節
+        error_msg = str(e).lower()
+        if ('404' in error_msg or
+            'no data found' in error_msg or
+            'no price data' in error_msg or
+            'not found' in error_msg or
+            'delisted' in error_msg):
+            detail = f"找不到股票代號「{symbol}」，請確認股票代號是否正確"
+        else:
+            detail = f"查詢股票「{symbol}」時發生錯誤，請稍後再試"
+
         raise HTTPException(
             status_code=400,
-            detail=f"確保股票存在失敗: {str(e)}"
+            detail=detail
         )
 
 

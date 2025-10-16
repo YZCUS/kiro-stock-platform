@@ -110,13 +110,26 @@ class StockRepository(IStockRepository):
 
     async def create(self, db: AsyncSession, obj_in):
         """創建股票"""
-        # 如果沒有提供 name，嘗試從 Yahoo Finance 查詢公司名稱
+        # 如果沒有提供 name，嘗試從 Yahoo Finance 查詢公司名稱並驗證股票有效性
         stock_name = obj_in.name
 
         if not stock_name:
             try:
                 logger.info(f"Fetching company name for {obj_in.symbol} from Yahoo Finance")
                 ticker = yfinance_wrapper.get_ticker(obj_in.symbol)
+
+                # 驗證股票是否能獲取歷史數據（檢查是否有效）
+                try:
+                    hist = ticker.history(period='5d')
+                    if hist.empty:
+                        error_msg = f"股票 {obj_in.symbol} 無法獲取價格數據，可能已下市或代碼錯誤"
+                        logger.error(error_msg)
+                        raise ValueError(error_msg)
+                    logger.info(f"股票 {obj_in.symbol} 驗證成功，可獲取價格數據")
+                except Exception as e:
+                    error_msg = f"股票 {obj_in.symbol} 驗證失敗: {str(e)}"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
 
                 # 嘗試獲取公司名稱
                 if hasattr(ticker, 'info') and ticker.info:
@@ -132,8 +145,12 @@ class StockRepository(IStockRepository):
                     logger.warning(f"No info available for {obj_in.symbol}, using symbol as name")
                     stock_name = obj_in.symbol
 
+            except ValueError:
+                # 重新拋出驗證錯誤
+                raise
             except Exception as e:
                 logger.error(f"Error fetching company name for {obj_in.symbol}: {e}")
+                # 如果獲取公司名稱失敗但沒有明確的驗證錯誤，仍然使用symbol作為名稱
                 stock_name = obj_in.symbol
 
         # 創建Stock實例

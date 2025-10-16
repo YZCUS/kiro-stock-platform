@@ -21,7 +21,6 @@ export interface Stock {
   created_at: string;
   updated_at: string;
   latest_price?: LatestPriceInfo | null;
-  is_watchlist?: boolean;  // 是否在自選股中
   is_portfolio?: boolean;  // 是否在持倉中
 }
 

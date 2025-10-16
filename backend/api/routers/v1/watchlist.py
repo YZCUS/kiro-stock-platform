@@ -230,3 +230,31 @@ async def get_popular_stocks(
         )
         for item in popular_stocks
     ]
+
+
+@router.get("/stats")
+async def get_watchlist_stats(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    取得自選股統計資訊（不需要登入）
+
+    Returns:
+        dict: 包含不重複股票數量等統計資訊
+    """
+    from sqlalchemy import select, func, distinct
+
+    # 計算所有 watchlist 中不重複的股票數量
+    query = select(func.count(distinct(UserWatchlist.stock_id)))
+    result = await db.execute(query)
+    unique_stocks_count = result.scalar() or 0
+
+    # 計算總共有多少筆 watchlist 記錄
+    total_query = select(func.count(UserWatchlist.id))
+    total_result = await db.execute(total_query)
+    total_watchlist_entries = total_result.scalar() or 0
+
+    return {
+        "unique_stocks_count": unique_stocks_count,
+        "total_entries": total_watchlist_entries
+    }

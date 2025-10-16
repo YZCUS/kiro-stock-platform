@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { ArrowRight, BarChart3, TrendingUp, Bell, Activity, Database, Zap } from 'lucide-react';
 import { useStocks } from '@/hooks/useStocks';
 import { useAppSelector } from '@/store';
+import { getStockLists } from '@/services/stockListApi';
 
 export default function HomePage() {
   const { isAuthenticated } = useAppSelector((state) => state.auth);
@@ -18,13 +19,19 @@ export default function HomePage() {
     database: 'checking',
     websocket: 'checking'
   });
+  const [trackedStocksCount, setTrackedStocksCount] = useState<number>(0);
+  const [isMounted, setIsMounted] = useState(false);
 
   // 獲取股票數據用於統計（後端限制 per_page 最大為 200）
   const { data: stocksResponse } = useStocks({ page: 1, pageSize: 200 });
 
   // 計算統計數據
-  const watchlistCount = stocksResponse?.items?.filter(s => s.is_watchlist).length || 0;
   const totalStocks = stocksResponse?.total || 0;
+
+  // 處理客戶端掛載
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // 檢查系統狀態
   useEffect(() => {
@@ -50,6 +57,47 @@ export default function HomePage() {
     const interval = setInterval(checkHealth, 30000); // 每 30 秒檢查一次
     return () => clearInterval(interval);
   }, []);
+
+  // 獲取追蹤股票數量（當前用戶所有 stock lists 中不重複的股票數）
+  useEffect(() => {
+    const fetchTrackedStocksCount = async () => {
+      if (!isAuthenticated) {
+        setTrackedStocksCount(0);
+        return;
+      }
+
+      try {
+        // 獲取用戶的所有清單
+        const response = await getStockLists();
+
+        // 收集所有清單中的不重複股票 ID
+        const uniqueStockIds = new Set<number>();
+
+        // 遍歷每個清單，獲取其中的股票
+        for (const list of response.items) {
+          try {
+            // 動態導入 getListStocks 避免循環依賴
+            const { getListStocks } = await import('@/services/stockListApi');
+            const listStocks = await getListStocks(list.id);
+
+            // 收集股票 ID
+            listStocks.items.forEach((stock) => {
+              uniqueStockIds.add(stock.id);
+            });
+          } catch (error) {
+            console.error(`獲取清單 ${list.id} 的股票失敗:`, error);
+          }
+        }
+
+        setTrackedStocksCount(uniqueStockIds.size);
+      } catch (error) {
+        console.error('獲取追蹤股票數量失敗:', error);
+        setTrackedStocksCount(0);
+      }
+    };
+
+    fetchTrackedStocksCount();
+  }, [isAuthenticated]); // 依賴 isAuthenticated
 
   const getStatusBadge = (status: string) => {
     if (status === 'running') {
@@ -164,7 +212,7 @@ export default function HomePage() {
               <div>
                 <p className="text-sm font-medium text-gray-600">追蹤股票</p>
                 <p className="text-3xl font-bold text-gray-900 mt-2">
-                  {isAuthenticated ? watchlistCount : '—'}
+                  {!isMounted || !isAuthenticated ? '—' : trackedStocksCount}
                 </p>
               </div>
               <TrendingUp className="h-8 w-8 text-blue-600" />

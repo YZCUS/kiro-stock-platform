@@ -42,14 +42,7 @@ class Stock(BaseModel, TimestampMixin):
     )
     
     trading_signals = relationship(
-        "TradingSignal", 
-        back_populates="stock", 
-        cascade="all, delete-orphan",
-        lazy="dynamic"
-    )
-    
-    user_watchlists = relationship(
-        "UserWatchlist",
+        "TradingSignal",
         back_populates="stock",
         cascade="all, delete-orphan",
         lazy="dynamic"

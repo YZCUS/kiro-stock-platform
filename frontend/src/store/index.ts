@@ -10,7 +10,6 @@ import signalsReducer from './slices/signalsSlice';
 import indicatorsReducer from './slices/indicatorsSlice';
 import uiReducer from './slices/uiSlice';
 import authReducer from './slices/authSlice';
-import watchlistReducer from './slices/watchlistSlice';
 import portfolioReducer from './slices/portfolioSlice';
 import stockListReducer from './slices/stockListSlice';
 
@@ -22,7 +21,6 @@ export const store = configureStore({
     indicators: indicatorsReducer,
     ui: uiReducer,
     auth: authReducer,
-    watchlist: watchlistReducer,
     portfolio: portfolioReducer,
     stockList: stockListReducer,
   },

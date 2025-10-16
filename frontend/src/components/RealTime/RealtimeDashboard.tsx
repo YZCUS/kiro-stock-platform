@@ -10,7 +10,8 @@ import { useAppDispatch, useAppSelector } from '@/store';
 import { fetchStockLists, fetchListStocks } from '@/store/slices/stockListSlice';
 import { useWebSocket, useMarketStatus } from '../../hooks/useWebSocket';
 import { ensureStockExistsAuto, StockEnsureResult } from '../../services/stockValidationApi';
-import { ChevronDown, TrendingUp, Activity, BarChart3, Search, X } from 'lucide-react';
+import { ChevronDown, TrendingUp, Activity, BarChart3, Search, X, ShoppingCart, TrendingDown } from 'lucide-react';
+import TransactionModal from '../Portfolio/TransactionModal';
 
 // 動態載入圖表組件
 const RealtimePriceChart = dynamic(() => import('./RealtimePriceChart'), {
@@ -46,12 +47,24 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
   const [selectedStockId, setSelectedStockId] = useState<number | null>(null);
   const [showListDropdown, setShowListDropdown] = useState(false);
   const [showStockDropdown, setShowStockDropdown] = useState(false);
+  const [urlStockProcessed, setUrlStockProcessed] = useState(false);
 
   // 直接輸入股票代號的狀態
   const [symbolInput, setSymbolInput] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [directStock, setDirectStock] = useState<any | null>(null);
+
+  // 交易 Modal 狀態
+  const [transactionModal, setTransactionModal] = useState<{
+    isOpen: boolean;
+    stock: any | null;
+    type: 'BUY' | 'SELL';
+  }>({
+    isOpen: false,
+    stock: null,
+    type: 'BUY'
+  });
 
   // WebSocket 狀態
   const { isConnected, error: wsError } = useWebSocket();
@@ -85,42 +98,57 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
     }
   }, [lists, selectedListId]);
 
-  // 當有 URL 股票參數時，載入所有清單的股票來查找該股票
+  // 當有 URL 股票參數時，查找包含該股票的清單並設置
   useEffect(() => {
-    if (stockIdFromUrl && lists.length > 0 && !selectedStockId) {
-      // 載入所有清單的股票來查找目標股票
-      lists.forEach(list => {
-        dispatch(fetchListStocks(list.id));
-      });
-    }
-  }, [stockIdFromUrl, lists, selectedStockId, dispatch]);
+    if (stockIdFromUrl && lists.length > 0 && !urlStockProcessed) {
+      const targetStockId = parseInt(stockIdFromUrl, 10);
 
-  // 當股票列表載入後，自動選擇第一個股票或 URL 參數指定的股票
-  useEffect(() => {
-    if (currentListStocks.length > 0) {
-      // 如果已經選擇了股票，檢查該股票是否在當前清單中
-      if (selectedStockId) {
-        const stockExists = currentListStocks.find(s => s.id === selectedStockId);
-        // 如果選中的股票不在當前清單中，重新選擇第一支股票
-        if (!stockExists) {
-          setSelectedStockId(currentListStocks[0].id);
-        }
-      } else {
-        // 如果沒有選擇股票
-        // 如果 URL 有指定股票 ID，優先選擇該股票
-        if (stockIdFromUrl) {
-          const stockId = parseInt(stockIdFromUrl, 10);
-          const stockExists = currentListStocks.find(s => s.id === stockId);
-          if (stockExists) {
-            setSelectedStockId(stockId);
-            return;
+      // 異步查找包含目標股票的清單
+      const findStockInLists = async () => {
+        setUrlStockProcessed(true); // 標記為已處理，避免重複執行
+
+        for (const list of lists) {
+          try {
+            const response = await dispatch(fetchListStocks(list.id)).unwrap();
+            // response 是 StockListItemListResponse，包含 items 屬性
+            const listStocks = response.items || [];
+            const stockExists = listStocks.find((s: any) => s.id === targetStockId);
+            if (stockExists) {
+              // 找到了！設置清單和股票
+              setSelectedListId(list.id);
+              setSelectedStockId(targetStockId);
+              return;
+            }
+          } catch (error) {
+            console.error(`載入清單 ${list.id} 失敗:`, error);
           }
         }
-        // 否則選擇第一個股票
+        // 如果在所有清單中都找不到，仍然設置 stock ID（可能該股票存在但不在任何清單中）
+        setSelectedStockId(targetStockId);
+      };
+
+      findStockInLists();
+    }
+  }, [stockIdFromUrl, lists, urlStockProcessed, dispatch]);
+
+  // 當股票列表載入後，自動選擇第一個股票
+  useEffect(() => {
+    // 只有在 URL 參數未處理或已處理完成時才執行自動選擇
+    const shouldAutoSelect = !stockIdFromUrl || urlStockProcessed;
+
+    if (currentListStocks.length > 0 && shouldAutoSelect) {
+      // 如果沒有選擇股票，或選擇的股票不在當前清單中，則自動選擇第一個股票
+      if (!selectedStockId) {
         setSelectedStockId(currentListStocks[0].id);
+      } else {
+        const stockInList = currentListStocks.find(s => s.id === selectedStockId);
+        if (!stockInList) {
+          // 當前選擇的股票不在新清單中，選擇第一個股票
+          setSelectedStockId(currentListStocks[0].id);
+        }
       }
     }
-  }, [currentListStocks, selectedStockId, stockIdFromUrl]);
+  }, [currentListStocks, selectedStockId, stockIdFromUrl, urlStockProcessed]);
 
   // 點擊外部關閉下拉選單
   useEffect(() => {
@@ -162,6 +190,37 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
   const priceChangePercent = selectedStock?.latest_price?.change_percent;
   const priceChange = selectedStock?.latest_price?.change;
   const currentPrice = selectedStock?.latest_price?.close;
+
+  // 計算當前市場狀態（基於選中股票的市場）
+  const getCurrentMarketStatus = () => {
+    if (!selectedStock) return { is_open: false, market: '' };
+
+    const now = new Date();
+    const utcHour = now.getUTCHours();
+    const utcMinute = now.getUTCMinutes();
+    const utcDay = now.getUTCDay(); // 0 = 週日, 1 = 週一, ..., 6 = 週六
+
+    if (selectedStock.market === 'US') {
+      // 美股交易時間（UTC）：週一至週五 14:30-21:00（夏令時）或 15:30-22:00（冬令時）
+      // 簡化版本：使用 14:30-21:00
+      const isWeekday = utcDay >= 1 && utcDay <= 5;
+      const isOpen = isWeekday &&
+                     ((utcHour === 14 && utcMinute >= 30) ||
+                      (utcHour > 14 && utcHour < 21) ||
+                      (utcHour === 21 && utcMinute === 0));
+      return { is_open: isOpen, market: 'US' };
+    } else {
+      // 台股交易時間（UTC）：週一至週五 01:00-05:30（UTC = 台北時間 09:00-13:30）
+      const isWeekday = utcDay >= 1 && utcDay <= 5;
+      const isOpen = isWeekday &&
+                     ((utcHour === 1) ||
+                      (utcHour > 1 && utcHour < 5) ||
+                      (utcHour === 5 && utcMinute <= 30));
+      return { is_open: isOpen, market: 'TW' };
+    }
+  };
+
+  const currentMarketStatus = getCurrentMarketStatus();
 
   // 處理股票查詢
   const handleSearch = async () => {
@@ -230,24 +289,25 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
               快速查詢股票
             </label>
             <div className="flex gap-2">
-              <div className="flex-1">
-                <input
-                  type="text"
-                  value={symbolInput}
-                  onChange={(e) => setSymbolInput(e.target.value.toUpperCase())}
-                  onKeyPress={handleKeyPress}
-                  onFocus={() => {
-                    setShowListDropdown(false);
-                    setShowStockDropdown(false);
-                  }}
-                  placeholder="輸入股號 (如: AAPL, 2330)"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  disabled={isSearching}
-                />
-                {searchError && (
-                  <p className="mt-1 text-xs text-red-600">{searchError}</p>
-                )}
-              </div>
+              <input
+                type="text"
+                value={symbolInput}
+                onChange={(e) => {
+                  setSymbolInput(e.target.value.toUpperCase());
+                  // 清除錯誤訊息當用戶開始輸入
+                  if (searchError) setSearchError(null);
+                }}
+                onKeyPress={handleKeyPress}
+                onFocus={() => {
+                  setShowListDropdown(false);
+                  setShowStockDropdown(false);
+                }}
+                placeholder="輸入股號 (如: AAPL, 2330)"
+                className={`flex-1 px-4 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                  searchError ? 'border-red-500' : 'border-gray-300'
+                }`}
+                disabled={isSearching}
+              />
               <button
                 onClick={handleSearch}
                 disabled={isSearching || !symbolInput.trim()}
@@ -268,23 +328,40 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
                 </button>
               )}
             </div>
+            {searchError && (
+              <p className="mt-1.5 text-sm text-red-600 flex items-center gap-1">
+                <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+                {searchError}
+              </p>
+            )}
           </div>
 
           {/* 清單選擇器 */}
           <div ref={listDropdownRef}>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               選擇清單
+              {!isAuthenticated && (
+                <span className="ml-2 text-xs text-gray-500">（需登入）</span>
+              )}
             </label>
             <div className="relative">
               <button
                 onClick={() => {
+                  if (!isAuthenticated) return;
                   setShowListDropdown(!showListDropdown);
                   setShowStockDropdown(false);
                 }}
-                className={`w-full bg-white border border-gray-300 rounded-md px-4 py-2 text-left flex items-center justify-between hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 ${directStock && !showListDropdown ? 'opacity-50' : ''}`}
+                disabled={!isAuthenticated}
+                className={`w-full bg-white border border-gray-300 rounded-md px-4 py-2 text-left flex items-center justify-between focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  !isAuthenticated
+                    ? 'bg-gray-100 cursor-not-allowed opacity-60'
+                    : 'hover:border-gray-400'
+                } ${directStock && !showListDropdown ? 'opacity-50' : ''}`}
               >
                 <span className={selectedList ? 'text-gray-900' : 'text-gray-400'}>
-                  {selectedList ? selectedList.name : '請選擇清單'}
+                  {!isAuthenticated ? '請先登入' : (selectedList ? selectedList.name : '請選擇清單')}
                 </span>
                 <ChevronDown className="w-5 h-5 text-gray-400" />
               </button>
@@ -341,7 +418,7 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
                   const listStock = selectedStockId && currentListStocks.find(s => s.id === selectedStockId);
                   if (listStock) {
                     return (
-                      <span className="text-gray-900">
+                      <span className="text-gray-900 truncate block pr-2">
                         {listStock.symbol} - {listStock.name}
                       </span>
                     );
@@ -373,13 +450,13 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
                           selectedStockId === stock.id ? 'bg-blue-50 text-blue-700' : 'text-gray-900'
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="font-medium">{stock.symbol}</div>
-                            <div className="text-xs text-gray-500">{stock.name}</div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium truncate">{stock.symbol}</div>
+                            <div className="text-xs text-gray-500 truncate">{stock.name}</div>
                           </div>
                           {stock.latest_price?.close && (
-                            <div className="text-right">
+                            <div className="text-right flex-shrink-0">
                               <div className="font-medium">
                                 {stock.market === 'TW' ? 'NT$' : '$'}{stock.latest_price.close.toFixed(2)}
                               </div>
@@ -467,16 +544,18 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
           <div className="bg-white shadow rounded-lg p-6">
             <div className="flex items-center">
               <div className={`p-3 rounded-full ${
-                marketStatus.is_open ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'
+                currentMarketStatus.is_open ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'
               }`}>
                 <Activity className="w-6 h-6" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">市場狀態</p>
+                <p className="text-sm font-medium text-gray-600">
+                  市場狀態 {currentMarketStatus.market && `(${currentMarketStatus.market === 'US' ? '美股' : '台股'})`}
+                </p>
                 <p className={`text-2xl font-bold ${
-                  marketStatus.is_open ? 'text-green-600' : 'text-orange-600'
+                  currentMarketStatus.is_open ? 'text-green-600' : 'text-orange-600'
                 }`}>
-                  {marketStatus.is_open ? '開盤' : '休市'}
+                  {currentMarketStatus.is_open ? '開盤' : '休市'}
                 </p>
               </div>
             </div>
@@ -497,11 +576,39 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
                       {selectedStock.symbol} - {selectedStock.name}
                     </h2>
                   </div>
-                  {selectedStock.latest_price?.date && (
-                    <div className="text-sm text-gray-500">
-                      更新時間: {selectedStock.latest_price.date}
-                    </div>
-                  )}
+                  <div className="flex items-center gap-4">
+                    {isAuthenticated && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setTransactionModal({
+                            isOpen: true,
+                            stock: selectedStock,
+                            type: 'BUY'
+                          })}
+                          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+                        >
+                          <ShoppingCart className="w-4 h-4" />
+                          買入
+                        </button>
+                        <button
+                          onClick={() => setTransactionModal({
+                            isOpen: true,
+                            stock: selectedStock,
+                            type: 'SELL'
+                          })}
+                          className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+                        >
+                          <TrendingDown className="w-4 h-4" />
+                          賣出
+                        </button>
+                      </div>
+                    )}
+                    {selectedStock.latest_price?.date && (
+                      <div className="text-sm text-gray-500">
+                        更新時間: {selectedStock.latest_price.date}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="p-6">
@@ -592,6 +699,20 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
           </div>
         </div>
       </div>
+
+      {/* 交易 Modal */}
+      {transactionModal.isOpen && transactionModal.stock && (
+        <TransactionModal
+          isOpen={transactionModal.isOpen}
+          onClose={() => setTransactionModal({
+            isOpen: false,
+            stock: null,
+            type: 'BUY'
+          })}
+          stock={transactionModal.stock}
+          transactionType={transactionModal.type}
+        />
+      )}
     </div>
   );
 };

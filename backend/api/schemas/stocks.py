@@ -30,7 +30,6 @@ class StockResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     latest_price: Optional[LatestPriceInfo] = None  # 最新價格資訊
-    is_watchlist: bool = False  # 是否在用戶自選股中
     is_portfolio: bool = False  # 是否在用戶持倉中
 
     class Config:

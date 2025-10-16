@@ -24,7 +24,6 @@ class User(BaseModel, TimestampMixin):
     is_superuser = Column(Boolean, default=False, nullable=False, comment="是否為超級用戶")
 
     # 關聯關係
-    watchlists = relationship("UserWatchlist", back_populates="user", cascade="all, delete-orphan")
     portfolios = relationship("UserPortfolio", back_populates="user", cascade="all, delete-orphan")
     transactions = relationship("Transaction", back_populates="user", cascade="all, delete-orphan")
     stock_lists = relationship("UserStockList", back_populates="user", cascade="all, delete-orphan")
