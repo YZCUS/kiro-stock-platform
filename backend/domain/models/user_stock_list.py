@@ -19,6 +19,7 @@ class UserStockList(BaseModel, TimestampMixin):
     name = Column(String(100), nullable=False, comment="清單名稱")
     description = Column(Text, nullable=True, comment="清單描述")
     is_default = Column(Boolean, default=False, nullable=False, comment="是否為預設清單")
+    sort_order = Column(Integer, default=0, nullable=False, comment="排序順序（數字越小越前面）")
 
     # 約束條件
     __table_args__ = (
@@ -32,8 +33,8 @@ class UserStockList(BaseModel, TimestampMixin):
 
     @classmethod
     def get_user_lists(cls, session, user_id: uuid.UUID) -> List['UserStockList']:
-        """取得用戶的所有清單"""
-        return session.query(cls).filter(cls.user_id == user_id).order_by(cls.is_default.desc(), cls.created_at).all()
+        """取得用戶的所有清單（按排序順序、預設清單、創建時間排序）"""
+        return session.query(cls).filter(cls.user_id == user_id).order_by(cls.sort_order, cls.is_default.desc(), cls.created_at).all()
 
     @classmethod
     def get_default_list(cls, session, user_id: uuid.UUID) -> Optional['UserStockList']:
@@ -86,6 +87,7 @@ class UserStockListItem(BaseModel, TimestampMixin):
     list_id = Column(Integer, ForeignKey("user_stock_lists.id", ondelete="CASCADE"), nullable=False, index=True, comment="清單ID")
     stock_id = Column(Integer, ForeignKey("stocks.id", ondelete="CASCADE"), nullable=False, index=True, comment="股票ID")
     note = Column(Text, nullable=True, comment="備註")
+    sort_order = Column(Integer, default=0, nullable=False, comment="排序順序（數字越小越前面）")
 
     # 約束條件
     __table_args__ = (

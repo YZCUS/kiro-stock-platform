@@ -25,11 +25,17 @@ export const subscribeToSignals = createAsyncThunk(
     const { getWebSocketManager } = await import('../../lib/websocket');
     const wsManager = getWebSocketManager();
 
-    if (stockId) {
-      wsManager.subscribeToStock(stockId);
+    // 只有在 stockId 是有效數字時才訂閱
+    if (stockId && typeof stockId === 'number' && stockId > 0) {
+      const success = wsManager.subscribeToStock(stockId);
+      if (!success) {
+        throw new Error(`Failed to subscribe to stock ${stockId}: WebSocket not connected or invalid stockId`);
+      }
+      return { stockId, subscribed: true };
     }
 
-    return { stockId, subscribed: true };
+    // stockId 無效時返回未訂閱狀態
+    return { stockId: undefined, subscribed: false };
   }
 );
 
@@ -40,11 +46,14 @@ export const unsubscribeFromSignals = createAsyncThunk(
     const { getWebSocketManager } = await import('../../lib/websocket');
     const wsManager = getWebSocketManager();
 
-    if (stockId) {
+    // 只有在 stockId 是有效數字時才取消訂閱
+    if (stockId && typeof stockId === 'number' && stockId > 0) {
       wsManager.unsubscribeFromStock(stockId);
+      return { stockId, subscribed: false };
     }
 
-    return { stockId, subscribed: false };
+    // stockId 無效時直接返回
+    return { stockId: undefined, subscribed: false };
   }
 );
 

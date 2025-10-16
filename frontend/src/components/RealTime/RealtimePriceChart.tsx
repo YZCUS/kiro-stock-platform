@@ -22,18 +22,26 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const smaSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
   const [historicalData, setHistoricalData] = useState<any[]>([]);
 
-  // 使用 WebSocket hooks
-  const { priceData, lastUpdate, isSubscribed } = usePriceUpdates(stockId);
-  const { indicators } = useIndicatorUpdates(stockId);
+  // 驗證 stockId 有效性 - 必須是有效的數字
+  const validStockId = stockId && typeof stockId === 'number' && stockId > 0 ? stockId : null;
+
+  // 使用 WebSocket hooks - 只有在 stockId 有效時才訂閱
+  const { priceData, lastUpdate, isSubscribed } = usePriceUpdates(validStockId);
+  const { indicators } = useIndicatorUpdates(validStockId);
 
   // 載入歷史價格數據
   useEffect(() => {
+    // 只有在 stockId 有效時才載入數據
+    if (!validStockId) {
+      setHistoricalData([]);
+      return;
+    }
+
     const loadHistoricalData = async () => {
       try {
-        const response = await fetch(`http://localhost:8000/api/v1/stocks/${stockId}/prices?limit=100`);
+        const response = await fetch(`http://localhost:8000/api/v1/stocks/${validStockId}/prices?limit=250`);
 
         if (!response.ok) {
           console.error(`Failed to load historical data: ${response.status} ${response.statusText}`);
@@ -57,11 +65,23 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
     };
 
     loadHistoricalData();
-  }, [stockId]);
+  }, [validStockId]);
 
   // 初始化圖表
   useEffect(() => {
-    if (!chartContainerRef.current || isInitialized) return;
+    if (!chartContainerRef.current) return;
+
+    // 清理舊圖表
+    if (chartRef.current) {
+      try {
+        chartRef.current.remove();
+      } catch (e) {
+        console.warn('Error removing old chart:', e);
+      }
+      chartRef.current = null;
+      seriesRef.current = null;
+      smaSeriesRef.current = null;
+    }
 
     // 創建圖表
     const chart = createChart(chartContainerRef.current, {
@@ -109,14 +129,16 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
     seriesRef.current = candlestickSeries;
     smaSeriesRef.current = smaSeries;
 
-    setIsInitialized(true);
-
     // 處理視窗大小變化
     const handleResize = () => {
-      if (chartContainerRef.current && chart) {
-        chart.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-        });
+      if (chartContainerRef.current && chartRef.current) {
+        try {
+          chartRef.current.applyOptions({
+            width: chartContainerRef.current.clientWidth,
+          });
+        } catch (e) {
+          console.warn('Error resizing chart:', e);
+        }
       }
     };
 
@@ -125,20 +147,34 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
     // 清理函數
     return () => {
       window.removeEventListener('resize', handleResize);
-      if (chart) {
-        chart.remove();
+      // 清理圖表實例
+      if (chartRef.current) {
+        try {
+          chartRef.current.remove();
+        } catch (e) {
+          console.warn('Error removing chart:', e);
+        }
+        chartRef.current = null;
+        seriesRef.current = null;
+        smaSeriesRef.current = null;
       }
     };
-  }, [height, isInitialized]);
+  }, [stockId, height]); // 依賴 stockId，當股票變化時重新創建圖表
 
   // 載入歷史數據到圖表
   useEffect(() => {
-    if (!isInitialized || !seriesRef.current || !smaSeriesRef.current) return;
-
     // 嚴格檢查 historicalData 是否為有效陣列
-    if (!Array.isArray(historicalData) || historicalData.length === 0) return;
+    if (!Array.isArray(historicalData) || historicalData.length === 0) {
+      return;
+    }
+
+    // 等待圖表初始化完成並確保所有 ref 都存在
+    if (!seriesRef.current || !smaSeriesRef.current || !chartRef.current) {
+      return;
+    }
 
     try {
+
       // 轉換歷史數據為圖表格式
       const chartData = historicalData
         .map(item => {
@@ -165,18 +201,22 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
         };
       }).filter(Boolean) as { time: UTCTimestamp; value: number }[];
 
-      seriesRef.current.setData(chartData);
-      smaSeriesRef.current.setData(smaData);
+      if (seriesRef.current && smaSeriesRef.current) {
+        seriesRef.current.setData(chartData);
+        smaSeriesRef.current.setData(smaData);
+      }
     } catch (error) {
       console.error('Failed to set chart data:', error);
     }
-  }, [isInitialized, historicalData]);
+  }, [historicalData]);
 
   // 處理即時價格更新
   useEffect(() => {
-    if (!priceData || !seriesRef.current) return;
+    if (!priceData || !seriesRef.current || !chartRef.current) return;
 
     try {
+      // 檢查圖表是否已被清理
+      if (!chartRef.current || !seriesRef.current) return;
       const time = Math.floor(new Date(priceData.timestamp).getTime() / 1000) as UTCTimestamp;
 
       // 處理真實的 OHLC 數據
@@ -277,41 +317,8 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
   }, [indicators]);
 
   return (
-    <div className="bg-white shadow rounded-lg">
-      <div className="px-4 py-3 border-b border-gray-200">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-medium text-gray-900">
-              {symbol} {stockName && `(${stockName})`} 即時價格圖表
-            </h3>
-            {lastUpdate && (
-              <p className="text-sm text-gray-500">
-                最後更新: {lastUpdate.toLocaleTimeString('zh-TW')}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center space-x-4">
-            {/* 訂閱狀態 */}
-            <div className="flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${
-                isSubscribed ? 'bg-green-500 animate-pulse' : 'bg-gray-400'
-              }`}></div>
-              <span className={`text-sm ${
-                isSubscribed ? 'text-green-600' : 'text-gray-500'
-              }`}>
-                {isSubscribed ? '已訂閱' : '未訂閱'}
-              </span>
-            </div>
-
-            {/* 股票ID */}
-            <span className="text-sm text-gray-500">
-              ID: {stockId}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className="p-4">
+    <div className="w-full">
+      {/* 當前價格和圖表區域 */}
         {/* 當前價格信息 */}
         {priceData && (
           <div className="mb-4 p-3 bg-gray-50 rounded-lg">
@@ -390,7 +397,6 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
             </div>
           </div>
         )}
-      </div>
     </div>
   );
 };

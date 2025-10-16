@@ -97,18 +97,28 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
 
   // 當股票列表載入後，自動選擇第一個股票或 URL 參數指定的股票
   useEffect(() => {
-    if (currentListStocks.length > 0 && !selectedStockId) {
-      // 如果 URL 有指定股票 ID，優先選擇該股票
-      if (stockIdFromUrl) {
-        const stockId = parseInt(stockIdFromUrl, 10);
-        const stockExists = currentListStocks.find(s => s.id === stockId);
-        if (stockExists) {
-          setSelectedStockId(stockId);
-          return;
+    if (currentListStocks.length > 0) {
+      // 如果已經選擇了股票，檢查該股票是否在當前清單中
+      if (selectedStockId) {
+        const stockExists = currentListStocks.find(s => s.id === selectedStockId);
+        // 如果選中的股票不在當前清單中，重新選擇第一支股票
+        if (!stockExists) {
+          setSelectedStockId(currentListStocks[0].id);
         }
+      } else {
+        // 如果沒有選擇股票
+        // 如果 URL 有指定股票 ID，優先選擇該股票
+        if (stockIdFromUrl) {
+          const stockId = parseInt(stockIdFromUrl, 10);
+          const stockExists = currentListStocks.find(s => s.id === stockId);
+          if (stockExists) {
+            setSelectedStockId(stockId);
+            return;
+          }
+        }
+        // 否則選擇第一個股票
+        setSelectedStockId(currentListStocks[0].id);
       }
-      // 否則選擇第一個股票
-      setSelectedStockId(currentListStocks[0].id);
     }
   }, [currentListStocks, selectedStockId, stockIdFromUrl]);
 
@@ -157,18 +167,21 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
   const handleSearch = async () => {
     if (!symbolInput.trim()) return;
 
+    // 先清除舊狀態，避免訂閱時序問題
+    setDirectStock(null);
+    setSelectedListId(null);
+    setSelectedStockId(null);
     setIsSearching(true);
     setSearchError(null);
 
     try {
       const result = await ensureStockExistsAuto(symbolInput.trim());
 
-      // 設置直接查詢的股票
-      setDirectStock(result.stock);
-
-      // 清除清單選擇（視覺上變灰）
-      setSelectedListId(null);
-      setSelectedStockId(null);
+      // 確保 API 返回後才設置新股票
+      // 使用 setTimeout 確保狀態清除後才設置新值，避免 WebSocket 訂閱時序問題
+      setTimeout(() => {
+        setDirectStock(result.stock);
+      }, 100);
 
     } catch (error: any) {
       setSearchError(error.message || '查詢股票失敗');
@@ -204,23 +217,6 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
             <p className="text-gray-600">
               選擇清單和股票，查看即時價格走勢和技術指標
             </p>
-          </div>
-
-          {/* 連接狀態 */}
-          <div className="text-right">
-            <div className={`inline-flex items-center px-3 py-2 rounded-full text-sm font-medium ${
-              isConnected
-                ? 'bg-green-100 text-green-800'
-                : 'bg-red-100 text-red-800'
-            }`}>
-              <div className={`w-2 h-2 rounded-full mr-2 ${
-                isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
-              }`}></div>
-              {isConnected ? '即時連線' : '連線中斷'}
-            </div>
-            {wsError && (
-              <p className="text-xs text-red-600 mt-1">{wsError}</p>
-            )}
           </div>
         </div>
       </div>
@@ -489,18 +485,17 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
       )}
 
       {/* 主要內容區域 */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        {/* 主圖表 */}
-        <div className="xl:col-span-2">
+      <div className="space-y-8">
+        {/* 主圖表 - 全寬顯示 */}
+        <div className="w-full">
           {selectedStock ? (
             <div className="bg-white shadow rounded-lg overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-xl font-bold text-gray-900">
-                      {selectedStock.symbol}
+                    <h2 className="text-2xl font-bold text-gray-900">
+                      {selectedStock.symbol} - {selectedStock.name}
                     </h2>
-                    <p className="text-sm text-gray-600 mt-1">{selectedStock.name}</p>
                   </div>
                   {selectedStock.latest_price?.date && (
                     <div className="text-sm text-gray-500">
@@ -517,12 +512,12 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
                     symbol: selectedStock.symbol,
                     name: selectedStock.name
                   }}
-                  height={600}
+                  height={500}
                 />
               </div>
             </div>
           ) : (
-            <div className="bg-white shadow rounded-lg p-6 h-[600px] flex items-center justify-center">
+            <div className="bg-white shadow rounded-lg p-6 h-[500px] flex items-center justify-center">
               <div className="text-center text-gray-500">
                 <div className="text-6xl mb-4">📊</div>
                 <div className="text-xl font-medium mb-2">請選擇清單和股票</div>
@@ -532,11 +527,8 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
           )}
         </div>
 
-        {/* 側邊欄 */}
-        <div className="xl:col-span-1 space-y-6">
-          {/* 即時信號 */}
-          <RealtimeSignals />
-
+        {/* 下方區域 - 分成兩欄 */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
           {/* 股票列表 */}
           {currentListStocks.length > 0 && (
             <div className="bg-white shadow rounded-lg p-6">
@@ -593,6 +585,11 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
               </div>
             </div>
           )}
+
+          {/* 即時信號 */}
+          <div>
+            <RealtimeSignals />
+          </div>
         </div>
       </div>
     </div>

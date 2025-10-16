@@ -13,9 +13,11 @@ import {
   deleteStockList
 } from '@/store/slices/stockListSlice';
 import { addToast } from '@/store/slices/uiSlice';
-import { Plus, ChevronDown, Trash2, Check, Edit2 } from 'lucide-react';
+import { Plus, ChevronDown, Trash2, Check, Edit2, ArrowUpDown } from 'lucide-react';
 import StockListModal from '../StockList/StockListModal';
 import StockListEditModal from './StockListEditModal';
+import StockListReorderModal from './StockListReorderModal';
+import * as stockListApi from '@/services/stockListApi';
 
 interface UnifiedStockSelectorProps {
   onListChange?: (listId: number | null) => void;
@@ -34,6 +36,7 @@ export default function UnifiedStockSelector({
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isReorderModalOpen, setIsReorderModalOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -151,6 +154,36 @@ export default function UnifiedStockSelector({
     }
   };
 
+  const handleSaveReorder = async (reorderedLists: any[]) => {
+    try {
+      // 準備排序數據
+      const list_orders = reorderedLists.map((list, index) => ({
+        id: list.id,
+        sort_order: index
+      }));
+
+      // 調用 API
+      await stockListApi.reorderStockLists({ list_orders });
+
+      // 重新載入清單
+      await dispatch(fetchStockLists());
+
+      dispatch(addToast({
+        type: 'success',
+        title: '成功',
+        message: '清單順序已更新'
+      }));
+
+      setIsReorderModalOpen(false);
+    } catch (error: any) {
+      dispatch(addToast({
+        type: 'error',
+        title: '錯誤',
+        message: error?.message || error?.toString() || '更新順序失敗'
+      }));
+    }
+  };
+
   // 獲取當前顯示的標籤
   const getCurrentLabel = () => {
     if (viewMode === 'portfolio') return '我的持倉';
@@ -228,7 +261,7 @@ export default function UnifiedStockSelector({
               )}
             </div>
 
-            {/* 新建清單選項 */}
+            {/* 新建清單和排序選項 */}
             {!loading && (
               <>
                 <div className="border-t border-gray-200"></div>
@@ -239,6 +272,18 @@ export default function UnifiedStockSelector({
                   <Plus className="w-4 h-4" />
                   新建清單
                 </button>
+                {lists.length > 1 && (
+                  <button
+                    onClick={() => {
+                      setIsReorderModalOpen(true);
+                      setIsDropdownOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                  >
+                    <ArrowUpDown className="w-4 h-4" />
+                    調整清單順序
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -283,6 +328,14 @@ export default function UnifiedStockSelector({
           list={currentList}
         />
       )}
+
+      {/* 排序清單彈窗 */}
+      <StockListReorderModal
+        isOpen={isReorderModalOpen}
+        onClose={() => setIsReorderModalOpen(false)}
+        lists={lists}
+        onSave={handleSaveReorder}
+      />
     </div>
   );
 }

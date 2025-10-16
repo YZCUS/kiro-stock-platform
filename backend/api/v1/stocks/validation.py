@@ -101,8 +101,39 @@ async def ensure_stock_exists(
 
         if existing_stock:
             # 股票已存在，獲取最新價格
-            from api.schemas.stocks import StockResponse
+            from api.schemas.stocks import StockResponse, LatestPriceInfo
+            from domain.models.price_history import PriceHistory
+            from sqlalchemy import select, desc
+
             stock_data = StockResponse.model_validate(existing_stock).model_dump()
+
+            # 獲取最新兩天的價格數據用於計算漲跌
+            price_query = select(PriceHistory).where(
+                PriceHistory.stock_id == existing_stock.id
+            ).order_by(desc(PriceHistory.date)).limit(2)
+            price_result = await db.execute(price_query)
+            prices = price_result.scalars().all()
+
+            if prices and len(prices) > 0:
+                latest = prices[0]
+                close_price = float(latest.close_price) if latest.close_price else None
+
+                # 計算漲跌
+                change = None
+                change_percent = None
+                if close_price and len(prices) > 1:
+                    prev_close = float(prices[1].close_price) if prices[1].close_price else None
+                    if prev_close and prev_close != 0:
+                        change = close_price - prev_close
+                        change_percent = (change / prev_close) * 100
+
+                stock_data['latest_price'] = {
+                    'close': close_price,
+                    'change': change,
+                    'change_percent': change_percent,
+                    'date': str(latest.date) if latest.date else None,
+                    'volume': latest.volume
+                }
 
             return {
                 "exists": True,
@@ -132,12 +163,12 @@ async def ensure_stock_exists(
         )
         new_stock = await stock_repo.create(db, obj_in=stock_create)
 
-        # 抓取歷史價格（最近90天）
+        # 抓取歷史價格（過去一年）
         try:
             await data_collection_service.collect_stock_prices(
                 db=db,
                 stock_id=new_stock.id,
-                days=90
+                period='1y'  # 使用 yfinance period 參數，獲取完整一年資料
             )
         except Exception as price_error:
             import logging
@@ -146,8 +177,39 @@ async def ensure_stock_exists(
 
         # 重新獲取股票以包含最新價格
         await db.refresh(new_stock)
-        from api.schemas.stocks import StockResponse
+        from api.schemas.stocks import StockResponse, LatestPriceInfo
+        from domain.models.price_history import PriceHistory
+        from sqlalchemy import select, desc
+
         stock_data = StockResponse.model_validate(new_stock).model_dump()
+
+        # 獲取最新兩天的價格數據用於計算漲跌
+        price_query = select(PriceHistory).where(
+            PriceHistory.stock_id == new_stock.id
+        ).order_by(desc(PriceHistory.date)).limit(2)
+        price_result = await db.execute(price_query)
+        prices = price_result.scalars().all()
+
+        if prices and len(prices) > 0:
+            latest = prices[0]
+            close_price = float(latest.close_price) if latest.close_price else None
+
+            # 計算漲跌
+            change = None
+            change_percent = None
+            if close_price and len(prices) > 1:
+                prev_close = float(prices[1].close_price) if prices[1].close_price else None
+                if prev_close and prev_close != 0:
+                    change = close_price - prev_close
+                    change_percent = (change / prev_close) * 100
+
+            stock_data['latest_price'] = {
+                'close': close_price,
+                'change': change,
+                'change_percent': change_percent,
+                'date': str(latest.date) if latest.date else None,
+                'volume': latest.volume
+            }
 
         return {
             "exists": False,

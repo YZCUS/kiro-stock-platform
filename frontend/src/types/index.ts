@@ -442,6 +442,7 @@ export interface StockList {
   name: string;
   description?: string | null;
   is_default: boolean;
+  sort_order: number;
   stocks_count: number;
   created_at: string;
   updated_at: string;
@@ -459,6 +460,12 @@ export interface StockListUpdateRequest {
   name?: string;
   description?: string;
   is_default?: boolean;
+  sort_order?: number;
+}
+
+// 批量更新清單排序請求
+export interface StockListReorderRequest {
+  list_orders: { id: number; sort_order: number }[];
 }
 
 // 股票清單列表響應

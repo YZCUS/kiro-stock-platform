@@ -6,6 +6,7 @@ import type {
   StockList,
   StockListCreateRequest,
   StockListUpdateRequest,
+  StockListReorderRequest,
   StockListListResponse,
   StockListItem,
   StockListItemAddRequest,
@@ -92,6 +93,23 @@ export const removeStockFromList = async (
   return ApiService.delete(`${BASE_URL}/${listId}/stocks/${stockId}`);
 };
 
+/**
+ * 批量更新清單排序
+ */
+export const reorderStockLists = async (data: StockListReorderRequest): Promise<{ message: string; updated_count: number }> => {
+  return ApiService.post<{ message: string; updated_count: number }>(`${BASE_URL}/reorder`, data);
+};
+
+/**
+ * 批量更新清單內股票排序
+ */
+export const reorderListStocks = async (
+  listId: number,
+  data: { stock_orders: { stock_id: number; sort_order: number }[] }
+): Promise<{ message: string; updated_count: number }> => {
+  return ApiService.post<{ message: string; updated_count: number }>(`${BASE_URL}/${listId}/stocks/reorder`, data);
+};
+
 export default {
   getStockLists,
   getStockList,
@@ -102,4 +120,6 @@ export default {
   addStockToList,
   batchAddStocksToList,
   removeStockFromList,
+  reorderStockLists,
+  reorderListStocks,
 };

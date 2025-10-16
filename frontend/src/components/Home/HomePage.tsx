@@ -19,8 +19,8 @@ export default function HomePage() {
     websocket: 'checking'
   });
 
-  // 獲取股票數據用於統計
-  const { data: stocksResponse } = useStocks({ page: 1, pageSize: 1000 });
+  // 獲取股票數據用於統計（後端限制 per_page 最大為 200）
+  const { data: stocksResponse } = useStocks({ page: 1, pageSize: 200 });
 
   // 計算統計數據
   const watchlistCount = stocksResponse?.items?.filter(s => s.is_watchlist).length || 0;
@@ -225,7 +225,7 @@ export default function HomePage() {
           </Card>
         </Link>
 
-        <Link href="/charts">
+        <Link href="/dashboard">
           <Card className="hover:shadow-lg transition-all hover:scale-105 cursor-pointer">
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
@@ -239,11 +239,11 @@ export default function HomePage() {
           </Card>
         </Link>
 
-        <Link href="/signals">
+        <Link href="/portfolio">
           <Card className="hover:shadow-lg transition-all hover:scale-105 cursor-pointer">
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
-                交易信號
+                投資組合
                 <ArrowRight className="w-5 h-5" />
               </CardTitle>
               <CardDescription>

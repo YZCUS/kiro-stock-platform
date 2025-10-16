@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAppDispatch } from '@/store';
 import { loginSuccess, setAuthLoading, setAuthError } from '@/store/slices/authSlice';
@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const dispatch = useAppDispatch();
   const [formData, setFormData] = useState({
     username: '',
@@ -21,6 +22,15 @@ export default function LoginPage() {
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [redirectPath, setRedirectPath] = useState('/');
+
+  // 獲取 redirect 參數
+  useEffect(() => {
+    const redirect = searchParams.get('redirect');
+    if (redirect) {
+      setRedirectPath(redirect);
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,7 +44,7 @@ export default function LoginPage() {
         user: response.user,
         token: response.access_token,
       }));
-      router.push('/');
+      router.push(redirectPath);
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || '登入失敗，請檢查您的帳號密碼';
       setError(errorMsg);

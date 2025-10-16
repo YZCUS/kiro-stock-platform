@@ -221,15 +221,15 @@ export function useSignalUpdates() {
 
 /**
  * 即時技術指標更新 Hook
+ *
+ * 注意：此 hook 不訂閱 WebSocket，只監聽事件
+ * 訂閱由 usePriceUpdates 處理以避免重複訂閱
  */
 export function useIndicatorUpdates(stockId: number | null) {
   const [indicators, setIndicators] = useState<Record<string, any>>({});
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
-  // 訂閱股票
-  const { isSubscribed } = useStockSubscription(stockId);
-
-  // 監聽指標更新
+  // 監聽指標更新（不訂閱，避免與 usePriceUpdates 重複）
   useWebSocketEvent(
     WebSocketEventType.INDICATOR_UPDATE,
     useCallback((message: WebSocketMessage) => {
@@ -247,7 +247,7 @@ export function useIndicatorUpdates(stockId: number | null) {
   return {
     indicators,
     lastUpdate,
-    isSubscribed,
+    isSubscribed: stockId !== null, // 假設如果有 stockId 就是已訂閱
   };
 }
 

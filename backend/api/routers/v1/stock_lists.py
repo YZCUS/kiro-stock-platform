@@ -18,6 +18,7 @@ from domain.models.stock import Stock
 from api.schemas.stock_list import (
     StockListCreateRequest,
     StockListUpdateRequest,
+    StockListReorderRequest,
     StockListResponse,
     StockListListResponse,
     StockListItemAddRequest,
@@ -55,6 +56,7 @@ async def get_user_stock_lists(
                     'name': lst.name,
                     'description': lst.description,
                     'is_default': lst.is_default,
+                    'sort_order': lst.sort_order,
                     'stocks_count': stocks_count,
                     'created_at': lst.created_at,
                     'updated_at': lst.updated_at
@@ -120,6 +122,7 @@ async def create_stock_list(
             name=new_list.name,
             description=new_list.description,
             is_default=new_list.is_default,
+            sort_order=new_list.sort_order,
             stocks_count=0,
             created_at=new_list.created_at,
             updated_at=new_list.updated_at
@@ -164,6 +167,7 @@ async def get_stock_list(
             name=stock_list.name,
             description=stock_list.description,
             is_default=stock_list.is_default,
+            sort_order=stock_list.sort_order,
             stocks_count=stocks_count,
             created_at=stock_list.created_at,
             updated_at=stock_list.updated_at
@@ -243,6 +247,7 @@ async def update_stock_list(
             name=stock_list.name,
             description=stock_list.description,
             is_default=stock_list.is_default,
+            sort_order=stock_list.sort_order,
             stocks_count=stocks_count,
             created_at=stock_list.created_at,
             updated_at=stock_list.updated_at
@@ -316,10 +321,10 @@ async def get_list_stocks(
         if not stock_list:
             raise HTTPException(status_code=404, detail="清單不存在")
 
-        # 獲取清單項目（預載入 stock）
+        # 獲取清單項目（預載入 stock，按 sort_order 排序）
         items_query = select(UserStockListItem).where(
             UserStockListItem.list_id == list_id
-        ).options(selectinload(UserStockListItem.stock))
+        ).options(selectinload(UserStockListItem.stock)).order_by(UserStockListItem.sort_order, UserStockListItem.created_at)
         items_result = await db.execute(items_query)
         items = items_result.scalars().all()
 
@@ -578,3 +583,108 @@ async def remove_stock_from_list(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"移除股票失敗: {str(e)}")
+
+
+@router.post("/reorder", response_model=dict)
+async def reorder_stock_lists(
+    request: StockListReorderRequest,
+    db: AsyncSession = Depends(get_database_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """批量更新清單排序"""
+    try:
+        from sqlalchemy import select
+
+        # 驗證所有清單都屬於當前用戶
+        list_ids = [item['id'] for item in request.list_orders]
+        query = select(UserStockList).where(
+            UserStockList.id.in_(list_ids),
+            UserStockList.user_id == current_user.id
+        )
+        result = await db.execute(query)
+        lists = result.scalars().all()
+
+        if len(lists) != len(list_ids):
+            raise HTTPException(status_code=404, detail="部分清單不存在或不屬於當前用戶")
+
+        # 更新每個清單的 sort_order
+        for item in request.list_orders:
+            list_id = item['id']
+            sort_order = item['sort_order']
+
+            stock_list = next((lst for lst in lists if lst.id == list_id), None)
+            if stock_list:
+                stock_list.sort_order = sort_order
+
+        await db.commit()
+
+        return {
+            "message": "清單排序已更新",
+            "updated_count": len(list_ids)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"更新排序失敗: {str(e)}")
+
+
+@router.post("/{list_id}/stocks/reorder", response_model=dict)
+async def reorder_list_stocks(
+    list_id: int,
+    request: dict,
+    db: AsyncSession = Depends(get_database_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """批量更新清單內股票排序"""
+    try:
+        from sqlalchemy import select
+
+        # 驗證清單所有權
+        list_query = select(UserStockList).where(
+            UserStockList.id == list_id,
+            UserStockList.user_id == current_user.id
+        )
+        list_result = await db.execute(list_query)
+        stock_list = list_result.scalar_one_or_none()
+
+        if not stock_list:
+            raise HTTPException(status_code=404, detail="清單不存在")
+
+        # 獲取 stock_orders
+        stock_orders = request.get('stock_orders', [])
+        if not stock_orders:
+            raise HTTPException(status_code=400, detail="stock_orders 不能為空")
+
+        # 驗證所有股票都在清單中
+        stock_ids = [item['stock_id'] for item in stock_orders]
+        items_query = select(UserStockListItem).where(
+            UserStockListItem.list_id == list_id,
+            UserStockListItem.stock_id.in_(stock_ids)
+        )
+        items_result = await db.execute(items_query)
+        items = items_result.scalars().all()
+
+        if len(items) != len(stock_ids):
+            raise HTTPException(status_code=404, detail="部分股票不在清單中")
+
+        # 更新每個股票的 sort_order
+        for order_item in stock_orders:
+            stock_id = order_item['stock_id']
+            sort_order = order_item['sort_order']
+
+            item = next((i for i in items if i.stock_id == stock_id), None)
+            if item:
+                item.sort_order = sort_order
+
+        await db.commit()
+
+        return {
+            "message": "股票排序已更新",
+            "updated_count": len(stock_ids)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"更新排序失敗: {str(e)}")

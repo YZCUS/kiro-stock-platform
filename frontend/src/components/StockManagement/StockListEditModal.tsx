@@ -21,26 +21,13 @@ interface StockListEditModalProps {
   };
 }
 
-interface StockInList {
-  id: number;
-  stock_id: number;
-  list_id: number;
-  position: number;
-  stock: {
-    id: number;
-    symbol: string;
-    name: string;
-    market: string;
-  };
-}
-
 export default function StockListEditModal({ isOpen, onClose, list }: StockListEditModalProps) {
   const dispatch = useAppDispatch();
   const { currentListStocks } = useAppSelector((state) => state.stockList);
 
   const [listName, setListName] = useState(list.name);
   const [description, setDescription] = useState(list.description || '');
-  const [stocks, setStocks] = useState<StockInList[]>([]);
+  const [stocks, setStocks] = useState<any[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -51,13 +38,12 @@ export default function StockListEditModal({ isOpen, onClose, list }: StockListE
     }
   }, [isOpen, list.id, dispatch]);
 
-  // 更新本地股票列表
+  // 更新本地股票列表（currentListStocks 現在是 Stock[] 類型）
   useEffect(() => {
     if (currentListStocks.length > 0) {
-      const sortedStocks = [...currentListStocks].sort((a, b) =>
-        (a.position || 0) - (b.position || 0)
-      );
-      setStocks(sortedStocks);
+      setStocks([...currentListStocks]);
+    } else {
+      setStocks([]);
     }
   }, [currentListStocks]);
 
@@ -130,19 +116,25 @@ export default function StockListEditModal({ isOpen, onClose, list }: StockListE
         }
       })).unwrap();
 
-      // TODO: 這裡需要後端 API 支援更新股票順序
-      // 暫時先只更新清單名稱
-      // 如果後端有 API，可以在這裡調用
-      // await updateStockPositions(list.id, stocks.map((s, idx) => ({
-      //   stock_id: s.stock_id,
-      //   position: idx
-      // })));
+      // 更新股票順序
+      if (stocks.length > 0) {
+        const stockListApi = await import('@/services/stockListApi');
+        const stock_orders = stocks.map((stock, index) => ({
+          stock_id: stock.id,
+          sort_order: index
+        }));
+
+        await stockListApi.reorderListStocks(list.id, { stock_orders });
+      }
 
       dispatch(addToast({
         type: 'success',
         title: '成功',
         message: '清單已更新'
       }));
+
+      // 重新載入清單
+      await dispatch(fetchListStocks(list.id));
 
       onClose();
     } catch (error: any) {
@@ -251,17 +243,17 @@ export default function StockListEditModal({ isOpen, onClose, list }: StockListE
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-gray-900">
-                            {item.stock.symbol}
+                            {item.symbol}
                           </span>
                           <span className="text-sm text-gray-600 truncate">
-                            {item.stock.name}
+                            {item.name}
                           </span>
                           <span className={`text-xs px-2 py-0.5 rounded ${
-                            item.stock.market === 'TW'
+                            item.market === 'TW'
                               ? 'bg-blue-100 text-blue-700'
                               : 'bg-green-100 text-green-700'
                           }`}>
-                            {item.stock.market}
+                            {item.market}
                           </span>
                         </div>
                       </div>

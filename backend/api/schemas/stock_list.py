@@ -22,6 +22,12 @@ class StockListUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="清單名稱")
     description: Optional[str] = Field(None, max_length=500, description="清單描述")
     is_default: Optional[bool] = Field(None, description="是否為預設清單")
+    sort_order: Optional[int] = Field(None, description="排序順序")
+
+
+class StockListReorderRequest(BaseModel):
+    """批量更新清單排序請求"""
+    list_orders: List[dict] = Field(..., description="清單排序列表，格式: [{'id': 1, 'sort_order': 0}, ...]")
 
 
 class StockListResponse(BaseModel):
@@ -31,6 +37,7 @@ class StockListResponse(BaseModel):
     name: str
     description: Optional[str] = None
     is_default: bool
+    sort_order: int = 0
     stocks_count: int = 0
     created_at: datetime
     updated_at: datetime

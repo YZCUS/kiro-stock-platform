@@ -569,3 +569,84 @@ class DataCollectionService:
             "records_per_minute": 150.0,
             "success_rate": 0.92
         }
+
+    async def collect_stock_prices(
+        self,
+        db: AsyncSession,
+        stock_id: int,
+        days: Optional[int] = None,
+        period: Optional[str] = None
+    ) -> int:
+        """
+        收集股票價格資料（支援 yfinance period 參數）
+
+        Args:
+            db: 資料庫會話
+            stock_id: 股票 ID
+            days: 抓取最近 N 天（與 period 互斥）
+            period: yfinance period 參數（1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max）
+
+        Returns:
+            抓取到的記錄數
+        """
+        import asyncio
+        import logging
+        from infrastructure.external.yfinance_wrapper import yfinance_wrapper
+
+        logger = logging.getLogger(__name__)
+
+        # 取得股票資訊
+        stock = await self.stock_repo.get(db, stock_id)
+        if not stock:
+            raise ValueError(f"股票 ID {stock_id} 不存在")
+
+        # 使用 period 或 days 參數
+        loop = asyncio.get_event_loop()
+        try:
+            if period:
+                logger.info(f"Collecting {stock.symbol} with period={period}")
+                df = await loop.run_in_executor(
+                    None,
+                    lambda: yfinance_wrapper.get_ticker(stock.symbol).history(period=period)
+                )
+            else:
+                if not days:
+                    days = 90  # 預設 90 天
+                end_dt = datetime.now()
+                start_dt = end_dt - timedelta(days=days)
+                logger.info(f"Collecting {stock.symbol} from {start_dt.date()} to {end_dt.date()}")
+                df = await loop.run_in_executor(
+                    None,
+                    lambda: yfinance_wrapper.get_ticker(stock.symbol).history(
+                        start=start_dt.isoformat(),
+                        end=end_dt.isoformat()
+                    )
+                )
+
+            # 批次儲存
+            if df is not None and not df.empty:
+                records = []
+                for date_idx, row in df.iterrows():
+                    record_date = date_idx.date() if hasattr(date_idx, 'date') else date_idx
+                    record = {
+                        'stock_id': stock_id,
+                        'date': record_date,
+                        'open_price': float(row['Open']) if row['Open'] else None,
+                        'high_price': float(row['High']) if row['High'] else None,
+                        'low_price': float(row['Low']) if row['Low'] else None,
+                        'close_price': float(row['Close']) if row['Close'] else None,
+                        'volume': int(row['Volume']) if row['Volume'] else 0,
+                        'adjusted_close': float(row.get('Adj Close', row['Close'])) if row.get('Adj Close', row['Close']) else None
+                    }
+                    records.append(record)
+
+                await self.price_repo.create_batch(db, records)
+                logger.info(f"Successfully saved {len(records)} records for {stock.symbol}")
+                return len(records)
+            else:
+                logger.warning(f"No data retrieved for {stock.symbol}")
+                return 0
+
+        except Exception as e:
+            logger.error(f"Error collecting prices for {stock.symbol}: {str(e)}")
+            raise
