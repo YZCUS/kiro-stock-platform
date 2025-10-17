@@ -36,7 +36,10 @@ services:
     container_name: stock_analysis_backend
     ports:
       - "8000:8000"
+    env_file:
+      - ./backend/.env  # 使用 backend 目錄下的 .env 文件
     environment:
+      # 容器內部連接使用服務名稱（覆蓋 .env 中的設定）
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stock_analysis
       - REDIS_URL=redis://redis:6379
       - PYTHONPATH=/app

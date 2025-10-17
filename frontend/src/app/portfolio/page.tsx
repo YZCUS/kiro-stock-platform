@@ -311,7 +311,7 @@ export default function PortfolioPage() {
                     </div>
                     <div className="mt-4 flex gap-2">
                       <Button variant="outline" size="sm" asChild>
-                        <Link href={`/charts?stock=${portfolio.stock_id}`}>
+                        <Link href={`/charts?stock=${portfolio.stock_symbol}`}>
                           查看圖表
                         </Link>
                       </Button>

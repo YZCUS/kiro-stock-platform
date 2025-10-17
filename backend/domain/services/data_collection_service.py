@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.repositories.stock_repository_interface import IStockRepository
 from domain.repositories.price_history_repository_interface import IPriceHistoryRepository
+from domain.repositories.price_data_source_interface import IPriceDataSource
 from infrastructure.cache.redis_cache_service import ICacheService
 
 
@@ -64,11 +65,13 @@ class DataCollectionService:
         self,
         stock_repository: IStockRepository,
         price_repository: IPriceHistoryRepository,
-        cache_service: ICacheService
+        cache_service: ICacheService,
+        price_data_source: IPriceDataSource
     ):
         self.stock_repo = stock_repository
         self.price_repo = price_repository
         self.cache = cache_service
+        self.price_source = price_data_source
 
         # 業務配置
         self.batch_size = 50
@@ -129,7 +132,7 @@ class DataCollectionService:
         # 執行數據收集 (這裡會調用Infrastructure層的實現)
         try:
             collected_data = await self._perform_data_collection(
-                stock.symbol, start_date, end_date
+                stock.symbol, start_date, end_date, stock.market
             )
 
             # 儲存數據
@@ -448,12 +451,13 @@ class DataCollectionService:
         self,
         symbol: str,
         start_date: date,
-        end_date: date
+        end_date: date,
+        market: str = "US"
     ) -> List[Dict[str, Any]]:
         """執行實際的數據收集，包含重試邏輯"""
         import asyncio
         import logging
-        from infrastructure.external.yfinance_wrapper import yfinance_wrapper
+        from domain.repositories.price_data_source_interface import DataUnavailableError
 
         logger = logging.getLogger(__name__)
         max_retries = 3
@@ -466,33 +470,17 @@ class DataCollectionService:
                     logger.info(f"Retry {attempt + 1}/{max_retries} for {symbol}, waiting {delay}s")
                     await asyncio.sleep(delay)
 
-                loop = asyncio.get_event_loop()
-                # Yahoo Finance 的 end 參數是 exclusive，需要加1天才能包含 end_date 的數據
-                end_date_inclusive = end_date + timedelta(days=1)
-                df = await loop.run_in_executor(
-                    None,
-                    lambda: yfinance_wrapper.get_ticker(symbol).history(
-                        start=start_date.isoformat(),
-                        end=end_date_inclusive.isoformat()
-                    )
+                # 使用抽象數據源獲取歷史價格
+                result_data = await self.price_source.fetch_historical_prices(
+                    symbol=symbol,
+                    start_date=start_date,
+                    end_date=end_date,
+                    market=market
                 )
 
-                if df is None or df.empty:
+                if not result_data:
                     logger.warning(f"No data returned for {symbol}")
                     return []
-
-                result_data = []
-                for date_idx, row in df.iterrows():
-                    data_point = {
-                        'date': date_idx.date() if hasattr(date_idx, 'date') else date_idx,
-                        'open': float(row.get('Open', 0)),
-                        'high': float(row.get('High', 0)),
-                        'low': float(row.get('Low', 0)),
-                        'close': float(row.get('Close', 0)),
-                        'volume': int(row.get('Volume', 0)),
-                        'adj_close': float(row.get('Adj Close', row.get('Close', 0)))
-                    }
-                    result_data.append(data_point)
 
                 logger.info(f"Successfully collected {len(result_data)} records for {symbol}")
                 return result_data
@@ -592,9 +580,7 @@ class DataCollectionService:
         Returns:
             抓取到的記錄數
         """
-        import asyncio
         import logging
-        from infrastructure.external.yfinance_wrapper import yfinance_wrapper
 
         logger = logging.getLogger(__name__)
 
@@ -604,42 +590,44 @@ class DataCollectionService:
             raise ValueError(f"股票 ID {stock_id} 不存在")
 
         # 使用 period 或 days 參數
-        loop = asyncio.get_event_loop()
         try:
+            price_data = []
+
             if period:
                 logger.info(f"Collecting {stock.symbol} with period={period}")
-                df = await loop.run_in_executor(
-                    None,
-                    lambda: yfinance_wrapper.get_ticker(stock.symbol).history(period=period)
+                # 使用抽象數據源獲取價格數據（by period）
+                price_data = await self.price_source.fetch_historical_prices_by_period(
+                    symbol=stock.symbol,
+                    period=period,
+                    market=stock.market
                 )
             else:
                 if not days:
                     days = 90  # 預設 90 天
-                end_dt = datetime.now()
+                end_dt = date.today()
                 start_dt = end_dt - timedelta(days=days)
-                logger.info(f"Collecting {stock.symbol} from {start_dt.date()} to {end_dt.date()}")
-                df = await loop.run_in_executor(
-                    None,
-                    lambda: yfinance_wrapper.get_ticker(stock.symbol).history(
-                        start=start_dt.isoformat(),
-                        end=end_dt.isoformat()
-                    )
+                logger.info(f"Collecting {stock.symbol} from {start_dt} to {end_dt}")
+                # 使用抽象數據源獲取價格數據（by date range）
+                price_data = await self.price_source.fetch_historical_prices(
+                    symbol=stock.symbol,
+                    start_date=start_dt,
+                    end_date=end_dt,
+                    market=stock.market
                 )
 
             # 批次儲存
-            if df is not None and not df.empty:
+            if price_data:
                 records = []
-                for date_idx, row in df.iterrows():
-                    record_date = date_idx.date() if hasattr(date_idx, 'date') else date_idx
+                for price_point in price_data:
                     record = {
                         'stock_id': stock_id,
-                        'date': record_date,
-                        'open_price': float(row['Open']) if row['Open'] else None,
-                        'high_price': float(row['High']) if row['High'] else None,
-                        'low_price': float(row['Low']) if row['Low'] else None,
-                        'close_price': float(row['Close']) if row['Close'] else None,
-                        'volume': int(row['Volume']) if row['Volume'] else 0,
-                        'adjusted_close': float(row.get('Adj Close', row['Close'])) if row.get('Adj Close', row['Close']) else None
+                        'date': price_point['date'],
+                        'open_price': price_point.get('open'),
+                        'high_price': price_point.get('high'),
+                        'low_price': price_point.get('low'),
+                        'close_price': price_point.get('close'),
+                        'volume': price_point.get('volume', 0),
+                        'adjusted_close': price_point.get('adj_close')
                     }
                     records.append(record)
 

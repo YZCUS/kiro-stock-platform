@@ -110,17 +110,48 @@ def provide_websocket_manager(
 
 
 # =============================================================================
+# Price Data Source 依賴
+# =============================================================================
+
+def get_price_data_source(
+    settings: Settings = Depends(get_settings)
+) -> 'IPriceDataSource':
+    """取得價格數據源 (根據環境變數配置)"""
+    from domain.repositories.price_data_source_interface import IPriceDataSource
+    from infrastructure.external.price_data_sources import YahooFinanceSource
+
+    # 根據配置選擇數據源
+    source_type = settings.external_api.price_data_source.lower()
+
+    if source_type == "yahoo_finance":
+        return YahooFinanceSource()
+    # elif source_type == "alpha_vantage":
+    #     from infrastructure.external.price_data_sources import AlphaVantageSource
+    #     return AlphaVantageSource()
+    # elif source_type == "fmp":
+    #     from infrastructure.external.price_data_sources import FMPSource
+    #     return FMPSource()
+    else:
+        # 預設使用 Yahoo Finance
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Unknown price data source: {source_type}, using Yahoo Finance as default")
+        return YahooFinanceSource()
+
+
+# =============================================================================
 # Repository 依賴 (新的Clean Architecture實現)
 # =============================================================================
 
 def get_stock_repository(
-    db: AsyncSession = Depends(get_database_session)
+    db: AsyncSession = Depends(get_database_session),
+    price_data_source: 'IPriceDataSource' = Depends(get_price_data_source)
 ) -> 'IStockRepository':
     """取得股票儲存庫 (Clean Architecture版本)"""
     from domain.repositories.stock_repository_interface import IStockRepository
     from infrastructure.persistence.stock_repository import StockRepository
 
-    return StockRepository(db)
+    return StockRepository(db, price_data_source)
 
 def get_price_history_repository_clean(
     db: AsyncSession = Depends(get_database_session)
@@ -181,12 +212,13 @@ def get_technical_analysis_service_clean(
 def get_data_collection_service_clean(
     stock_repo: 'IStockRepository' = Depends(get_stock_repository),
     price_repo: 'IPriceHistoryRepository' = Depends(get_price_history_repository_clean),
-    cache_service: ICacheService = Depends(get_cache_service)
+    cache_service: ICacheService = Depends(get_cache_service),
+    price_data_source: 'IPriceDataSource' = Depends(get_price_data_source)
 ) -> 'DataCollectionService':
     """取得數據收集服務 (Clean Architecture版本)"""
     from domain.services.data_collection_service import DataCollectionService
 
-    return DataCollectionService(stock_repo, price_repo, cache_service)
+    return DataCollectionService(stock_repo, price_repo, cache_service, price_data_source)
 
 
 def get_trading_signal_service_clean(

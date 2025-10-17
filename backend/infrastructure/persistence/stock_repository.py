@@ -8,8 +8,8 @@ from sqlalchemy import select, func, and_, or_
 import logging
 
 from domain.repositories.stock_repository_interface import IStockRepository
+from domain.repositories.price_data_source_interface import IPriceDataSource
 from domain.models.stock import Stock
-from infrastructure.external.yfinance_wrapper import yfinance_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +17,9 @@ logger = logging.getLogger(__name__)
 class StockRepository(IStockRepository):
     """股票儲存庫實現"""
 
-    def __init__(self, db_session: AsyncSession):
+    def __init__(self, db_session: AsyncSession, price_data_source: Optional[IPriceDataSource] = None):
         self.db = db_session
+        self.price_source = price_data_source
 
     async def get(self, db: AsyncSession, stock_id: int):
         """根據ID取得股票"""
@@ -113,45 +114,54 @@ class StockRepository(IStockRepository):
         # 如果沒有提供 name，嘗試從 Yahoo Finance 查詢公司名稱並驗證股票有效性
         stock_name = obj_in.name
 
-        if not stock_name:
+        if not stock_name and self.price_source:
             try:
-                logger.info(f"Fetching company name for {obj_in.symbol} from Yahoo Finance")
-                ticker = yfinance_wrapper.get_ticker(obj_in.symbol)
+                logger.info(f"Fetching company info for {obj_in.symbol} using price data source")
 
-                # 驗證股票是否能獲取歷史數據（檢查是否有效）
-                try:
-                    hist = ticker.history(period='5d')
-                    if hist.empty:
-                        error_msg = f"股票 {obj_in.symbol} 無法獲取價格數據，可能已下市或代碼錯誤"
-                        logger.error(error_msg)
-                        raise ValueError(error_msg)
-                    logger.info(f"股票 {obj_in.symbol} 驗證成功，可獲取價格數據")
-                except Exception as e:
-                    error_msg = f"股票 {obj_in.symbol} 驗證失敗: {str(e)}"
+                # 驗證股票代碼是否有效
+                is_valid = await self.price_source.validate_symbol(
+                    symbol=obj_in.symbol,
+                    market=obj_in.market
+                )
+
+                if not is_valid:
+                    error_msg = f"股票 {obj_in.symbol} 無法獲取價格數據，可能已下市或代碼錯誤"
                     logger.error(error_msg)
                     raise ValueError(error_msg)
 
-                # 嘗試獲取公司名稱
-                if hasattr(ticker, 'info') and ticker.info:
-                    # 優先使用 longName，其次使用 shortName
-                    stock_name = ticker.info.get('longName') or ticker.info.get('shortName')
+                logger.info(f"股票 {obj_in.symbol} 驗證成功，可獲取價格數據")
+
+                # 嘗試獲取公司資訊
+                try:
+                    stock_info = await self.price_source.get_stock_info(
+                        symbol=obj_in.symbol,
+                        market=obj_in.market
+                    )
+
+                    # 優先使用 long_name，其次使用 short_name
+                    stock_name = stock_info.get('long_name') or stock_info.get('short_name')
 
                     if stock_name:
                         logger.info(f"Found company name: {stock_name} for {obj_in.symbol}")
                     else:
                         logger.warning(f"No company name found for {obj_in.symbol}, using symbol as name")
                         stock_name = obj_in.symbol
-                else:
-                    logger.warning(f"No info available for {obj_in.symbol}, using symbol as name")
+
+                except Exception as e:
+                    logger.warning(f"Could not fetch company info for {obj_in.symbol}: {e}, using symbol as name")
                     stock_name = obj_in.symbol
 
             except ValueError:
                 # 重新拋出驗證錯誤
                 raise
             except Exception as e:
-                logger.error(f"Error fetching company name for {obj_in.symbol}: {e}")
-                # 如果獲取公司名稱失敗但沒有明確的驗證錯誤，仍然使用symbol作為名稱
+                logger.error(f"Error validating stock {obj_in.symbol}: {e}")
+                # 如果驗證失敗但沒有明確的錯誤，仍然使用symbol作為名稱
                 stock_name = obj_in.symbol
+        elif not stock_name:
+            # 如果沒有 price_source（向後兼容），使用 symbol 作為名稱
+            logger.warning(f"No price data source available, using symbol as name for {obj_in.symbol}")
+            stock_name = obj_in.symbol
 
         # 創建Stock實例
         db_obj = Stock(

@@ -41,8 +41,14 @@ class RedisSettings(BaseSettings):
 
 class ExternalAPISettings(BaseSettings):
     """外部 API 設定"""
+    # 價格數據源配置（不使用 env_prefix，直接讀取 PRICE_DATA_SOURCE）
+    price_data_source: str = Field("yahoo_finance")
+
+    # Yahoo Finance 配置
     yahoo_finance_timeout: int = Field(30, env="YAHOO_FINANCE_TIMEOUT")
     yahoo_finance_retries: int = Field(3, env="YAHOO_FINANCE_RETRIES")
+
+    # API 限流配置
     rate_limit_requests: int = Field(100, env="RATE_LIMIT_REQUESTS")
     rate_limit_period: int = Field(60, env="RATE_LIMIT_PERIOD")
 

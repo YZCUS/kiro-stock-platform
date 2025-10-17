@@ -11,7 +11,8 @@ from app.dependencies import (
     get_stock_service,
     get_data_validation_service_clean,
     get_data_collection_service_clean,
-    get_stock_repository
+    get_stock_repository,
+    get_price_data_source
 )
 from domain.services.data_validation_service import DataValidationService
 from domain.services.stock_service import StockService
@@ -23,44 +24,40 @@ router = APIRouter()
 async def validate_stock_symbol(
     symbol: str = Query(..., description="股票代號"),
     market: str = Query(..., description="市場代碼 (TW/US)"),
-    data_collection_service=Depends(get_data_collection_service_clean)
+    price_source=Depends(get_price_data_source)
 ):
     """
     驗證股票代號是否有效
 
-    通過 Yahoo Finance API 驗證股票代號，返回股票基本信息
+    通過價格數據源驗證股票代號，返回股票基本信息
     """
     try:
-        from infrastructure.external.yfinance_wrapper import YFinanceWrapper
-
         # 格式化股票代號
         formatted_symbol = symbol.strip().upper()
         if market == 'TW' and not formatted_symbol.endswith('.TW'):
             formatted_symbol = f"{formatted_symbol}.TW"
 
-        # 使用 YFinance 驗證
-        yf_wrapper = YFinanceWrapper()
-        ticker = yf_wrapper.get_ticker(formatted_symbol)
+        # 使用抽象數據源驗證
+        is_valid = await price_source.validate_symbol(formatted_symbol, market)
 
-        # 獲取股票信息
-        info = ticker.info
-
-        # 檢查是否有效
-        if not info or 'symbol' not in info:
+        if not is_valid:
             raise HTTPException(
                 status_code=400,
                 detail=f"找不到股票代號「{symbol}」，請確認股票代號是否正確"
             )
 
+        # 獲取股票資訊
+        stock_info = await price_source.get_stock_info(formatted_symbol, market)
+
         # 返回股票基本信息
         return {
             "valid": True,
             "symbol": formatted_symbol,
-            "name": info.get('longName') or info.get('shortName') or formatted_symbol,
+            "name": stock_info.get('long_name') or stock_info.get('short_name') or formatted_symbol,
             "market": market,
-            "currency": info.get('currency'),
-            "exchange": info.get('exchange'),
-            "quote_type": info.get('quoteType')
+            "currency": stock_info.get('currency'),
+            "exchange": stock_info.get('exchange'),  # 注意：可能沒有這個欄位
+            "quote_type": stock_info.get('quote_type')  # 注意：可能沒有這個欄位
         }
 
     except HTTPException:
@@ -153,27 +150,24 @@ async def ensure_stock_exists(
                 "stock": stock_data
             }
 
-        # 股票不存在，先驗證股票代號有效性
-        yf_wrapper = YFinanceWrapper()
-        ticker = yf_wrapper.get_ticker(formatted_symbol)
-        info = ticker.info
-
-        if not info or 'symbol' not in info:
-            raise HTTPException(
-                status_code=400,
-                detail=f"找不到股票代號「{symbol}」，請確認股票代號是否正確"
-            )
-
-        # 創建新股票
+        # 股票不存在，創建新股票（stock_repo.create 已整合驗證邏輯）
         from api.schemas.stocks import StockCreateRequest
 
-        company_name = info.get('longName') or info.get('shortName') or formatted_symbol
         stock_create = StockCreateRequest(
             symbol=formatted_symbol,
-            name=company_name,
+            name=None,  # 讓 stock_repo 自動從數據源獲取公司名稱
             market=market
         )
-        new_stock = await stock_repo.create(db, obj_in=stock_create)
+
+        # stock_repo.create 會自動驗證股票並獲取公司名稱
+        try:
+            new_stock = await stock_repo.create(db, obj_in=stock_create)
+        except ValueError as e:
+            # 股票驗證失敗
+            raise HTTPException(
+                status_code=400,
+                detail=str(e)
+            )
 
         # 抓取歷史價格（過去一年）
         try:
