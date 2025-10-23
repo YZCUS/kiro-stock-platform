@@ -13,6 +13,9 @@ from .user import User
 from .user_portfolio import UserPortfolio
 from .transaction import Transaction
 from .user_stock_list import UserStockList, UserStockListItem
+from .user_strategy_subscription import UserStrategySubscription
+from .user_strategy_stock_list import UserStrategyStockList
+from .strategy_signal import StrategySignal
 
 __all__ = [
     'Stock',
@@ -24,5 +27,8 @@ __all__ = [
     'UserPortfolio',
     'Transaction',
     'UserStockList',
-    'UserStockListItem'
+    'UserStockListItem',
+    'UserStrategySubscription',
+    'UserStrategyStockList',
+    'StrategySignal'
 ]

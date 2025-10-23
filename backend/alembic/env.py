@@ -21,6 +21,13 @@ from domain.models.technical_indicator import TechnicalIndicator
 from domain.models.trading_signal import TradingSignal
 from domain.models.user_watchlist import UserWatchlist
 from domain.models.system_log import SystemLog
+from domain.models.user import User
+from domain.models.user_portfolio import UserPortfolio
+from domain.models.transaction import Transaction
+from domain.models.user_stock_list import UserStockList, UserStockListItem
+from domain.models.user_strategy_subscription import UserStrategySubscription
+from domain.models.user_strategy_stock_list import UserStrategyStockList
+from domain.models.strategy_signal import StrategySignal
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

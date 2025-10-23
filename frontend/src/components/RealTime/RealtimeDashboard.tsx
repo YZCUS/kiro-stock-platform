@@ -12,6 +12,8 @@ import { useWebSocket, useMarketStatus } from '../../hooks/useWebSocket';
 import { ensureStockExistsAuto, StockEnsureResult } from '../../services/stockValidationApi';
 import { ChevronDown, TrendingUp, Activity, BarChart3, Search, X, ShoppingCart, TrendingDown } from 'lucide-react';
 import TransactionModal from '../Portfolio/TransactionModal';
+import { getPortfolioList } from '@/services/portfolioApi';
+import type { Portfolio } from '@/types';
 
 // 動態載入圖表組件
 const RealtimePriceChart = dynamic(() => import('./RealtimePriceChart'), {
@@ -43,11 +45,16 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
   const { isAuthenticated } = useAppSelector((state) => state.auth);
   const { lists, currentListStocks, loading } = useAppSelector((state) => state.stockList);
 
+  const [viewMode, setViewMode] = useState<'list' | 'portfolio'>('list'); // 視圖模式：清單 or 持倉
   const [selectedListId, setSelectedListId] = useState<number | null>(null);
   const [selectedStockId, setSelectedStockId] = useState<number | null>(null);
   const [showListDropdown, setShowListDropdown] = useState(false);
   const [showStockDropdown, setShowStockDropdown] = useState(false);
   const [urlStockProcessed, setUrlStockProcessed] = useState(false);
+
+  // 持倉相關狀態
+  const [portfolioStocks, setPortfolioStocks] = useState<Portfolio[]>([]);
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
 
   // 直接輸入股票代號的狀態
   const [symbolInput, setSymbolInput] = useState('');
@@ -74,8 +81,9 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
   const listDropdownRef = useRef<HTMLDivElement>(null);
   const stockDropdownRef = useRef<HTMLDivElement>(null);
 
-  // 從 URL 參數讀取股票 ID
+  // 從 URL 參數讀取股票 ID 和來源
   const stockIdFromUrl = searchParams.get('stock');
+  const sourceFromUrl = searchParams.get('source'); // 新增：檢測來源（如 'portfolio'）
 
   // 載入清單
   useEffect(() => {
@@ -83,6 +91,33 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
       dispatch(fetchStockLists());
     }
   }, [isAuthenticated, dispatch, lists.length]);
+
+  // 當從持倉管理跳轉時，自動切換到持倉視圖
+  useEffect(() => {
+    if (sourceFromUrl === 'portfolio' && isAuthenticated) {
+      setViewMode('portfolio');
+    }
+  }, [sourceFromUrl, isAuthenticated]);
+
+  // 載入持倉數據（當切換到持倉視圖時）
+  useEffect(() => {
+    const loadPortfolioStocks = async () => {
+      if (!isAuthenticated || viewMode !== 'portfolio') return;
+
+      setPortfolioLoading(true);
+      try {
+        const response = await getPortfolioList();
+        setPortfolioStocks(response.items || []);
+      } catch (error) {
+        console.error('載入持倉失敗:', error);
+        setPortfolioStocks([]);
+      } finally {
+        setPortfolioLoading(false);
+      }
+    };
+
+    loadPortfolioStocks();
+  }, [isAuthenticated, viewMode]);
 
   // 當選擇清單時載入該清單的股票
   useEffect(() => {
@@ -98,38 +133,50 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
     }
   }, [lists, selectedListId]);
 
-  // 當有 URL 股票參數時，查找包含該股票的清單並設置
+  // 當有 URL 股票參數時，查找包含該股票的清單或持倉並設置
   useEffect(() => {
-    if (stockIdFromUrl && lists.length > 0 && !urlStockProcessed) {
+    if (stockIdFromUrl && !urlStockProcessed) {
       const targetStockId = parseInt(stockIdFromUrl, 10);
 
-      // 異步查找包含目標股票的清單
-      const findStockInLists = async () => {
-        setUrlStockProcessed(true); // 標記為已處理，避免重複執行
-
-        for (const list of lists) {
-          try {
-            const response = await dispatch(fetchListStocks(list.id)).unwrap();
-            // response 是 StockListItemListResponse，包含 items 屬性
-            const listStocks = response.items || [];
-            const stockExists = listStocks.find((s: any) => s.id === targetStockId);
-            if (stockExists) {
-              // 找到了！設置清單和股票
-              setSelectedListId(list.id);
-              setSelectedStockId(targetStockId);
-              return;
-            }
-          } catch (error) {
-            console.error(`載入清單 ${list.id} 失敗:`, error);
-          }
+      // 如果來源是持倉，從持倉列表中查找
+      if (sourceFromUrl === 'portfolio' && portfolioStocks.length > 0) {
+        setUrlStockProcessed(true);
+        const portfolioStock = portfolioStocks.find((p) => p.stock_id === targetStockId);
+        if (portfolioStock) {
+          setSelectedStockId(targetStockId);
         }
-        // 如果在所有清單中都找不到，仍然設置 stock ID（可能該股票存在但不在任何清單中）
-        setSelectedStockId(targetStockId);
-      };
+        return;
+      }
 
-      findStockInLists();
+      // 否則從清單中查找
+      if (lists.length > 0) {
+        const findStockInLists = async () => {
+          setUrlStockProcessed(true); // 標記為已處理，避免重複執行
+
+          for (const list of lists) {
+            try {
+              const response = await dispatch(fetchListStocks(list.id)).unwrap();
+              // response 是 StockListItemListResponse，包含 items 屬性
+              const listStocks = response.items || [];
+              const stockExists = listStocks.find((s: any) => s.id === targetStockId);
+              if (stockExists) {
+                // 找到了！設置清單和股票
+                setSelectedListId(list.id);
+                setSelectedStockId(targetStockId);
+                return;
+              }
+            } catch (error) {
+              console.error(`載入清單 ${list.id} 失敗:`, error);
+            }
+          }
+          // 如果在所有清單中都找不到，仍然設置 stock ID（可能該股票存在但不在任何清單中）
+          setSelectedStockId(targetStockId);
+        };
+
+        findStockInLists();
+      }
     }
-  }, [stockIdFromUrl, lists, urlStockProcessed, dispatch]);
+  }, [stockIdFromUrl, sourceFromUrl, lists, portfolioStocks, urlStockProcessed, dispatch]);
 
   // 當股票列表載入後，自動選擇第一個股票
   useEffect(() => {
@@ -182,9 +229,23 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
     if (directStock) {
       return directStock;
     }
+    // 如果是持倉視圖，從持倉列表中查找並轉換格式
+    if (viewMode === 'portfolio' && selectedStockId) {
+      const portfolio = portfolioStocks.find(p => p.stock_id === selectedStockId);
+      if (portfolio) {
+        // 將 Portfolio 轉換為 Stock 格式
+        return {
+          id: portfolio.stock_id,
+          symbol: portfolio.stock_symbol || '',
+          name: portfolio.stock_name || '',
+          market: portfolio.stock_symbol?.match(/^\d+$/) ? 'TW' : 'US',
+          latest_price: portfolio.latest_price
+        };
+      }
+    }
     // 否則從清單中選擇
     return currentListStocks.find(stock => stock.id === selectedStockId);
-  }, [currentListStocks, selectedStockId, directStock]);
+  }, [currentListStocks, selectedStockId, directStock, viewMode, portfolioStocks]);
 
   // 計算價格變動百分比
   const priceChangePercent = selectedStock?.latest_price?.change_percent;
@@ -360,14 +421,42 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
                     : 'hover:border-gray-400'
                 } ${directStock && !showListDropdown ? 'opacity-50' : ''}`}
               >
-                <span className={selectedList ? 'text-gray-900' : 'text-gray-400'}>
-                  {!isAuthenticated ? '請先登入' : (selectedList ? selectedList.name : '請選擇清單')}
+                <span className={viewMode === 'portfolio' || selectedList ? 'text-gray-900' : 'text-gray-400'}>
+                  {!isAuthenticated
+                    ? '請先登入'
+                    : viewMode === 'portfolio'
+                      ? '我的持倉'
+                      : (selectedList ? selectedList.name : '請選擇清單')
+                  }
                 </span>
                 <ChevronDown className="w-5 h-5 text-gray-400" />
               </button>
 
               {showListDropdown && (
                 <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
+                  {/* 我的持倉選項 */}
+                  <div className="border-b border-gray-200">
+                    <button
+                      onClick={() => {
+                        setViewMode('portfolio');
+                        setSelectedListId(null);
+                        setSelectedStockId(null);
+                        setShowListDropdown(false);
+                      }}
+                      className={`w-full px-4 py-2 text-left hover:bg-gray-100 ${
+                        viewMode === 'portfolio' ? 'bg-blue-50 text-blue-700' : 'text-gray-900'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span>我的持倉</span>
+                        <span className="text-xs text-gray-500">
+                          {portfolioStocks.length} 檔股票
+                        </span>
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* 股票清單選項 */}
                   {loading ? (
                     <div className="px-4 py-3 text-sm text-gray-500">載入中...</div>
                   ) : lists.length === 0 ? (
@@ -377,13 +466,13 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
                       <button
                         key={list.id}
                         onClick={() => {
+                          setViewMode('list');
                           setSelectedListId(list.id);
                           setSelectedStockId(null);
                           setShowListDropdown(false);
-                          // 不自動清除查詢結果
                         }}
                         className={`w-full px-4 py-2 text-left hover:bg-gray-100 ${
-                          selectedListId === list.id ? 'bg-blue-50 text-blue-700' : 'text-gray-900'
+                          viewMode === 'list' && selectedListId === list.id ? 'bg-blue-50 text-blue-700' : 'text-gray-900'
                         }`}
                       >
                         <div className="flex items-center justify-between">
@@ -411,10 +500,22 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
                   setShowStockDropdown(!showStockDropdown);
                   setShowListDropdown(false);
                 }}
-                disabled={!selectedListId}
+                disabled={viewMode === 'list' && !selectedListId}
                 className={`w-full bg-white border border-gray-300 rounded-md px-4 py-2 text-left flex items-center justify-between hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed ${directStock && !showStockDropdown ? 'opacity-50' : ''}`}
               >
                 {(() => {
+                  // 持倉視圖
+                  if (viewMode === 'portfolio' && selectedStockId) {
+                    const portfolioStock = portfolioStocks.find(p => p.stock_id === selectedStockId);
+                    if (portfolioStock) {
+                      return (
+                        <span className="text-gray-900 truncate block pr-2">
+                          {portfolioStock.stock_symbol} - {portfolioStock.stock_name}
+                        </span>
+                      );
+                    }
+                  }
+                  // 清單視圖
                   const listStock = selectedStockId && currentListStocks.find(s => s.id === selectedStockId);
                   if (listStock) {
                     return (
@@ -423,12 +524,64 @@ const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
                       </span>
                     );
                   }
-                  return <span className="text-gray-400">請先選擇清單</span>;
+                  return <span className="text-gray-400">
+                    {viewMode === 'portfolio' ? '請選擇持倉股票' : '請先選擇清單'}
+                  </span>;
                 })()}
                 <ChevronDown className="w-5 h-5 text-gray-400" />
               </button>
 
-              {showStockDropdown && selectedListId && (
+              {/* 持倉視圖的股票下拉選單 */}
+              {showStockDropdown && viewMode === 'portfolio' && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
+                  {portfolioLoading ? (
+                    <div className="px-4 py-3 text-sm text-gray-500">載入中...</div>
+                  ) : portfolioStocks.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-gray-500">尚無持倉</div>
+                  ) : (
+                    portfolioStocks.map((portfolio) => (
+                      <button
+                        key={portfolio.id}
+                        onClick={() => {
+                          setSelectedStockId(portfolio.stock_id);
+                          setShowStockDropdown(false);
+                          setDirectStock(null);
+                          setSymbolInput('');
+                          setSearchError(null);
+                        }}
+                        className={`w-full px-4 py-2 text-left hover:bg-gray-100 ${
+                          selectedStockId === portfolio.stock_id ? 'bg-blue-50 text-blue-700' : 'text-gray-900'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium truncate">{portfolio.stock_symbol}</div>
+                            <div className="text-xs text-gray-500 truncate">{portfolio.stock_name}</div>
+                          </div>
+                          {portfolio.latest_price?.close && (
+                            <div className="text-right flex-shrink-0">
+                              <div className="font-medium">
+                                {portfolio.stock_symbol?.match(/^\d+$/) ? 'NT$' : '$'}{portfolio.latest_price.close.toFixed(2)}
+                              </div>
+                              {portfolio.latest_price.change_percent !== null && (
+                                <div className={`text-xs ${
+                                  portfolio.latest_price.change_percent >= 0 ? 'text-green-600' : 'text-red-600'
+                                }`}>
+                                  {portfolio.latest_price.change_percent >= 0 ? '+' : ''}
+                                  {portfolio.latest_price.change_percent.toFixed(2)}%
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {/* 清單視圖的股票下拉選單 */}
+              {showStockDropdown && viewMode === 'list' && selectedListId && (
                 <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
                   {loading ? (
                     <div className="px-4 py-3 text-sm text-gray-500">載入中...</div>

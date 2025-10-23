@@ -41,7 +41,6 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
   });
   const [stockSymbol, setStockSymbol] = useState('');
   const [viewMode, setViewMode] = useState<'all' | 'portfolio'>('all');
-  const [currentListId, setCurrentListId] = useState<number | null>(null);
   const [transactionModal, setTransactionModal] = useState<{
     isOpen: boolean;
     stock: any | null;
@@ -55,6 +54,9 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
 
   // 從 Redux 獲取清單股票和清單列表
   const { currentListStocks, lists, currentList } = useAppSelector((state) => state.stockList);
+
+  // 使用 Redux 的 currentList.id 作為當前清單 ID
+  const currentListId = currentList?.id || null;
   const { isAuthenticated } = useAppSelector((state) => state.auth);
 
   // 股號驗證 Hook
@@ -73,14 +75,6 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
       dispatch(fetchStockLists());
     }
   }, [isAuthenticated, lists.length, dispatch]);
-
-  // 設置預設清單
-  useEffect(() => {
-    if (lists.length > 0 && !currentListId && viewMode === 'all') {
-      const defaultList = lists.find(l => l.is_default) || lists[0];
-      setCurrentListId(defaultList.id);
-    }
-  }, [lists, currentListId, viewMode]);
 
   // 當清單改變時，載入清單中的股票
   useEffect(() => {
@@ -554,7 +548,6 @@ const StockManagementPage: React.FC<StockManagementPageProps> = () => {
             <h2 className="text-lg font-medium text-gray-900">股票列表</h2>
             {/* 統一選擇器 - 整合清單和視圖模式 */}
             <UnifiedStockSelector
-              onListChange={setCurrentListId}
               viewMode={viewMode}
               onViewModeChange={setViewMode}
             />
