@@ -1,6 +1,7 @@
 """
 股票清單管理 API 路由
 """
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
@@ -25,7 +26,7 @@ from api.schemas.stock_list import (
     StockListItemBatchAddRequest,
     StockListItemResponse,
     StockListItemListResponse,
-    StockListStocksResponse
+    StockListStocksResponse,
 )
 
 router = APIRouter()
@@ -35,13 +36,15 @@ router = APIRouter()
 # 股票清單管理端點
 # =============================================================================
 
+
 @router.get("/", response_model=StockListListResponse)
 async def get_user_stock_lists(
     db: AsyncSession = Depends(get_database_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """獲取用戶的所有股票清單"""
     try:
+
         def _get_lists_with_counts(session):
             """在同步會話中獲取清單和股票數量"""
             lists = UserStockList.get_user_lists(session, current_user.id)
@@ -50,24 +53,26 @@ async def get_user_stock_lists(
             for lst in lists:
                 # 觸發關聯載入
                 stocks_count = len(lst.list_items)
-                result.append({
-                    'id': lst.id,
-                    'user_id': str(lst.user_id),
-                    'name': lst.name,
-                    'description': lst.description,
-                    'is_default': lst.is_default,
-                    'sort_order': lst.sort_order,
-                    'stocks_count': stocks_count,
-                    'created_at': lst.created_at,
-                    'updated_at': lst.updated_at
-                })
+                result.append(
+                    {
+                        "id": lst.id,
+                        "user_id": str(lst.user_id),
+                        "name": lst.name,
+                        "description": lst.description,
+                        "is_default": lst.is_default,
+                        "sort_order": lst.sort_order,
+                        "stocks_count": stocks_count,
+                        "created_at": lst.created_at,
+                        "updated_at": lst.updated_at,
+                    }
+                )
             return result
 
         lists_data = await db.run_sync(_get_lists_with_counts)
 
         return StockListListResponse(
             items=[StockListResponse(**lst_data) for lst_data in lists_data],
-            total=len(lists_data)
+            total=len(lists_data),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"獲取清單失敗: {str(e)}")
@@ -77,7 +82,7 @@ async def get_user_stock_lists(
 async def create_stock_list(
     request: StockListCreateRequest,
     db: AsyncSession = Depends(get_database_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """創建新的股票清單"""
     try:
@@ -85,8 +90,7 @@ async def create_stock_list(
 
         # 檢查清單名稱是否已存在
         query = select(UserStockList).where(
-            UserStockList.user_id == current_user.id,
-            UserStockList.name == request.name
+            UserStockList.user_id == current_user.id, UserStockList.name == request.name
         )
         result = await db.execute(query)
         existing = result.scalar_one_or_none()
@@ -98,7 +102,7 @@ async def create_stock_list(
         if request.is_default:
             update_query = select(UserStockList).where(
                 UserStockList.user_id == current_user.id,
-                UserStockList.is_default == True
+                UserStockList.is_default == True,
             )
             result = await db.execute(update_query)
             default_lists = result.scalars().all()
@@ -110,7 +114,7 @@ async def create_stock_list(
             user_id=current_user.id,
             name=request.name,
             description=request.description,
-            is_default=request.is_default
+            is_default=request.is_default,
         )
         db.add(new_list)
         await db.commit()
@@ -125,7 +129,7 @@ async def create_stock_list(
             sort_order=new_list.sort_order,
             stocks_count=0,
             created_at=new_list.created_at,
-            updated_at=new_list.updated_at
+            updated_at=new_list.updated_at,
         )
     except HTTPException:
         raise
@@ -138,15 +142,14 @@ async def create_stock_list(
 async def get_stock_list(
     list_id: int,
     db: AsyncSession = Depends(get_database_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """獲取單個股票清單"""
     try:
         from sqlalchemy import select
 
         query = select(UserStockList).where(
-            UserStockList.id == list_id,
-            UserStockList.user_id == current_user.id
+            UserStockList.id == list_id, UserStockList.user_id == current_user.id
         )
         result = await db.execute(query)
         stock_list = result.scalar_one_or_none()
@@ -170,7 +173,7 @@ async def get_stock_list(
             sort_order=stock_list.sort_order,
             stocks_count=stocks_count,
             created_at=stock_list.created_at,
-            updated_at=stock_list.updated_at
+            updated_at=stock_list.updated_at,
         )
     except HTTPException:
         raise
@@ -183,7 +186,7 @@ async def update_stock_list(
     list_id: int,
     request: StockListUpdateRequest,
     db: AsyncSession = Depends(get_database_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """更新股票清單"""
     try:
@@ -191,8 +194,7 @@ async def update_stock_list(
 
         # 獲取清單
         query = select(UserStockList).where(
-            UserStockList.id == list_id,
-            UserStockList.user_id == current_user.id
+            UserStockList.id == list_id, UserStockList.user_id == current_user.id
         )
         result = await db.execute(query)
         stock_list = result.scalar_one_or_none()
@@ -206,7 +208,7 @@ async def update_stock_list(
             check_query = select(UserStockList).where(
                 UserStockList.user_id == current_user.id,
                 UserStockList.name == request.name,
-                UserStockList.id != list_id
+                UserStockList.id != list_id,
             )
             check_result = await db.execute(check_query)
             if check_result.scalar_one_or_none():
@@ -222,7 +224,7 @@ async def update_stock_list(
                 update_query = select(UserStockList).where(
                     UserStockList.user_id == current_user.id,
                     UserStockList.is_default == True,
-                    UserStockList.id != list_id
+                    UserStockList.id != list_id,
                 )
                 result = await db.execute(update_query)
                 default_lists = result.scalars().all()
@@ -250,7 +252,7 @@ async def update_stock_list(
             sort_order=stock_list.sort_order,
             stocks_count=stocks_count,
             created_at=stock_list.created_at,
-            updated_at=stock_list.updated_at
+            updated_at=stock_list.updated_at,
         )
     except HTTPException:
         raise
@@ -263,7 +265,7 @@ async def update_stock_list(
 async def delete_stock_list(
     list_id: int,
     db: AsyncSession = Depends(get_database_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """刪除股票清單"""
     try:
@@ -271,8 +273,7 @@ async def delete_stock_list(
 
         # 檢查清單是否存在
         query = select(UserStockList).where(
-            UserStockList.id == list_id,
-            UserStockList.user_id == current_user.id
+            UserStockList.id == list_id, UserStockList.user_id == current_user.id
         )
         result = await db.execute(query)
         stock_list = result.scalar_one_or_none()
@@ -297,11 +298,12 @@ async def delete_stock_list(
 # 清單項目管理端點
 # =============================================================================
 
+
 @router.get("/{list_id}/stocks")
 async def get_list_stocks(
     list_id: int,
     db: AsyncSession = Depends(get_database_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """獲取清單中的所有股票（包含最新價格和完整股票信息）"""
     try:
@@ -312,8 +314,7 @@ async def get_list_stocks(
 
         # 驗證清單所有權
         list_query = select(UserStockList).where(
-            UserStockList.id == list_id,
-            UserStockList.user_id == current_user.id
+            UserStockList.id == list_id, UserStockList.user_id == current_user.id
         )
         list_result = await db.execute(list_query)
         stock_list = list_result.scalar_one_or_none()
@@ -322,9 +323,12 @@ async def get_list_stocks(
             raise HTTPException(status_code=404, detail="清單不存在")
 
         # 獲取清單項目（預載入 stock，按 sort_order 排序）
-        items_query = select(UserStockListItem).where(
-            UserStockListItem.list_id == list_id
-        ).options(selectinload(UserStockListItem.stock)).order_by(UserStockListItem.sort_order, UserStockListItem.created_at)
+        items_query = (
+            select(UserStockListItem)
+            .where(UserStockListItem.list_id == list_id)
+            .options(selectinload(UserStockListItem.stock))
+            .order_by(UserStockListItem.sort_order, UserStockListItem.created_at)
+        )
         items_result = await db.execute(items_query)
         items = items_result.scalars().all()
 
@@ -337,25 +341,28 @@ async def get_list_stocks(
             stock = item.stock
 
             # 查詢最新兩個交易日的價格（用於計算漲跌）
-            price_query = select(PriceHistory).where(
-                PriceHistory.stock_id == stock.id
-            ).order_by(desc(PriceHistory.date)).limit(2)
+            price_query = (
+                select(PriceHistory)
+                .where(PriceHistory.stock_id == stock.id)
+                .order_by(desc(PriceHistory.date))
+                .limit(2)
+            )
 
             price_result = await db.execute(price_query)
             prices = price_result.scalars().all()
 
             # 構建股票響應
             stock_data = {
-                'id': stock.id,
-                'symbol': stock.symbol,
-                'market': stock.market,
-                'name': stock.name,
-                'is_active': stock.is_active,
-                'created_at': stock.created_at,
-                'updated_at': stock.updated_at,
-                'is_watchlist': False,
-                'is_portfolio': False,
-                'latest_price': None
+                "id": stock.id,
+                "symbol": stock.symbol,
+                "market": stock.market,
+                "name": stock.name,
+                "is_active": stock.is_active,
+                "created_at": stock.created_at,
+                "updated_at": stock.updated_at,
+                "is_watchlist": False,
+                "is_portfolio": False,
+                "latest_price": None,
             }
 
             # 添加最新價格信息
@@ -367,32 +374,35 @@ async def get_list_stocks(
                 change = None
                 change_percent = None
                 if close_price and len(prices) > 1:
-                    prev_close = float(prices[1].close_price) if prices[1].close_price else None
+                    prev_close = (
+                        float(prices[1].close_price) if prices[1].close_price else None
+                    )
                     if prev_close:
                         change = close_price - prev_close
                         change_percent = (change / prev_close) * 100
 
-                stock_data['latest_price'] = {
-                    'close': close_price,
-                    'change': change,
-                    'change_percent': change_percent,
-                    'date': latest.date,
-                    'volume': latest.volume
+                stock_data["latest_price"] = {
+                    "close": close_price,
+                    "change": change,
+                    "change_percent": change_percent,
+                    "date": latest.date,
+                    "volume": latest.volume,
                 }
 
             stock_responses.append(stock_data)
 
         # 返回與前端期望的格式一致的響應
         return {
-            'items': stock_responses,
-            'total': len(stock_responses),
-            'list_id': list_id,
-            'list_name': stock_list.name
+            "items": stock_responses,
+            "total": len(stock_responses),
+            "list_id": list_id,
+            "list_name": stock_list.name,
         }
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"獲取清單股票失敗: {str(e)}")
 
@@ -402,7 +412,7 @@ async def add_stock_to_list(
     list_id: int,
     request: StockListItemAddRequest,
     db: AsyncSession = Depends(get_database_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """添加股票到清單"""
     try:
@@ -410,8 +420,7 @@ async def add_stock_to_list(
 
         # 驗證清單所有權
         list_query = select(UserStockList).where(
-            UserStockList.id == list_id,
-            UserStockList.user_id == current_user.id
+            UserStockList.id == list_id, UserStockList.user_id == current_user.id
         )
         list_result = await db.execute(list_query)
         stock_list = list_result.scalar_one_or_none()
@@ -430,7 +439,7 @@ async def add_stock_to_list(
         # 檢查是否已存在
         existing_query = select(UserStockListItem).where(
             UserStockListItem.list_id == list_id,
-            UserStockListItem.stock_id == request.stock_id
+            UserStockListItem.stock_id == request.stock_id,
         )
         existing_result = await db.execute(existing_query)
         existing = existing_result.scalar_one_or_none()
@@ -443,14 +452,12 @@ async def add_stock_to_list(
                 stock_symbol=stock.symbol,
                 stock_name=stock.name,
                 note=existing.note,
-                created_at=existing.created_at
+                created_at=existing.created_at,
             )
 
         # 添加新項目
         new_item = UserStockListItem(
-            list_id=list_id,
-            stock_id=request.stock_id,
-            note=request.note
+            list_id=list_id, stock_id=request.stock_id, note=request.note
         )
         db.add(new_item)
         await db.commit()
@@ -463,7 +470,7 @@ async def add_stock_to_list(
             stock_symbol=stock.symbol,
             stock_name=stock.name,
             note=new_item.note,
-            created_at=new_item.created_at
+            created_at=new_item.created_at,
         )
     except HTTPException:
         raise
@@ -477,7 +484,7 @@ async def batch_add_stocks_to_list(
     list_id: int,
     request: StockListItemBatchAddRequest,
     db: AsyncSession = Depends(get_database_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """批量添加股票到清單"""
     try:
@@ -485,8 +492,7 @@ async def batch_add_stocks_to_list(
 
         # 驗證清單所有權
         list_query = select(UserStockList).where(
-            UserStockList.id == list_id,
-            UserStockList.user_id == current_user.id
+            UserStockList.id == list_id, UserStockList.user_id == current_user.id
         )
         list_result = await db.execute(list_query)
         stock_list = list_result.scalar_one_or_none()
@@ -511,7 +517,7 @@ async def batch_add_stocks_to_list(
                 # 檢查是否已存在
                 existing_query = select(UserStockListItem).where(
                     UserStockListItem.list_id == list_id,
-                    UserStockListItem.stock_id == stock_id
+                    UserStockListItem.stock_id == stock_id,
                 )
                 existing_result = await db.execute(existing_query)
                 if existing_result.scalar_one_or_none():
@@ -519,10 +525,7 @@ async def batch_add_stocks_to_list(
                     continue
 
                 # 添加新項目
-                new_item = UserStockListItem(
-                    list_id=list_id,
-                    stock_id=stock_id
-                )
+                new_item = UserStockListItem(list_id=list_id, stock_id=stock_id)
                 db.add(new_item)
                 success_count += 1
             except Exception as e:
@@ -535,7 +538,7 @@ async def batch_add_stocks_to_list(
             "message": "批量添加完成",
             "success_count": success_count,
             "failed_count": failed_count,
-            "errors": errors
+            "errors": errors,
         }
     except HTTPException:
         raise
@@ -549,7 +552,7 @@ async def remove_stock_from_list(
     list_id: int,
     stock_id: int,
     db: AsyncSession = Depends(get_database_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """從清單中移除股票"""
     try:
@@ -557,8 +560,7 @@ async def remove_stock_from_list(
 
         # 驗證清單所有權
         list_query = select(UserStockList).where(
-            UserStockList.id == list_id,
-            UserStockList.user_id == current_user.id
+            UserStockList.id == list_id, UserStockList.user_id == current_user.id
         )
         list_result = await db.execute(list_query)
         stock_list = list_result.scalar_one_or_none()
@@ -568,8 +570,7 @@ async def remove_stock_from_list(
 
         # 刪除項目
         delete_query = delete(UserStockListItem).where(
-            UserStockListItem.list_id == list_id,
-            UserStockListItem.stock_id == stock_id
+            UserStockListItem.list_id == list_id, UserStockListItem.stock_id == stock_id
         )
         result = await db.execute(delete_query)
         await db.commit()
@@ -577,7 +578,11 @@ async def remove_stock_from_list(
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="股票不在清單中")
 
-        return {"message": "股票已從清單中移除", "list_id": list_id, "stock_id": stock_id}
+        return {
+            "message": "股票已從清單中移除",
+            "list_id": list_id,
+            "stock_id": stock_id,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -589,28 +594,29 @@ async def remove_stock_from_list(
 async def reorder_stock_lists(
     request: StockListReorderRequest,
     db: AsyncSession = Depends(get_database_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """批量更新清單排序"""
     try:
         from sqlalchemy import select
 
         # 驗證所有清單都屬於當前用戶
-        list_ids = [item['id'] for item in request.list_orders]
+        list_ids = [item["id"] for item in request.list_orders]
         query = select(UserStockList).where(
-            UserStockList.id.in_(list_ids),
-            UserStockList.user_id == current_user.id
+            UserStockList.id.in_(list_ids), UserStockList.user_id == current_user.id
         )
         result = await db.execute(query)
         lists = result.scalars().all()
 
         if len(lists) != len(list_ids):
-            raise HTTPException(status_code=404, detail="部分清單不存在或不屬於當前用戶")
+            raise HTTPException(
+                status_code=404, detail="部分清單不存在或不屬於當前用戶"
+            )
 
         # 更新每個清單的 sort_order
         for item in request.list_orders:
-            list_id = item['id']
-            sort_order = item['sort_order']
+            list_id = item["id"]
+            sort_order = item["sort_order"]
 
             stock_list = next((lst for lst in lists if lst.id == list_id), None)
             if stock_list:
@@ -618,10 +624,7 @@ async def reorder_stock_lists(
 
         await db.commit()
 
-        return {
-            "message": "清單排序已更新",
-            "updated_count": len(list_ids)
-        }
+        return {"message": "清單排序已更新", "updated_count": len(list_ids)}
     except HTTPException:
         raise
     except Exception as e:
@@ -634,7 +637,7 @@ async def reorder_list_stocks(
     list_id: int,
     request: dict,
     db: AsyncSession = Depends(get_database_session),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """批量更新清單內股票排序"""
     try:
@@ -642,8 +645,7 @@ async def reorder_list_stocks(
 
         # 驗證清單所有權
         list_query = select(UserStockList).where(
-            UserStockList.id == list_id,
-            UserStockList.user_id == current_user.id
+            UserStockList.id == list_id, UserStockList.user_id == current_user.id
         )
         list_result = await db.execute(list_query)
         stock_list = list_result.scalar_one_or_none()
@@ -652,15 +654,15 @@ async def reorder_list_stocks(
             raise HTTPException(status_code=404, detail="清單不存在")
 
         # 獲取 stock_orders
-        stock_orders = request.get('stock_orders', [])
+        stock_orders = request.get("stock_orders", [])
         if not stock_orders:
             raise HTTPException(status_code=400, detail="stock_orders 不能為空")
 
         # 驗證所有股票都在清單中
-        stock_ids = [item['stock_id'] for item in stock_orders]
+        stock_ids = [item["stock_id"] for item in stock_orders]
         items_query = select(UserStockListItem).where(
             UserStockListItem.list_id == list_id,
-            UserStockListItem.stock_id.in_(stock_ids)
+            UserStockListItem.stock_id.in_(stock_ids),
         )
         items_result = await db.execute(items_query)
         items = items_result.scalars().all()
@@ -670,8 +672,8 @@ async def reorder_list_stocks(
 
         # 更新每個股票的 sort_order
         for order_item in stock_orders:
-            stock_id = order_item['stock_id']
-            sort_order = order_item['sort_order']
+            stock_id = order_item["stock_id"]
+            sort_order = order_item["sort_order"]
 
             item = next((i for i in items if i.stock_id == stock_id), None)
             if item:
@@ -679,10 +681,7 @@ async def reorder_list_stocks(
 
         await db.commit()
 
-        return {
-            "message": "股票排序已更新",
-            "updated_count": len(stock_ids)
-        }
+        return {"message": "股票排序已更新", "updated_count": len(stock_ids)}
     except HTTPException:
         raise
     except Exception as e:

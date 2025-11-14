@@ -2,6 +2,7 @@
 驗證規則 - Domain Policies
 從utils/helpers.py遷移的業務驗證邏輯
 """
+
 from typing import List, Dict, Any
 import re
 
@@ -18,7 +19,7 @@ class ValidationRules:
         symbol = symbol.strip().upper()
 
         # 基本驗證 - 英數字加上可選的點和破折號
-        if not symbol.replace('.', '').replace('-', '').isalnum():
+        if not symbol.replace(".", "").replace("-", "").isalnum():
             return False
 
         # 長度檢查
@@ -30,7 +31,7 @@ class ValidationRules:
     @staticmethod
     def validate_market_code(market: str) -> bool:
         """驗證市場代碼"""
-        valid_markets = ['TW', 'US']
+        valid_markets = ["TW", "US"]
         return market in valid_markets
 
     @staticmethod
@@ -44,7 +45,9 @@ class ValidationRules:
         return volume >= 0
 
     @staticmethod
-    def validate_indicator_parameters(indicator_type: str, parameters: Dict[str, Any]) -> bool:
+    def validate_indicator_parameters(
+        indicator_type: str, parameters: Dict[str, Any]
+    ) -> bool:
         """驗證技術指標參數"""
         if indicator_type == "RSI":
             period = parameters.get("period", 14)
@@ -85,6 +88,7 @@ class ValidationRules:
 
         # 日期範圍不能超過10年
         from datetime import timedelta
+
         max_range = timedelta(days=365 * 10)
         if (end_date - start_date) > max_range:
             return False
@@ -104,5 +108,5 @@ class ValidationRules:
     @staticmethod
     def validate_trading_signal_type(signal_type: str) -> bool:
         """驗證交易信號類型"""
-        valid_signals = ['buy', 'sell', 'hold', 'strong_buy', 'strong_sell']
+        valid_signals = ["buy", "sell", "hold", "strong_buy", "strong_sell"]
         return signal_type.lower() in valid_signals

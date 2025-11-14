@@ -11,18 +11,18 @@ from .unified_cache_service import (
     StockCacheService,
     TechnicalAnalysisCacheService,
     TradingSignalCacheService,
-    DataCollectionCacheService
+    DataCollectionCacheService,
 )
 
 # 向後兼容
 from .redis_cache_service import MockCacheService as LegacyMockCacheService
 
 __all__ = [
-    'ICacheService',
-    'RedisCacheService',
-    'MockCacheService',
-    'StockCacheService',
-    'TechnicalAnalysisCacheService',
-    'TradingSignalCacheService',
-    'DataCollectionCacheService'
+    "ICacheService",
+    "RedisCacheService",
+    "MockCacheService",
+    "StockCacheService",
+    "TechnicalAnalysisCacheService",
+    "TradingSignalCacheService",
+    "DataCollectionCacheService",
 ]

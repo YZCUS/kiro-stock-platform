@@ -2,6 +2,7 @@
 技術分析API路由 - Clean Architecture版本
 只負責HTTP路由、參數驗證和回應格式化，業務邏輯委託給Domain Services
 """
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -19,14 +20,12 @@ async def get_technical_analysis(
     stock_id: int,
     analysis_days: int = Query(60, ge=20, le=365, description="分析天數"),
     db: AsyncSession = Depends(get_database_session),
-    technical_service=Depends(get_technical_analysis_service_clean)
+    technical_service=Depends(get_technical_analysis_service_clean),
 ):
     """取得股票技術分析"""
     try:
         analysis = await technical_service.calculate_stock_indicators(
-            db=db,
-            stock_id=stock_id,
-            analysis_days=analysis_days
+            db=db, stock_id=stock_id, analysis_days=analysis_days
         )
 
         return {
@@ -52,7 +51,7 @@ async def get_technical_summary(
     stock_id: int,
     timeframe: Optional[str] = Query(None, description="時間框架"),
     db: AsyncSession = Depends(get_database_session),
-    technical_service=Depends(get_technical_analysis_service_clean)
+    technical_service=Depends(get_technical_analysis_service_clean),
 ):
     """取得股票技術面摘要"""
     try:

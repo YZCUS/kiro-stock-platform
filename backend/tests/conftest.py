@@ -3,6 +3,7 @@ Pytest 配置和共享 fixtures
 
 提供測試所需的共享資源和配置
 """
+
 import pytest
 import os
 from pathlib import Path
@@ -27,6 +28,7 @@ os.environ.setdefault("SECURITY_SECRET_KEY", "test-secret")
 # =============================================================================
 # YFinance Mock Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def mock_yfinance_ticker():
@@ -61,17 +63,17 @@ def mock_yfinance_download():
         else:
             start_date = pd.to_datetime(start)
 
-        dates = pd.date_range(start=start_date, end=end_date, freq='D')
+        dates = pd.date_range(start=start_date, end=end_date, freq="D")
         n = len(dates)
         base_price = 100
 
         data = {
-            'Open': base_price + np.random.randn(n).cumsum() * 0.5,
-            'High': base_price + np.random.randn(n).cumsum() * 0.5 + 2,
-            'Low': base_price + np.random.randn(n).cumsum() * 0.5 - 2,
-            'Close': base_price + np.random.randn(n).cumsum() * 0.5,
-            'Volume': np.random.randint(1000000, 10000000, n),
-            'Adj Close': base_price + np.random.randn(n).cumsum() * 0.5,
+            "Open": base_price + np.random.randn(n).cumsum() * 0.5,
+            "High": base_price + np.random.randn(n).cumsum() * 0.5 + 2,
+            "Low": base_price + np.random.randn(n).cumsum() * 0.5 - 2,
+            "Close": base_price + np.random.randn(n).cumsum() * 0.5,
+            "Volume": np.random.randint(1000000, 10000000, n),
+            "Adj Close": base_price + np.random.randn(n).cumsum() * 0.5,
         }
 
         return pd.DataFrame(data, index=dates)
@@ -87,13 +89,14 @@ def auto_mock_yfinance_in_tests(request):
     如果測試需要真實的 yfinance，可以使用 marker 排除：
     @pytest.mark.real_yfinance
     """
-    if 'real_yfinance' in request.keywords:
+    if "real_yfinance" in request.keywords:
         yield
         return
 
     # 啟用 mock 模式（直接設定，而非 patch）
     try:
         from infrastructure.external import yfinance_wrapper
+
         original_use_mock = yfinance_wrapper.use_mock
         yfinance_wrapper.use_mock = True
         yield
@@ -107,14 +110,11 @@ def auto_mock_yfinance_in_tests(request):
 # Pytest 配置
 # =============================================================================
 
+
 def pytest_configure(config):
     """Pytest 配置"""
     config.addinivalue_line(
         "markers", "real_yfinance: 測試使用真實的 yfinance（不使用 mock）"
     )
-    config.addinivalue_line(
-        "markers", "slow: 標記為慢速測試"
-    )
-    config.addinivalue_line(
-        "markers", "integration: 標記為整合測試"
-    )
+    config.addinivalue_line("markers", "slow: 標記為慢速測試")
+    config.addinivalue_line("markers", "integration: 標記為整合測試")

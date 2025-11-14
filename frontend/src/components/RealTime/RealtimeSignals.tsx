@@ -6,9 +6,7 @@
 import React from 'react';
 import { useSignalUpdates, useSystemNotifications } from '../../hooks/useWebSocket';
 
-export interface RealtimeSignalsProps {}
-
-const RealtimeSignals: React.FC<RealtimeSignalsProps> = () => {
+const RealtimeSignals: React.FC = () => {
   const { signals } = useSignalUpdates();
   const { notifications, clearNotification } = useSystemNotifications();
 

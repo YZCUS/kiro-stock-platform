@@ -18,17 +18,17 @@ from .user_strategy_stock_list import UserStrategyStockList
 from .strategy_signal import StrategySignal
 
 __all__ = [
-    'Stock',
-    'PriceHistory',
-    'TechnicalIndicator',
-    'TradingSignal',
-    'SystemLog',
-    'User',
-    'UserPortfolio',
-    'Transaction',
-    'UserStockList',
-    'UserStockListItem',
-    'UserStrategySubscription',
-    'UserStrategyStockList',
-    'StrategySignal'
+    "Stock",
+    "PriceHistory",
+    "TechnicalIndicator",
+    "TradingSignal",
+    "SystemLog",
+    "User",
+    "UserPortfolio",
+    "Transaction",
+    "UserStockList",
+    "UserStockListItem",
+    "UserStrategySubscription",
+    "UserStrategyStockList",
+    "StrategySignal",
 ]

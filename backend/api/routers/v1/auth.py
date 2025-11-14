@@ -1,6 +1,7 @@
 """
 認證相關的 API 路由
 """
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db
@@ -11,7 +12,7 @@ from api.schemas.auth import (
     UserLogin,
     UserResponse,
     TokenResponse,
-    PasswordChange
+    PasswordChange,
 )
 from domain.models.user import User
 from datetime import timedelta
@@ -21,11 +22,10 @@ import uuid
 router = APIRouter(prefix="/auth", tags=["認證"])
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(
-    user_data: UserRegister,
-    db: AsyncSession = Depends(get_db)
-):
+@router.post(
+    "/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED
+)
+async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
     """
     用戶註冊
 
@@ -45,8 +45,7 @@ async def register(
     )
     if existing_user:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="電子郵件已被註冊"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="電子郵件已被註冊"
         )
 
     # 檢查用戶名稱是否已存在
@@ -55,8 +54,7 @@ async def register(
     )
     if existing_username:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="用戶名稱已被使用"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="用戶名稱已被使用"
         )
 
     # 建立新用戶
@@ -65,7 +63,7 @@ async def register(
             session,
             email=user_data.email,
             username=user_data.username,
-            password=user_data.password
+            password=user_data.password,
         )
     )
     await db.commit()
@@ -74,7 +72,7 @@ async def register(
     # 生成 access token
     access_token = create_access_token(
         data={"sub": str(user.id)},
-        expires_delta=timedelta(minutes=settings.security.access_token_expire_minutes)
+        expires_delta=timedelta(minutes=settings.security.access_token_expire_minutes),
     )
 
     return TokenResponse(
@@ -85,16 +83,13 @@ async def register(
             email=user.email,
             username=user.username,
             is_active=user.is_active,
-            created_at=user.created_at
-        )
+            created_at=user.created_at,
+        ),
     )
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(
-    credentials: UserLogin,
-    db: AsyncSession = Depends(get_db)
-):
+async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
     """
     用戶登入
 
@@ -127,15 +122,12 @@ async def login(
         )
 
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="用戶已停用"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="用戶已停用")
 
     # 生成 access token
     access_token = create_access_token(
         data={"sub": str(user.id)},
-        expires_delta=timedelta(minutes=settings.security.access_token_expire_minutes)
+        expires_delta=timedelta(minutes=settings.security.access_token_expire_minutes),
     )
 
     return TokenResponse(
@@ -146,15 +138,13 @@ async def login(
             email=user.email,
             username=user.username,
             is_active=user.is_active,
-            created_at=user.created_at
-        )
+            created_at=user.created_at,
+        ),
     )
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(
-    current_user: User = Depends(get_current_active_user)
-):
+async def get_current_user_info(current_user: User = Depends(get_current_active_user)):
     """
     取得當前用戶資訊
 
@@ -169,7 +159,7 @@ async def get_current_user_info(
         email=current_user.email,
         username=current_user.username,
         is_active=current_user.is_active,
-        created_at=current_user.created_at
+        created_at=current_user.created_at,
     )
 
 
@@ -177,7 +167,7 @@ async def get_current_user_info(
 async def change_password(
     password_data: PasswordChange,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     修改密碼
@@ -196,8 +186,7 @@ async def change_password(
     # 驗證舊密碼
     if not current_user.check_password(password_data.old_password):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="舊密碼錯誤"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="舊密碼錯誤"
         )
 
     # 更新密碼

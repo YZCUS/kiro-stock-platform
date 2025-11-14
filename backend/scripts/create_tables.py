@@ -1,4 +1,5 @@
 """建立資料表腳本"""
+
 import asyncio
 import sys
 from pathlib import Path

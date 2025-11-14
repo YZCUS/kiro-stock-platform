@@ -2,6 +2,7 @@
 交易規則 - Domain Policies
 包含交易決策相關的業務規則
 """
+
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import date, datetime
 from enum import Enum
@@ -9,6 +10,7 @@ from enum import Enum
 
 class TrendDirection(str, Enum):
     """趨勢方向"""
+
     BULLISH = "bullish"
     BEARISH = "bearish"
     SIDEWAYS = "sideways"
@@ -16,6 +18,7 @@ class TrendDirection(str, Enum):
 
 class MarketCondition(str, Enum):
     """市場狀況"""
+
     BULL_MARKET = "bull_market"
     BEAR_MARKET = "bear_market"
     VOLATILE = "volatile"
@@ -49,13 +52,17 @@ class TradingRules:
         return trading_days
 
     @staticmethod
-    def is_golden_cross(short_ma: float, long_ma: float, prev_short_ma: float, prev_long_ma: float) -> bool:
+    def is_golden_cross(
+        short_ma: float, long_ma: float, prev_short_ma: float, prev_long_ma: float
+    ) -> bool:
         """檢測黃金交叉"""
         # 短期均線從下方穿越長期均線
         return (prev_short_ma <= prev_long_ma) and (short_ma > long_ma)
 
     @staticmethod
-    def is_death_cross(short_ma: float, long_ma: float, prev_short_ma: float, prev_long_ma: float) -> bool:
+    def is_death_cross(
+        short_ma: float, long_ma: float, prev_short_ma: float, prev_long_ma: float
+    ) -> bool:
         """檢測死亡交叉"""
         # 短期均線從上方穿越長期均線
         return (prev_short_ma >= prev_long_ma) and (short_ma < long_ma)
@@ -75,16 +82,24 @@ class TradingRules:
             return "neutral", 0.3
 
     @staticmethod
-    def determine_trend_direction(prices: List[float], window: int = 5) -> TrendDirection:
+    def determine_trend_direction(
+        prices: List[float], window: int = 5
+    ) -> TrendDirection:
         """判斷趨勢方向"""
         if len(prices) < window:
             return TrendDirection.SIDEWAYS
 
         recent_avg = sum(prices[:window]) / window
-        older_avg = sum(prices[window:window*2]) / window if len(prices) >= window*2 else recent_avg
+        older_avg = (
+            sum(prices[window : window * 2]) / window
+            if len(prices) >= window * 2
+            else recent_avg
+        )
 
         change_threshold = 0.02  # 2%
-        change_percent = abs((recent_avg - older_avg) / older_avg) if older_avg != 0 else 0
+        change_percent = (
+            abs((recent_avg - older_avg) / older_avg) if older_avg != 0 else 0
+        )
 
         if change_percent < change_threshold:
             return TrendDirection.SIDEWAYS
@@ -101,8 +116,8 @@ class TradingRules:
 
         returns = []
         for i in range(1, len(prices)):
-            if prices[i-1] != 0:
-                ret = (prices[i] - prices[i-1]) / prices[i-1]
+            if prices[i - 1] != 0:
+                ret = (prices[i] - prices[i - 1]) / prices[i - 1]
                 returns.append(ret)
 
         if not returns:
@@ -111,14 +126,11 @@ class TradingRules:
         # 計算標準差
         mean_return = sum(returns) / len(returns)
         variance = sum((r - mean_return) ** 2 for r in returns) / len(returns)
-        return variance ** 0.5
+        return variance**0.5
 
     @staticmethod
     def should_buy_on_dip(
-        current_price: float,
-        support_level: float,
-        rsi: float,
-        trend: TrendDirection
+        current_price: float, support_level: float, rsi: float, trend: TrendDirection
     ) -> Tuple[bool, float]:
         """判斷是否應該逢低買入"""
         confidence = 0.0
@@ -140,10 +152,7 @@ class TradingRules:
 
     @staticmethod
     def should_sell_on_resistance(
-        current_price: float,
-        resistance_level: float,
-        rsi: float,
-        profit_margin: float
+        current_price: float, resistance_level: float, rsi: float, profit_margin: float
     ) -> Tuple[bool, float]:
         """判斷是否應該在阻力位賣出"""
         confidence = 0.0
@@ -168,7 +177,7 @@ class TradingRules:
         account_balance: float,
         risk_percentage: float,
         entry_price: float,
-        stop_loss_price: float
+        stop_loss_price: float,
     ) -> int:
         """計算倉位大小"""
         if entry_price <= 0 or stop_loss_price <= 0:
@@ -185,18 +194,14 @@ class TradingRules:
 
     @staticmethod
     def calculate_stop_loss_level(
-        entry_price: float,
-        atr: float,
-        multiplier: float = 2.0
+        entry_price: float, atr: float, multiplier: float = 2.0
     ) -> float:
         """計算止損位"""
         return entry_price - (atr * multiplier)
 
     @staticmethod
     def calculate_take_profit_level(
-        entry_price: float,
-        stop_loss_price: float,
-        risk_reward_ratio: float = 2.0
+        entry_price: float, stop_loss_price: float, risk_reward_ratio: float = 2.0
     ) -> float:
         """計算止盈位"""
         risk = entry_price - stop_loss_price
@@ -204,9 +209,7 @@ class TradingRules:
 
     @staticmethod
     def assess_market_condition(
-        overall_trend: TrendDirection,
-        volatility: float,
-        volume_trend: float
+        overall_trend: TrendDirection, volatility: float, volume_trend: float
     ) -> MarketCondition:
         """評估市場狀況"""
         high_volatility_threshold = 0.03  # 3%

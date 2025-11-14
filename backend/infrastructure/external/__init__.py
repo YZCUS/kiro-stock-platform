@@ -1,4 +1,5 @@
 """外部服務整合模組"""
+
 from .yfinance_wrapper import (
     YFinanceWrapper,
     yfinance_wrapper,
@@ -8,9 +9,9 @@ from .yfinance_wrapper import (
 )
 
 __all__ = [
-    'YFinanceWrapper',
-    'yfinance_wrapper',
-    'is_yfinance_available',
-    'get_yfinance_version',
-    'MockTicker',
+    "YFinanceWrapper",
+    "yfinance_wrapper",
+    "is_yfinance_available",
+    "get_yfinance_version",
+    "MockTicker",
 ]

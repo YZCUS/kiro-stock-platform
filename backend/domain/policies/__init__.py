@@ -8,9 +8,4 @@ from .risk_assessment import RiskAssessment
 from .indicator_strategies import IndicatorStrategies
 from .validation_rules import ValidationRules
 
-__all__ = [
-    'TradingRules',
-    'RiskAssessment',
-    'IndicatorStrategies',
-    'ValidationRules'
-]
+__all__ = ["TradingRules", "RiskAssessment", "IndicatorStrategies", "ValidationRules"]

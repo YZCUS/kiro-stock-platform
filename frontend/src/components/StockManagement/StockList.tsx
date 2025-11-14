@@ -8,9 +8,7 @@ import { useStocks, useDeleteStock } from '../../hooks/useStocks';
 import { addToast } from '../../store/slices/uiSlice';
 import { useAppDispatch } from '../../store';
 
-export interface StockListProps {}
-
-const StockList: React.FC<StockListProps> = () => {
+const StockList: React.FC = () => {
   const dispatch = useAppDispatch();
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);

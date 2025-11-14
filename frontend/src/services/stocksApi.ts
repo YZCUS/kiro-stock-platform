@@ -10,7 +10,7 @@ export interface StockListParams {
   filters?: StockFilter;
 }
 
-export interface StockCreateData extends StockCreateForm {}
+export type StockCreateData = StockCreateForm;
 
 export interface StockUpdateData {
   name?: string;

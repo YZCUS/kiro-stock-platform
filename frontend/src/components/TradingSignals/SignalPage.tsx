@@ -5,9 +5,7 @@
 
 import React, { useState } from 'react';
 
-export interface SignalPageProps {}
-
-const SignalPage: React.FC<SignalPageProps> = () => {
+const SignalPage: React.FC = () => {
   const [selectedStock, setSelectedStock] = useState<string>('');
 
   return (

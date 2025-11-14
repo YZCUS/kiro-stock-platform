@@ -2,12 +2,15 @@
 股票業務服務 - Domain Layer
 專注於股票相關的業務邏輯，不依賴具體的基礎設施實現
 """
+
 from typing import List, Optional, Tuple, Dict, Any
 from datetime import date, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.repositories.stock_repository_interface import IStockRepository
-from domain.repositories.price_history_repository_interface import IPriceHistoryRepository
+from domain.repositories.price_history_repository_interface import (
+    IPriceHistoryRepository,
+)
 from infrastructure.cache.redis_cache_service import ICacheService
 
 
@@ -18,7 +21,7 @@ class StockService:
         self,
         stock_repository: IStockRepository,
         price_repository: IPriceHistoryRepository,
-        cache_service: ICacheService
+        cache_service: ICacheService,
     ):
         self.stock_repo = stock_repository
         self.price_repo = price_repository
@@ -31,7 +34,7 @@ class StockService:
         is_active: Optional[bool] = None,
         search: Optional[str] = None,
         page: int = 1,
-        per_page: int = 50
+        per_page: int = 50,
     ) -> Dict[str, Any]:
         """
         取得股票清單
@@ -49,7 +52,7 @@ class StockService:
             is_active=is_active,
             search=search,
             page=page,
-            per_page=per_page
+            per_page=per_page,
         )
 
         # 檢查快取（僅對常用查詢）
@@ -66,7 +69,7 @@ class StockService:
             is_active=is_active,
             search=search,
             offset=offset,
-            limit=per_page
+            limit=per_page,
         )
 
         # 計算分頁資訊
@@ -79,7 +82,7 @@ class StockService:
             "total": total,
             "page": page,
             "per_page": per_page,
-            "total_pages": total_pages
+            "total_pages": total_pages,
         }
 
         # 更新快取
@@ -89,9 +92,7 @@ class StockService:
         return result
 
     async def get_active_stocks(
-        self,
-        db: AsyncSession,
-        market: Optional[str] = None
+        self, db: AsyncSession, market: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         取得活躍股票清單
@@ -118,7 +119,7 @@ class StockService:
                 "id": stock.id,
                 "symbol": stock.symbol,
                 "name": stock.name,
-                "market": stock.market
+                "market": stock.market,
             }
             for stock in stocks
         ]
@@ -128,11 +129,7 @@ class StockService:
 
         return result
 
-    async def get_stock_by_id(
-        self,
-        db: AsyncSession,
-        stock_id: int
-    ):
+    async def get_stock_by_id(self, db: AsyncSession, stock_id: int):
         """
         根據ID取得股票詳情
 
@@ -145,11 +142,7 @@ class StockService:
             raise ValueError(f"股票 ID {stock_id} 不存在")
         return stock
 
-    async def get_stock_by_symbol(
-        self,
-        db: AsyncSession,
-        symbol: str
-    ):
+    async def get_stock_by_symbol(self, db: AsyncSession, symbol: str):
         """
         根據代號取得股票詳情
 
@@ -162,11 +155,7 @@ class StockService:
             raise ValueError(f"股票代號 {symbol} 不存在")
         return stock
 
-    async def create_stock(
-        self,
-        db: AsyncSession,
-        stock_data
-    ):
+    async def create_stock(self, db: AsyncSession, stock_data):
         """
         創建新股票
 
@@ -188,12 +177,7 @@ class StockService:
 
         return self._serialize_stock(new_stock)
 
-    async def update_stock(
-        self,
-        db: AsyncSession,
-        stock_id: int,
-        update_data
-    ):
+    async def update_stock(self, db: AsyncSession, stock_id: int, update_data):
         """
         更新股票資訊
 
@@ -213,11 +197,7 @@ class StockService:
 
         return self._serialize_stock(updated_stock)
 
-    async def delete_stock(
-        self,
-        db: AsyncSession,
-        stock_id: int
-    ):
+    async def delete_stock(self, db: AsyncSession, stock_id: int):
         """
         刪除股票
 
@@ -239,9 +219,7 @@ class StockService:
         return {"message": f"股票 {symbol} 已刪除"}
 
     async def create_stocks_batch(
-        self,
-        db: AsyncSession,
-        stocks_data
+        self, db: AsyncSession, stocks_data
     ) -> Dict[str, Any]:
         """批次建立股票"""
         created_stocks = []
@@ -250,21 +228,21 @@ class StockService:
 
         for stock_data in stocks_data:
             try:
-                existing_stock = await self.stock_repo.get_by_symbol(db, symbol=stock_data.symbol)
+                existing_stock = await self.stock_repo.get_by_symbol(
+                    db, symbol=stock_data.symbol
+                )
                 if existing_stock:
-                    skipped_stocks.append({
-                        "symbol": stock_data.symbol,
-                        "reason": "股票已存在"
-                    })
+                    skipped_stocks.append(
+                        {"symbol": stock_data.symbol, "reason": "股票已存在"}
+                    )
                     continue
 
                 created_stock = await self.stock_repo.create(db, stock_data)
                 created_stocks.append(self._serialize_stock(created_stock))
             except Exception as exc:
-                failed_stocks.append({
-                    "symbol": getattr(stock_data, "symbol", None),
-                    "error": str(exc)
-                })
+                failed_stocks.append(
+                    {"symbol": getattr(stock_data, "symbol", None), "error": str(exc)}
+                )
 
         # 清除快取以反映最新狀態
         if created_stocks:
@@ -281,7 +259,7 @@ class StockService:
             "message": (
                 f"批次處理完成：創建 {len(created_stocks)} 隻，"
                 f"跳過 {len(skipped_stocks)} 隻，失敗 {len(failed_stocks)} 隻"
-            )
+            ),
         }
 
     async def get_stock_prices(
@@ -290,7 +268,7 @@ class StockService:
         stock_id: int,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> List[Dict[str, Any]]:
         """取得股票價格數據"""
         await self.get_stock_by_id(db, stock_id)
@@ -310,28 +288,22 @@ class StockService:
         stock_id: int,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
-        limit: int = 1000
+        limit: int = 1000,
     ) -> Dict[str, Any]:
         """取得股票價格歷史資料"""
         stock = await self.get_stock_by_id(db, stock_id)
 
         prices = await self.price_repo.get_stock_price_range(
-            db,
-            stock_id=stock_id,
-            start_date=start_date,
-            end_date=end_date,
-            limit=limit
+            db, stock_id=stock_id, start_date=start_date, end_date=end_date, limit=limit
         )
 
         return {
             "symbol": stock.symbol,
-            "data": [self._serialize_price_full(price) for price in prices]
+            "data": [self._serialize_price_full(price) for price in prices],
         }
 
     async def get_latest_price_with_change(
-        self,
-        db: AsyncSession,
-        stock_id: int
+        self, db: AsyncSession, stock_id: int
     ) -> Dict[str, Any]:
         """
         取得最新價格和變動
@@ -360,7 +332,7 @@ class StockService:
             "change": change,
             "change_percent": change_percent,
             "volume": latest_price.volume,
-            "timestamp": latest_price.date.isoformat()
+            "timestamp": latest_price.date.isoformat(),
         }
 
     def _serialize_price(self, price) -> Dict[str, Any]:
@@ -371,7 +343,7 @@ class StockService:
             "high": float(price.high_price),
             "low": float(price.low_price),
             "close": float(price.close_price),
-            "volume": price.volume
+            "volume": price.volume,
         }
 
     def _serialize_price_full(self, price) -> Dict[str, Any]:
@@ -383,14 +355,11 @@ class StockService:
             "low": float(price.low_price),
             "close": float(price.close_price),
             "volume": price.volume,
-            "adjusted_close": float(price.adjusted_close or price.close_price)
+            "adjusted_close": float(price.adjusted_close or price.close_price),
         }
 
     async def _calculate_price_change(
-        self,
-        db: AsyncSession,
-        stock_id: int,
-        latest_price
+        self, db: AsyncSession, stock_id: int, latest_price
     ) -> Tuple[float, float]:
         """
         計算價格變動（私有方法）
@@ -401,10 +370,14 @@ class StockService:
         from domain.models.price_history import PriceHistory
 
         # 查詢前一個交易日
-        previous_price_query = select(PriceHistory).where(
-            PriceHistory.stock_id == stock_id,
-            PriceHistory.date < latest_price.date
-        ).order_by(desc(PriceHistory.date)).limit(1)
+        previous_price_query = (
+            select(PriceHistory)
+            .where(
+                PriceHistory.stock_id == stock_id, PriceHistory.date < latest_price.date
+            )
+            .order_by(desc(PriceHistory.date))
+            .limit(1)
+        )
 
         result = await db.execute(previous_price_query)
         previous_price = result.scalar_one_or_none()
@@ -433,7 +406,7 @@ class StockService:
             "name": stock.name,
             "is_active": getattr(stock, "is_active", None),
             "created_at": self._serialize_datetime(getattr(stock, "created_at", None)),
-            "updated_at": self._serialize_datetime(getattr(stock, "updated_at", None))
+            "updated_at": self._serialize_datetime(getattr(stock, "updated_at", None)),
         }
 
     def _serialize_datetime(self, value: Optional[datetime]) -> Optional[str]:

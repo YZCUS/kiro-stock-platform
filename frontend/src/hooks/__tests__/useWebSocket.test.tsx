@@ -50,9 +50,11 @@ const createTestStore = () => {
 };
 
 const createWrapper = (store = createTestStore()) => {
-  return ({ children }: { children: React.ReactNode }) => (
+  const Wrapper = ({ children }: { children: React.ReactNode }) => (
     <Provider store={store}>{children}</Provider>
   );
+  Wrapper.displayName = 'ReduxWrapper';
+  return Wrapper;
 };
 
 describe('useWebSocket', () => {

@@ -1,6 +1,7 @@
 """
 認證工具 - JWT Token 生成與驗證
 """
+
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
@@ -8,7 +9,9 @@ from app.settings import settings
 import uuid
 
 
-def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(
+    data: Dict[str, Any], expires_delta: Optional[timedelta] = None
+) -> str:
     """
     建立 JWT access token
 
@@ -23,10 +26,14 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.security.access_token_expire_minutes)
+        expire = datetime.utcnow() + timedelta(
+            minutes=settings.security.access_token_expire_minutes
+        )
 
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.security.secret_key, algorithm=settings.security.algorithm)
+    encoded_jwt = jwt.encode(
+        to_encode, settings.security.secret_key, algorithm=settings.security.algorithm
+    )
     return encoded_jwt
 
 
@@ -41,7 +48,11 @@ def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
         解碼後的 payload，如果驗證失敗則返回 None
     """
     try:
-        payload = jwt.decode(token, settings.security.secret_key, algorithms=[settings.security.algorithm])
+        payload = jwt.decode(
+            token,
+            settings.security.secret_key,
+            algorithms=[settings.security.algorithm],
+        )
         return payload
     except JWTError:
         return None

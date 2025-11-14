@@ -2,6 +2,7 @@
 股票API路由 - 重構為Clean Architecture版本
 只負責HTTP路由、參數驗證和回應格式化，業務邏輯委託給Domain Services
 """
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional, Dict, Any
@@ -16,7 +17,7 @@ from app.dependencies import (
     get_trading_signal_service_clean,
     get_stock_repository,
     get_cache_service,
-    get_settings
+    get_settings,
 )
 
 # Schemas
@@ -27,7 +28,7 @@ from api.schemas.stocks import (
     StockUpdateRequest,
     PriceDataResponse,
     IndicatorSummaryResponse,
-    DataCollectionResponse
+    DataCollectionResponse,
 )
 
 router = APIRouter()
@@ -37,6 +38,7 @@ router = APIRouter()
 # 股票清單相關端點
 # =============================================================================
 
+
 @router.get("/", response_model=StockListResponse)
 async def get_stocks(
     market: Optional[str] = Query(None, description="市場代碼 (TW/US)"),
@@ -45,7 +47,7 @@ async def get_stocks(
     page: int = Query(1, ge=1, description="頁碼"),
     per_page: int = Query(50, ge=1, le=200, description="每頁數量"),
     db: AsyncSession = Depends(get_database_session),
-    stock_service=Depends(get_stock_service)
+    stock_service=Depends(get_stock_service),
 ):
     """取得股票清單（支援過濾和分頁，支持可選的用戶認證以顯示持倉標記）
 
@@ -69,19 +71,23 @@ async def get_stocks(
             is_active=is_active,
             search=search,
             page=page,
-            per_page=per_page
+            per_page=per_page,
         )
 
         # 為每個股票獲取最新價格和用戶標記
         import logging
+
         logger = logging.getLogger(__name__)
 
         stock_responses = []
         for stock in result["items"]:
             # 查詢最新兩個交易日的價格（用於計算漲跌）
-            price_query = select(PriceHistory).where(
-                PriceHistory.stock_id == stock.id
-            ).order_by(desc(PriceHistory.date)).limit(2)
+            price_query = (
+                select(PriceHistory)
+                .where(PriceHistory.stock_id == stock.id)
+                .order_by(desc(PriceHistory.date))
+                .limit(2)
+            )
 
             price_result = await db.execute(price_query)
             prices = price_result.scalars().all()
@@ -94,13 +100,15 @@ async def get_stocks(
                 # 檢查持倉
                 portfolio_query = select(UserPortfolio).where(
                     UserPortfolio.user_id == current_user.id,
-                    UserPortfolio.stock_id == stock.id
+                    UserPortfolio.stock_id == stock.id,
                 )
                 portfolio_result = await db.execute(portfolio_query)
-                stock_data['is_portfolio'] = portfolio_result.scalar_one_or_none() is not None
+                stock_data["is_portfolio"] = (
+                    portfolio_result.scalar_one_or_none() is not None
+                )
             else:
                 # 未認證用戶，標記為 False
-                stock_data['is_portfolio'] = False
+                stock_data["is_portfolio"] = False
 
             if prices and len(prices) > 0:
                 latest = prices[0]
@@ -110,17 +118,19 @@ async def get_stocks(
                 change = None
                 change_percent = None
                 if close_price and len(prices) > 1:
-                    prev_close = float(prices[1].close_price) if prices[1].close_price else None
+                    prev_close = (
+                        float(prices[1].close_price) if prices[1].close_price else None
+                    )
                     if prev_close:
                         change = close_price - prev_close
                         change_percent = (change / prev_close) * 100
 
-                stock_data['latest_price'] = LatestPriceInfo(
+                stock_data["latest_price"] = LatestPriceInfo(
                     close=close_price,
                     change=change,
                     change_percent=change_percent,
                     date=latest.date,
-                    volume=latest.volume
+                    volume=latest.volume,
                 )
 
             stock_responses.append(StockResponse(**stock_data))
@@ -131,13 +141,14 @@ async def get_stocks(
             "total": result["total"],
             "page": result["page"],
             "per_page": result["per_page"],
-            "total_pages": result["total_pages"]
+            "total_pages": result["total_pages"],
         }
 
         return StockListResponse(**response_data)
 
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"取得股票清單失敗: {str(e)}")
 
@@ -147,7 +158,7 @@ async def get_active_stocks(
     market: Optional[str] = Query(None, description="市場代碼"),
     db: AsyncSession = Depends(get_database_session),
     stock_repo=Depends(get_stock_repository),
-    cache_service=Depends(get_cache_service)
+    cache_service=Depends(get_cache_service),
 ):
     """取得活躍股票清單"""
     try:
@@ -166,7 +177,7 @@ async def get_active_stocks(
                 "id": stock.id,
                 "symbol": stock.symbol,
                 "name": stock.name,
-                "market": stock.market
+                "market": stock.market,
             }
             for stock in stocks
         ]
@@ -184,11 +195,12 @@ async def get_active_stocks(
 # 股票詳情端點
 # =============================================================================
 
+
 @router.post("/validate")
 async def validate_stock_symbol(
     symbol: str = Query(..., description="股票代號"),
     market: str = Query(..., description="市場代碼 (TW/US)"),
-    data_collection_service=Depends(get_data_collection_service_clean)
+    data_collection_service=Depends(get_data_collection_service_clean),
 ):
     """
     驗證股票代號是否有效
@@ -200,7 +212,7 @@ async def validate_stock_symbol(
 
         # 格式化股票代號
         formatted_symbol = symbol.strip().upper()
-        if market == 'TW' and not formatted_symbol.endswith('.TW'):
+        if market == "TW" and not formatted_symbol.endswith(".TW"):
             formatted_symbol = f"{formatted_symbol}.TW"
 
         # 使用 YFinance 驗證
@@ -211,40 +223,37 @@ async def validate_stock_symbol(
         info = ticker.info
 
         # 檢查是否有效
-        if not info or 'symbol' not in info:
+        if not info or "symbol" not in info:
             raise HTTPException(
-                status_code=404,
-                detail=f"股票代號 {formatted_symbol} 無效或不存在"
+                status_code=404, detail=f"股票代號 {formatted_symbol} 無效或不存在"
             )
 
         # 返回股票基本信息
         return {
             "valid": True,
             "symbol": formatted_symbol,
-            "name": info.get('longName') or info.get('shortName') or formatted_symbol,
+            "name": info.get("longName") or info.get("shortName") or formatted_symbol,
             "market": market,
-            "currency": info.get('currency'),
-            "exchange": info.get('exchange'),
-            "quote_type": info.get('quoteType')
+            "currency": info.get("currency"),
+            "exchange": info.get("exchange"),
+            "quote_type": info.get("quoteType"),
         }
 
     except HTTPException:
         raise
     except Exception as e:
         import logging
+
         logger = logging.getLogger(__name__)
         logger.error(f"驗證股票代號失敗: {str(e)}")
-        raise HTTPException(
-            status_code=400,
-            detail=f"驗證股票代號失敗: {str(e)}"
-        )
+        raise HTTPException(status_code=400, detail=f"驗證股票代號失敗: {str(e)}")
 
 
 @router.get("/{stock_id}", response_model=StockResponse)
 async def get_stock(
     stock_id: int,
     db: AsyncSession = Depends(get_database_session),
-    stock_repo=Depends(get_stock_repository)
+    stock_repo=Depends(get_stock_repository),
 ):
     """取得單個股票詳情"""
     try:
@@ -264,6 +273,7 @@ async def get_stock(
 # 價格相關端點
 # =============================================================================
 
+
 @router.get("/{stock_id}/prices", response_model=List[PriceDataResponse])
 async def get_stock_prices(
     stock_id: int,
@@ -271,7 +281,7 @@ async def get_stock_prices(
     end_date: Optional[date] = Query(None, description="結束日期"),
     limit: int = Query(100, description="返回數量限制"),
     db: AsyncSession = Depends(get_database_session),
-    stock_repo=Depends(get_stock_repository)
+    stock_repo=Depends(get_stock_repository),
 ):
     """取得股票價格數據"""
     try:
@@ -288,10 +298,7 @@ async def get_stock_prices(
 
         if start_date and end_date:
             query = query.where(
-                and_(
-                    PriceHistory.date >= start_date,
-                    PriceHistory.date <= end_date
-                )
+                and_(PriceHistory.date >= start_date, PriceHistory.date <= end_date)
             )
 
         query = query.order_by(desc(PriceHistory.date)).limit(limit)
@@ -303,13 +310,15 @@ async def get_stock_prices(
         for price in prices:
             try:
                 # 檢查必要欄位是否存在且不為 None
-                if all([
-                    price.date is not None,
-                    price.open_price is not None,
-                    price.high_price is not None,
-                    price.low_price is not None,
-                    price.close_price is not None
-                ]):
+                if all(
+                    [
+                        price.date is not None,
+                        price.open_price is not None,
+                        price.high_price is not None,
+                        price.low_price is not None,
+                        price.close_price is not None,
+                    ]
+                ):
                     valid_prices.append(
                         PriceDataResponse(
                             date=price.date,
@@ -317,7 +326,7 @@ async def get_stock_prices(
                             high=float(price.high_price),
                             low=float(price.low_price),
                             close=float(price.close_price),
-                            volume=price.volume if price.volume is not None else 0
+                            volume=price.volume if price.volume is not None else 0,
                         )
                     )
             except (ValueError, TypeError) as e:
@@ -336,6 +345,7 @@ async def get_stock_prices(
 # 技術指標端點
 # =============================================================================
 
+
 @router.get("/{stock_id}/indicators/summary", response_model=IndicatorSummaryResponse)
 async def get_indicators_summary(
     stock_id: int,
@@ -345,7 +355,7 @@ async def get_indicators_summary(
     db: AsyncSession = Depends(get_database_session),
     stock_repo=Depends(get_stock_repository),
     analysis_service=Depends(get_technical_analysis_service_clean),
-    settings=Depends(get_settings)
+    settings=Depends(get_settings),
 ):
     """取得技術指標摘要"""
     try:
@@ -356,7 +366,7 @@ async def get_indicators_summary(
 
         # 解析指標類型
         if indicator_types:
-            indicator_list = [t.strip().upper() for t in indicator_types.split(',')]
+            indicator_list = [t.strip().upper() for t in indicator_types.split(",")]
         else:
             indicator_list = ["RSI", "SMA_20", "MACD", "SMA_5"]  # 預設指標
 
@@ -366,7 +376,7 @@ async def get_indicators_summary(
             db_session=db,
             stock_id=stock_id,
             indicator_types=indicator_list,
-            days=100  # 暫時使用固定值，後續可根據period調整
+            days=100,  # 暫時使用固定值，後續可根據period調整
         )
 
         # 格式化響應
@@ -376,7 +386,9 @@ async def get_indicators_summary(
                 raw_data = indicators_data[indicator_type]
                 if raw_data:
                     # 建立標準化的指標響應格式
-                    latest_value = raw_data[-1] if isinstance(raw_data, list) else raw_data
+                    latest_value = (
+                        raw_data[-1] if isinstance(raw_data, list) else raw_data
+                    )
 
                     formatted_response = {
                         "symbol": stock.symbol,
@@ -384,7 +396,9 @@ async def get_indicators_summary(
                         "period": period or 14,
                         "timestamp": "2024-01-01T12:00:00Z",  # 暫時使用固定時間
                         "success": True,
-                        "data_points": len(raw_data) if isinstance(raw_data, list) else 1
+                        "data_points": (
+                            len(raw_data) if isinstance(raw_data, list) else 1
+                        ),
                     }
 
                     indicators_summary[indicator_type] = formatted_response
@@ -393,7 +407,7 @@ async def get_indicators_summary(
             stock_id=stock_id,
             symbol=stock.symbol,
             timeframe=timeframe,
-            indicators=indicators_summary
+            indicators=indicators_summary,
         )
 
     except HTTPException:
@@ -406,18 +420,22 @@ async def get_indicators_summary(
 # 數據收集端點
 # =============================================================================
 
+
 @router.post("/{stock_id}/refresh", response_model=DataCollectionResponse)
 async def refresh_stock_data(
     stock_id: int,
     days: int = Query(30, ge=1, le=365, description="回補天數"),
     db: AsyncSession = Depends(get_database_session),
     stock_repo=Depends(get_stock_repository),
-    collection_service=Depends(get_data_collection_service_clean)
+    collection_service=Depends(get_data_collection_service_clean),
 ):
     """手動更新股票數據"""
     import logging
+
     logger = logging.getLogger(__name__)
-    logger.info(f"=== ENTERING refresh_stock_data endpoint, stock_id={stock_id}, days={days} ===")
+    logger.info(
+        f"=== ENTERING refresh_stock_data endpoint, stock_id={stock_id}, days={days} ==="
+    )
     try:
         logger.info("Checking if stock exists...")
         # 檢查股票是否存在
@@ -428,13 +446,17 @@ async def refresh_stock_data(
 
         # 計算日期範圍
         from datetime import timedelta
+
         end_date = date.today()
         start_date = end_date - timedelta(days=days)
 
         # 呼叫Domain Service
         import logging
+
         logger = logging.getLogger(__name__)
-        logger.info(f"Calling collect_stock_data with stock_id={stock.id}, start={start_date}, end={end_date}")
+        logger.info(
+            f"Calling collect_stock_data with stock_id={stock.id}, start={start_date}, end={end_date}"
+        )
 
         result = await collection_service.collect_stock_data(
             db, stock_id=stock.id, start_date=start_date, end_date=end_date
@@ -444,20 +466,24 @@ async def refresh_stock_data(
 
         # 檢查結果狀態 (result.status 是 DataCollectionStatus enum)
         from domain.services.data_collection_service import DataCollectionStatus
+
         success = result.status == DataCollectionStatus.SUCCESS
-        message = f"成功收集 {result.records_collected} 筆數據" if success else "數據收集失敗"
+        message = (
+            f"成功收集 {result.records_collected} 筆數據" if success else "數據收集失敗"
+        )
 
         return DataCollectionResponse(
             success=success,
             message=message,
             data_points=result.records_collected,
-            errors=result.errors
+            errors=result.errors,
         )
 
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"數據刷新失敗: {str(e)}")
 
@@ -466,11 +492,12 @@ async def refresh_stock_data(
 # CRUD 端點
 # =============================================================================
 
+
 @router.post("/", response_model=StockResponse)
 async def create_stock(
     stock: StockCreateRequest,
     db: AsyncSession = Depends(get_database_session),
-    stock_repo=Depends(get_stock_repository)
+    stock_repo=Depends(get_stock_repository),
 ):
     """創建新股票"""
     try:
@@ -478,8 +505,7 @@ async def create_stock(
         existing_stock = await stock_repo.get_by_symbol(db, symbol=stock.symbol)
         if existing_stock:
             raise HTTPException(
-                status_code=400,
-                detail=f"股票代號 {stock.symbol} 已存在"
+                status_code=400, detail=f"股票代號 {stock.symbol} 已存在"
             )
 
         # 創建股票
@@ -497,7 +523,7 @@ async def update_stock(
     stock_id: int,
     stock_update: StockUpdateRequest,
     db: AsyncSession = Depends(get_database_session),
-    stock_repo=Depends(get_stock_repository)
+    stock_repo=Depends(get_stock_repository),
 ):
     """更新股票資訊"""
     try:
@@ -520,7 +546,7 @@ async def update_stock(
 async def delete_stock(
     stock_id: int,
     db: AsyncSession = Depends(get_database_session),
-    stock_repo=Depends(get_stock_repository)
+    stock_repo=Depends(get_stock_repository),
 ):
     """刪除股票"""
     try:

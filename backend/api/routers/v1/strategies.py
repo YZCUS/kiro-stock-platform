@@ -1,6 +1,7 @@
 """
 策略管理 API 路由
 """
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
@@ -23,7 +24,7 @@ from api.schemas.strategy import (
     SignalResponse,
     SignalListResponse,
     SignalStatisticsResponse,
-    UpdateSignalStatusRequest
+    UpdateSignalStatusRequest,
 )
 
 
@@ -37,6 +38,7 @@ signal_service = StrategySignalService()
 # ============================================================================
 # 策略查詢 API
 # ============================================================================
+
 
 @router.get("/available", response_model=StrategyListResponse)
 async def get_available_strategies():
@@ -61,7 +63,7 @@ async def get_available_strategies():
                 type=strategy.strategy_type.value,
                 name=strategy.name,
                 description=strategy.description,
-                default_params=strategy.get_default_params()
+                default_params=strategy.get_default_params(),
             )
         )
 
@@ -72,11 +74,12 @@ async def get_available_strategies():
 # 訂閱管理 API
 # ============================================================================
 
+
 @router.post("/subscriptions", response_model=SubscriptionResponse, status_code=201)
 async def create_subscription(
     request: SubscriptionCreateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     創建策略訂閱
@@ -104,7 +107,7 @@ async def create_subscription(
             params=request.params,
             monitor_all_lists=request.monitor_all_lists,
             monitor_portfolio=request.monitor_portfolio,
-            selected_list_ids=request.selected_list_ids
+            selected_list_ids=request.selected_list_ids,
         )
 
         return SubscriptionResponse(
@@ -116,8 +119,12 @@ async def create_subscription(
             monitor_portfolio=subscription.monitor_portfolio,
             parameters=subscription.parameters,
             monitored_lists=subscription.get_monitored_stock_list_ids(),
-            created_at=subscription.created_at.isoformat() if subscription.created_at else None,
-            updated_at=subscription.updated_at.isoformat() if subscription.updated_at else None
+            created_at=(
+                subscription.created_at.isoformat() if subscription.created_at else None
+            ),
+            updated_at=(
+                subscription.updated_at.isoformat() if subscription.updated_at else None
+            ),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -127,7 +134,7 @@ async def create_subscription(
 async def get_user_subscriptions(
     active_only: bool = Query(False, description="是否只返回啟用的訂閱"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     獲取用戶的策略訂閱列表
@@ -143,9 +150,7 @@ async def get_user_subscriptions(
         SubscriptionListResponse: 訂閱列表
     """
     subscriptions = await subscription_service.get_user_subscriptions(
-        db=db,
-        user_id=current_user.id,
-        active_only=active_only
+        db=db, user_id=current_user.id, active_only=active_only
     )
 
     subscription_responses = [
@@ -159,14 +164,13 @@ async def get_user_subscriptions(
             parameters=sub.parameters,
             monitored_lists=sub.get_monitored_stock_list_ids(),
             created_at=sub.created_at.isoformat() if sub.created_at else None,
-            updated_at=sub.updated_at.isoformat() if sub.updated_at else None
+            updated_at=sub.updated_at.isoformat() if sub.updated_at else None,
         )
         for sub in subscriptions
     ]
 
     return SubscriptionListResponse(
-        subscriptions=subscription_responses,
-        total=len(subscription_responses)
+        subscriptions=subscription_responses, total=len(subscription_responses)
     )
 
 
@@ -175,7 +179,7 @@ async def update_subscription(
     subscription_id: int,
     request: SubscriptionUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     更新策略訂閱
@@ -202,7 +206,7 @@ async def update_subscription(
             params=request.params,
             monitor_all_lists=request.monitor_all_lists,
             monitor_portfolio=request.monitor_portfolio,
-            selected_list_ids=request.selected_list_ids
+            selected_list_ids=request.selected_list_ids,
         )
 
         # 驗證訂閱屬於當前用戶
@@ -218,8 +222,12 @@ async def update_subscription(
             monitor_portfolio=subscription.monitor_portfolio,
             parameters=subscription.parameters,
             monitored_lists=subscription.get_monitored_stock_list_ids(),
-            created_at=subscription.created_at.isoformat() if subscription.created_at else None,
-            updated_at=subscription.updated_at.isoformat() if subscription.updated_at else None
+            created_at=(
+                subscription.created_at.isoformat() if subscription.created_at else None
+            ),
+            updated_at=(
+                subscription.updated_at.isoformat() if subscription.updated_at else None
+            ),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -230,7 +238,7 @@ async def delete_subscription(
     subscription_id: int,
     hard_delete: bool = Query(False, description="是否硬刪除（物理刪除）"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     刪除策略訂閱
@@ -248,29 +256,28 @@ async def delete_subscription(
     """
     # 先檢查訂閱是否屬於當前用戶
     subscriptions = await subscription_service.get_user_subscriptions(
-        db=db,
-        user_id=current_user.id
+        db=db, user_id=current_user.id
     )
 
     if not any(sub.id == subscription_id for sub in subscriptions):
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     success = await subscription_service.delete_subscription(
-        db=db,
-        subscription_id=subscription_id,
-        hard_delete=hard_delete
+        db=db, subscription_id=subscription_id, hard_delete=hard_delete
     )
 
     if not success:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
 
-@router.post("/subscriptions/{subscription_id}/toggle", response_model=SubscriptionResponse)
+@router.post(
+    "/subscriptions/{subscription_id}/toggle", response_model=SubscriptionResponse
+)
 async def toggle_subscription(
     subscription_id: int,
     is_active: Optional[bool] = Query(None, description="目標狀態（None=自動切換）"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     切換訂閱狀態（啟用/停用）
@@ -291,9 +298,7 @@ async def toggle_subscription(
     """
     try:
         subscription = await subscription_service.toggle_subscription(
-            db=db,
-            subscription_id=subscription_id,
-            is_active=is_active
+            db=db, subscription_id=subscription_id, is_active=is_active
         )
 
         # 驗證訂閱屬於當前用戶
@@ -309,8 +314,12 @@ async def toggle_subscription(
             monitor_portfolio=subscription.monitor_portfolio,
             parameters=subscription.parameters,
             monitored_lists=subscription.get_monitored_stock_list_ids(),
-            created_at=subscription.created_at.isoformat() if subscription.created_at else None,
-            updated_at=subscription.updated_at.isoformat() if subscription.updated_at else None
+            created_at=(
+                subscription.created_at.isoformat() if subscription.created_at else None
+            ),
+            updated_at=(
+                subscription.updated_at.isoformat() if subscription.updated_at else None
+            ),
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -319,6 +328,7 @@ async def toggle_subscription(
 # ============================================================================
 # 信號查詢 API
 # ============================================================================
+
 
 @router.get("/signals", response_model=SignalListResponse)
 async def get_user_signals(
@@ -332,7 +342,7 @@ async def get_user_signals(
     limit: Optional[int] = Query(50, description="每頁數量", le=100),
     offset: Optional[int] = Query(0, description="偏移量", ge=0),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     獲取用戶的交易信號列表
@@ -366,7 +376,7 @@ async def get_user_signals(
         sort_by=sort_by,
         sort_order=sort_order,
         limit=limit,
-        offset=offset
+        offset=offset,
     )
 
     signal_responses = [
@@ -379,10 +389,7 @@ async def get_user_signals(
             strategy_type=signal.strategy_type,
             direction=signal.direction,
             confidence=float(signal.confidence),
-            entry_zone={
-                "min": float(signal.entry_min),
-                "max": float(signal.entry_max)
-            },
+            entry_zone={"min": float(signal.entry_min), "max": float(signal.entry_max)},
             stop_loss=float(signal.stop_loss),
             take_profit=signal.take_profit_targets,
             status=signal.status,
@@ -391,15 +398,12 @@ async def get_user_signals(
             reason=signal.reason,
             extra_data=signal.extra_data,
             is_valid=signal.is_valid(),
-            created_at=signal.created_at.isoformat() if signal.created_at else None
+            created_at=signal.created_at.isoformat() if signal.created_at else None,
         )
         for signal in signals
     ]
 
-    return SignalListResponse(
-        signals=signal_responses,
-        total=len(signal_responses)
-    )
+    return SignalListResponse(signals=signal_responses, total=len(signal_responses))
 
 
 @router.get("/signals/statistics", response_model=SignalStatisticsResponse)
@@ -407,7 +411,7 @@ async def get_signal_statistics(
     date_from: Optional[date] = Query(None, description="開始日期"),
     date_to: Optional[date] = Query(None, description="結束日期"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     獲取用戶的信號統計資訊
@@ -424,10 +428,7 @@ async def get_signal_statistics(
         SignalStatisticsResponse: 信號統計資訊
     """
     stats = await signal_service.get_signal_statistics(
-        db=db,
-        user_id=current_user.id,
-        date_from=date_from,
-        date_to=date_to
+        db=db, user_id=current_user.id, date_from=date_from, date_to=date_to
     )
 
     return SignalStatisticsResponse(**stats)
@@ -438,7 +439,7 @@ async def update_signal_status(
     signal_id: int,
     request: UpdateSignalStatusRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     更新信號狀態
@@ -460,10 +461,7 @@ async def update_signal_status(
     """
     try:
         signal = await signal_service.update_signal_status(
-            db=db,
-            signal_id=signal_id,
-            status=request.status,
-            user_id=current_user.id
+            db=db, signal_id=signal_id, status=request.status, user_id=current_user.id
         )
 
         return SignalResponse(
@@ -475,10 +473,7 @@ async def update_signal_status(
             strategy_type=signal.strategy_type,
             direction=signal.direction,
             confidence=float(signal.confidence),
-            entry_zone={
-                "min": float(signal.entry_min),
-                "max": float(signal.entry_max)
-            },
+            entry_zone={"min": float(signal.entry_min), "max": float(signal.entry_max)},
             stop_loss=float(signal.stop_loss),
             take_profit=signal.take_profit_targets,
             status=signal.status,
@@ -487,7 +482,7 @@ async def update_signal_status(
             reason=signal.reason,
             extra_data=signal.extra_data,
             is_valid=signal.is_valid(),
-            created_at=signal.created_at.isoformat() if signal.created_at else None
+            created_at=signal.created_at.isoformat() if signal.created_at else None,
         )
     except ValueError as e:
         error_msg = str(e)
@@ -501,7 +496,7 @@ async def update_signal_status(
 async def generate_signals(
     user_id: Optional[uuid.UUID] = Query(None, description="用戶 ID（管理員功能）"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     手動觸發信號生成
@@ -524,18 +519,15 @@ async def generate_signals(
         if not current_user.is_superuser:
             raise HTTPException(
                 status_code=403,
-                detail="Only administrators can generate signals for other users"
+                detail="Only administrators can generate signals for other users",
             )
 
     # 批量生成信號
-    result = await signal_service.batch_generate_signals(
-        db=db,
-        user_id=target_user_id
-    )
+    result = await signal_service.batch_generate_signals(db=db, user_id=target_user_id)
 
     return {
         "message": "Signal generation started",
         "processed_subscriptions": result["processed_subscriptions"],
         "generated_signals": result["generated_signals"],
-        "errors": result["errors"]
+        "errors": result["errors"],
     }

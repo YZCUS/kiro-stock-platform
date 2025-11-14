@@ -1,6 +1,7 @@
 """
 交易信號相關API端點
 """
+
 from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Dict, List, Optional, Any
@@ -122,7 +123,9 @@ async def get_all_signals(
             filters=filters,
             market=market,
         )
-        stats = await signal_service.get_signal_stats(db, filters=filters, market=market)
+        stats = await signal_service.get_signal_stats(
+            db, filters=filters, market=market
+        )
 
         signal_responses = []
         for signal in signals:
@@ -205,7 +208,9 @@ async def get_signal_statistics(
             "end_date": end_date,
         }
 
-        stats = await signal_service.get_detailed_signal_stats(db, filters=filters, market=market)
+        stats = await signal_service.get_detailed_signal_stats(
+            db, filters=filters, market=market
+        )
 
         return SignalStatsResponse(
             total_signals=stats.get("total_signals", 0),
@@ -289,7 +294,11 @@ async def detect_stock_signals(
                     symbol=stock.symbol,
                     signal_type=signal.signal_type.value,
                     strength=signal.signal_strength.value,
-                    price=float(signal.metadata.get("price", 0)) if signal.metadata else None,
+                    price=(
+                        float(signal.metadata.get("price", 0))
+                        if signal.metadata
+                        else None
+                    ),
                     confidence=signal.confidence,
                     date=date.today(),
                     description=signal.description,

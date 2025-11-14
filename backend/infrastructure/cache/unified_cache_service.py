@@ -2,6 +2,7 @@
 統一快取服務 - Infrastructure Layer
 整合所有快取功能，提供統一的快取抽象
 """
+
 import json
 import redis
 from typing import Optional, List, Dict, Any, Union
@@ -76,9 +77,7 @@ class RedisCacheService(ICacheService):
         try:
             ttl = ttl or self.default_ttl
             success = self.redis_client.setex(
-                key,
-                ttl,
-                json.dumps(value, ensure_ascii=False, default=str)
+                key, ttl, json.dumps(value, ensure_ascii=False, default=str)
             )
             if success:
                 logger.debug(f"成功設置快取: {key}")
@@ -130,7 +129,7 @@ class RedisCacheService(ICacheService):
             "hit_count": self.hit_count,
             "miss_count": self.miss_count,
             "hit_rate": hit_rate,
-            "total_requests": total
+            "total_requests": total,
         }
 
 
@@ -200,7 +199,7 @@ class StockCacheService:
         is_active: Optional[bool] = None,
         search: Optional[str] = None,
         page: int = 1,
-        per_page: int = 50
+        per_page: int = 50,
     ) -> Optional[Dict[str, Any]]:
         """取得股票清單快取"""
         cache_key = self.cache.get_cache_key(
@@ -209,7 +208,7 @@ class StockCacheService:
             is_active=is_active,
             search=search,
             page=page,
-            per_page=per_page
+            per_page=per_page,
         )
         return await self.cache.get(cache_key)
 
@@ -221,7 +220,7 @@ class StockCacheService:
         search: Optional[str] = None,
         page: int = 1,
         per_page: int = 50,
-        ttl: int = 300
+        ttl: int = 300,
     ) -> bool:
         """設置股票清單快取"""
         cache_key = self.cache.get_cache_key(
@@ -230,20 +229,19 @@ class StockCacheService:
             is_active=is_active,
             search=search,
             page=page,
-            per_page=per_page
+            per_page=per_page,
         )
         return await self.cache.set(cache_key, data, ttl)
 
-    async def get_active_stocks(self, market: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
+    async def get_active_stocks(
+        self, market: Optional[str] = None
+    ) -> Optional[List[Dict[str, Any]]]:
         """取得活躍股票快取"""
         cache_key = self.cache.get_cache_key("active_stocks", market=market)
         return await self.cache.get(cache_key)
 
     async def set_active_stocks(
-        self,
-        data: List[Dict[str, Any]],
-        market: Optional[str] = None,
-        ttl: int = 1800
+        self, data: List[Dict[str, Any]], market: Optional[str] = None, ttl: int = 1800
     ) -> bool:
         """設置活躍股票快取"""
         cache_key = self.cache.get_cache_key("active_stocks", market=market)
@@ -266,17 +264,14 @@ class TechnicalAnalysisCacheService:
         self.cache = cache_service
 
     async def get_technical_analysis(
-        self,
-        stock_id: int,
-        indicators: List[str] = None,
-        days: int = 100
+        self, stock_id: int, indicators: List[str] = None, days: int = 100
     ) -> Optional[Dict[str, Any]]:
         """取得技術分析快取"""
         cache_key = self.cache.get_cache_key(
             "technical_analysis",
             stock_id=stock_id,
             indicators=",".join(indicators) if indicators else "all",
-            days=days
+            days=days,
         )
         return await self.cache.get(cache_key)
 
@@ -286,14 +281,14 @@ class TechnicalAnalysisCacheService:
         data: Dict[str, Any],
         indicators: List[str] = None,
         days: int = 100,
-        ttl: int = 300
+        ttl: int = 300,
     ) -> bool:
         """設置技術分析快取"""
         cache_key = self.cache.get_cache_key(
             "technical_analysis",
             stock_id=stock_id,
             indicators=",".join(indicators) if indicators else "all",
-            days=days
+            days=days,
         )
         return await self.cache.set(cache_key, data, ttl)
 
@@ -303,10 +298,7 @@ class TechnicalAnalysisCacheService:
         return await self.cache.get(cache_key)
 
     async def set_technical_summary(
-        self,
-        stock_id: int,
-        data: Dict[str, Any],
-        ttl: int = 600
+        self, stock_id: int, data: Dict[str, Any], ttl: int = 600
     ) -> bool:
         """設置技術摘要快取"""
         cache_key = self.cache.get_cache_key("technical_summary", stock_id=stock_id)
@@ -320,15 +312,11 @@ class TradingSignalCacheService:
         self.cache = cache_service
 
     async def get_trading_signals(
-        self,
-        stock_id: int,
-        analysis_days: int = 60
+        self, stock_id: int, analysis_days: int = 60
     ) -> Optional[Dict[str, Any]]:
         """取得交易信號快取"""
         cache_key = self.cache.get_cache_key(
-            "trading_signals",
-            stock_id=stock_id,
-            analysis_days=analysis_days
+            "trading_signals", stock_id=stock_id, analysis_days=analysis_days
         )
         return await self.cache.get(cache_key)
 
@@ -337,26 +325,20 @@ class TradingSignalCacheService:
         stock_id: int,
         data: Dict[str, Any],
         analysis_days: int = 60,
-        ttl: int = 3600
+        ttl: int = 3600,
     ) -> bool:
         """設置交易信號快取"""
         cache_key = self.cache.get_cache_key(
-            "trading_signals",
-            stock_id=stock_id,
-            analysis_days=analysis_days
+            "trading_signals", stock_id=stock_id, analysis_days=analysis_days
         )
         return await self.cache.set(cache_key, data, ttl)
 
     async def get_market_signals(
-        self,
-        market: Optional[str] = None,
-        min_confidence: float = 0.8
+        self, market: Optional[str] = None, min_confidence: float = 0.8
     ) -> Optional[Dict[str, Any]]:
         """取得市場信號快取"""
         cache_key = self.cache.get_cache_key(
-            "market_signals",
-            market=market,
-            min_confidence=min_confidence
+            "market_signals", market=market, min_confidence=min_confidence
         )
         return await self.cache.get(cache_key)
 
@@ -365,13 +347,11 @@ class TradingSignalCacheService:
         data: Dict[str, Any],
         market: Optional[str] = None,
         min_confidence: float = 0.8,
-        ttl: int = 1800
+        ttl: int = 1800,
     ) -> bool:
         """設置市場信號快取"""
         cache_key = self.cache.get_cache_key(
-            "market_signals",
-            market=market,
-            min_confidence=min_confidence
+            "market_signals", market=market, min_confidence=min_confidence
         )
         return await self.cache.set(cache_key, data, ttl)
 
@@ -383,17 +363,14 @@ class DataCollectionCacheService:
         self.cache = cache_service
 
     async def get_collection_status(
-        self,
-        stock_id: int,
-        start_date: str,
-        end_date: str
+        self, stock_id: int, start_date: str, end_date: str
     ) -> Optional[Dict[str, Any]]:
         """取得收集狀態快取"""
         cache_key = self.cache.get_cache_key(
             "data_collection_status",
             stock_id=stock_id,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
         )
         return await self.cache.get(cache_key)
 
@@ -403,14 +380,14 @@ class DataCollectionCacheService:
         start_date: str,
         end_date: str,
         data: Dict[str, Any],
-        ttl: int = 3600
+        ttl: int = 3600,
     ) -> bool:
         """設置收集狀態快取"""
         cache_key = self.cache.get_cache_key(
             "data_collection_status",
             stock_id=stock_id,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
         )
         return await self.cache.set(cache_key, data, ttl)
 
@@ -419,11 +396,7 @@ class DataCollectionCacheService:
         cache_key = self.cache.get_cache_key("collection_health")
         return await self.cache.get(cache_key)
 
-    async def set_collection_health(
-        self,
-        data: Dict[str, Any],
-        ttl: int = 600
-    ) -> bool:
+    async def set_collection_health(self, data: Dict[str, Any], ttl: int = 600) -> bool:
         """設置收集健康狀態快取"""
         cache_key = self.cache.get_cache_key("collection_health")
         return await self.cache.set(cache_key, data, ttl)

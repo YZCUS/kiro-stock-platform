@@ -2,6 +2,7 @@
 技術分析業務服務 - Domain Layer
 專注於技術分析相關的業務邏輯，不依賴具體的基礎設施實現
 """
+
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import date, datetime, timedelta
 from dataclasses import dataclass
@@ -9,12 +10,15 @@ from enum import Enum
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.repositories.stock_repository_interface import IStockRepository
-from domain.repositories.price_history_repository_interface import IPriceHistoryRepository
+from domain.repositories.price_history_repository_interface import (
+    IPriceHistoryRepository,
+)
 from infrastructure.cache.redis_cache_service import ICacheService
 
 
 class IndicatorType(str, Enum):
     """技術指標類型"""
+
     RSI = "RSI"
     SMA_5 = "SMA_5"
     SMA_20 = "SMA_20"
@@ -38,6 +42,7 @@ class IndicatorType(str, Enum):
 @dataclass
 class IndicatorResult:
     """指標計算結果"""
+
     indicator_type: str
     values: List[float]
     dates: List[date]
@@ -49,6 +54,7 @@ class IndicatorResult:
 @dataclass
 class AnalysisResult:
     """技術分析結果"""
+
     stock_id: int
     stock_symbol: str
     analysis_date: date
@@ -67,7 +73,7 @@ class TechnicalAnalysisService:
         self,
         stock_repository: IStockRepository,
         price_repository: IPriceHistoryRepository,
-        cache_service: ICacheService
+        cache_service: ICacheService,
     ):
         self.stock_repo = stock_repository
         self.price_repo = price_repository
@@ -78,7 +84,7 @@ class TechnicalAnalysisService:
         db: AsyncSession,
         stock_id: int,
         indicators: List[IndicatorType] = None,
-        days: int = 100
+        days: int = 100,
     ) -> AnalysisResult:
         """
         計算股票技術指標
@@ -101,7 +107,7 @@ class TechnicalAnalysisService:
             "technical_analysis",
             stock_id=stock_id,
             indicators=",".join(indicators) if indicators else "all",
-            days=days
+            days=days,
         )
 
         cached_result = await self.cache.get(cache_key)
@@ -124,9 +130,7 @@ class TechnicalAnalysisService:
 
         for indicator in indicators:
             try:
-                result = await self._calculate_single_indicator(
-                    prices, indicator
-                )
+                result = await self._calculate_single_indicator(prices, indicator)
                 results.append(result)
                 if not result.success:
                     errors.append(result.error_message)
@@ -148,24 +152,16 @@ class TechnicalAnalysisService:
             indicators_failed=len([r for r in results if not r.success]),
             execution_time_seconds=execution_time,
             errors=errors,
-            warnings=warnings
+            warnings=warnings,
         )
 
         # 快取結果 (短期快取，因為技術指標會頻繁更新)
-        await self.cache.set(
-            cache_key,
-            analysis_result.__dict__,
-            ttl=300  # 5分鐘
-        )
+        await self.cache.set(cache_key, analysis_result.__dict__, ttl=300)  # 5分鐘
 
         return analysis_result
 
     async def calculate_indicator(
-        self,
-        db: AsyncSession,
-        stock_id: int,
-        indicator: IndicatorType,
-        days: int = 60
+        self, db: AsyncSession, stock_id: int, indicator: IndicatorType, days: int = 60
     ) -> Dict[str, Any]:
         """計算單一技術指標並返回摘要資料"""
 
@@ -177,7 +173,9 @@ class TechnicalAnalysisService:
         if len(prices) < 5:
             raise ValueError("價格數據不足，無法計算技術指標")
 
-        result = await self._calculate_single_indicator(prices, indicator, max_points=days)
+        result = await self._calculate_single_indicator(
+            prices, indicator, max_points=days
+        )
 
         summary = self._summarize_indicator(result)
 
@@ -186,14 +184,14 @@ class TechnicalAnalysisService:
             "symbol": stock.symbol,
             "indicator": indicator.value,
             "values": result.values,
-            "dates": [d.isoformat() if isinstance(d, date) else d for d in result.dates],
+            "dates": [
+                d.isoformat() if isinstance(d, date) else d for d in result.dates
+            ],
             "summary": summary,
         }
 
     async def get_stock_technical_summary(
-        self,
-        db: AsyncSession,
-        stock_id: int
+        self, db: AsyncSession, stock_id: int
     ) -> Dict[str, Any]:
         """
         取得股票技術面摘要
@@ -209,10 +207,7 @@ class TechnicalAnalysisService:
             raise ValueError(f"股票 ID {stock_id} 不存在")
 
         # 檢查快取
-        cache_key = self.cache.get_cache_key(
-            "technical_summary",
-            stock_id=stock_id
-        )
+        cache_key = self.cache.get_cache_key("technical_summary", stock_id=stock_id)
 
         cached_result = await self.cache.get(cache_key)
         if cached_result:
@@ -234,7 +229,7 @@ class TechnicalAnalysisService:
             "analysis_date": datetime.now().isoformat(),
             "technical_signals": await self._generate_technical_signals(prices),
             "trend_analysis": await self._analyze_trend(prices),
-            "support_resistance": await self._calculate_support_resistance(prices)
+            "support_resistance": await self._calculate_support_resistance(prices),
         }
 
         # 快取結果
@@ -243,10 +238,7 @@ class TechnicalAnalysisService:
         return summary
 
     async def calculate_price_momentum(
-        self,
-        db: AsyncSession,
-        stock_id: int,
-        periods: List[int] = [1, 5, 20]
+        self, db: AsyncSession, stock_id: int, periods: List[int] = [1, 5, 20]
     ) -> Dict[str, float]:
         """
         計算價格動能
@@ -255,7 +247,9 @@ class TechnicalAnalysisService:
         1. 計算不同週期的價格變化
         2. 分析動能強度
         """
-        prices = await self.price_repo.get_by_stock(db, stock_id, limit=max(periods) + 1)
+        prices = await self.price_repo.get_by_stock(
+            db, stock_id, limit=max(periods) + 1
+        )
 
         momentum = {}
         for period in periods:
@@ -268,10 +262,7 @@ class TechnicalAnalysisService:
         return momentum
 
     async def _calculate_single_indicator(
-        self,
-        prices: List,
-        indicator: IndicatorType,
-        max_points: int = 30
+        self, prices: List, indicator: IndicatorType, max_points: int = 30
     ) -> IndicatorResult:
         """計算單一技術指標 (簡化版本)"""
         try:
@@ -287,7 +278,7 @@ class TechnicalAnalysisService:
                 values=values,
                 dates=dates,
                 parameters={"period": 14},
-                success=True
+                success=True,
             )
         except Exception as e:
             return IndicatorResult(
@@ -296,7 +287,7 @@ class TechnicalAnalysisService:
                 dates=[],
                 parameters={},
                 success=False,
-                error_message=str(e)
+                error_message=str(e),
             )
 
     def _summarize_indicator(self, result: IndicatorResult) -> Dict[str, Any]:
@@ -375,5 +366,5 @@ class TechnicalAnalysisService:
 
         return {
             "support": round(min(recent_prices), 2),
-            "resistance": round(max(recent_prices), 2)
+            "resistance": round(max(recent_prices), 2),
         }

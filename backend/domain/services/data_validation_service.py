@@ -2,6 +2,7 @@
 數據驗證業務服務 - Domain Layer
 負責股票數據品質評估，依賴抽象的 Repository 與 Cache 介面
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,7 +12,9 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.policies.validation_rules import ValidationRules
-from domain.repositories.price_history_repository_interface import IPriceHistoryRepository
+from domain.repositories.price_history_repository_interface import (
+    IPriceHistoryRepository,
+)
 from domain.repositories.stock_repository_interface import IStockRepository
 from infrastructure.cache.redis_cache_service import ICacheService
 
@@ -45,7 +48,7 @@ class DataValidationService:
         self,
         stock_repository: IStockRepository,
         price_repository: IPriceHistoryRepository,
-        cache_service: ICacheService
+        cache_service: ICacheService,
     ) -> None:
         self.stock_repo = stock_repository
         self.price_repo = price_repository
@@ -61,7 +64,7 @@ class DataValidationService:
         db: AsyncSession,
         stock_id: int,
         start_date: Optional[date] = None,
-        end_date: Optional[date] = None
+        end_date: Optional[date] = None,
     ) -> ValidationReport:
         """驗證指定股票數據品質"""
 
@@ -69,7 +72,11 @@ class DataValidationService:
         if not stock:
             raise ValueError(f"股票 ID {stock_id} 不存在")
 
-        if start_date and end_date and not ValidationRules.validate_date_range(start_date, end_date):
+        if (
+            start_date
+            and end_date
+            and not ValidationRules.validate_date_range(start_date, end_date)
+        ):
             raise ValueError("日期區間不合法或超過限制")
 
         start_date = start_date or (datetime.now().date() - timedelta(days=90))
@@ -117,15 +124,20 @@ class DataValidationService:
                 issues=[
                     ValidationIssue(
                         message="無可用價格記錄",
-                        context={"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+                        context={
+                            "start_date": start_date.isoformat(),
+                            "end_date": end_date.isoformat(),
+                        },
                     )
                 ],
-                recommendations=["確認資料收集排程是否正常執行"]
+                recommendations=["確認資料收集排程是否正常執行"],
             )
             await self.cache.set(cache_key, self._serialize_report(report), ttl=900)
             return report
 
-        completeness_score, completeness_issues = self._check_completeness(price_records)
+        completeness_score, completeness_issues = self._check_completeness(
+            price_records
+        )
         issues.extend(completeness_issues)
 
         price_score, price_issues = self._check_price_consistency(price_records)
@@ -140,7 +152,9 @@ class DataValidationService:
         outlier_score, outlier_issues = self._detect_outliers(price_records)
         issues.extend(outlier_issues)
 
-        missing_score, missing_issues = self._check_missing_days(price_records, start_date, end_date)
+        missing_score, missing_issues = self._check_missing_days(
+            price_records, start_date, end_date
+        )
         issues.extend(missing_issues)
 
         weighted_score = int(
@@ -152,7 +166,9 @@ class DataValidationService:
             + missing_score * 0.1
         )
 
-        is_valid = weighted_score >= 75 and completeness_score >= 70 and price_score >= 70
+        is_valid = (
+            weighted_score >= 75 and completeness_score >= 70 and price_score >= 70
+        )
 
         if completeness_score < 70:
             recommendations.append("補齊缺失的價格欄位或補拷資料")
@@ -177,17 +193,28 @@ class DataValidationService:
 
     def _check_completeness(self, price_records) -> tuple[int, List[ValidationIssue]]:
         issues: List[ValidationIssue] = []
-        required_fields = ["open_price", "high_price", "low_price", "close_price", "volume"]
+        required_fields = [
+            "open_price",
+            "high_price",
+            "low_price",
+            "close_price",
+            "volume",
+        ]
 
         total = len(price_records)
         complete = 0
         for record in price_records:
-            missing = [field for field in required_fields if getattr(record, field) is None]
+            missing = [
+                field for field in required_fields if getattr(record, field) is None
+            ]
             if missing:
                 issues.append(
                     ValidationIssue(
                         message="價格欄位缺失",
-                        context={"date": record.date.isoformat(), "missing_fields": missing},
+                        context={
+                            "date": record.date.isoformat(),
+                            "missing_fields": missing,
+                        },
                     )
                 )
             else:
@@ -196,7 +223,9 @@ class DataValidationService:
         score = int((complete / total) * 100)
         return score, issues
 
-    def _check_price_consistency(self, price_records) -> tuple[int, List[ValidationIssue]]:
+    def _check_price_consistency(
+        self, price_records
+    ) -> tuple[int, List[ValidationIssue]]:
         issues: List[ValidationIssue] = []
         valid = 0
 
@@ -205,21 +234,30 @@ class DataValidationService:
             if record.high_price is not None and record.low_price is not None:
                 if record.high_price < record.low_price:
                     record_issues.append("high_lt_low")
-                if record.high_price < max(record.open_price or 0, record.close_price or 0):
+                if record.high_price < max(
+                    record.open_price or 0, record.close_price or 0
+                ):
                     record_issues.append("high_lt_open_close")
-                if record.low_price > min(record.open_price or 0, record.close_price or 0):
+                if record.low_price > min(
+                    record.open_price or 0, record.close_price or 0
+                ):
                     record_issues.append("low_gt_open_close")
 
             for field in ["open_price", "high_price", "low_price", "close_price"]:
                 value = getattr(record, field)
-                if value is not None and (value <= 0 or not ValidationRules.validate_price_range(float(value))):
+                if value is not None and (
+                    value <= 0 or not ValidationRules.validate_price_range(float(value))
+                ):
                     record_issues.append(f"invalid_{field}")
 
             if record_issues:
                 issues.append(
                     ValidationIssue(
                         message="價格邏輯異常",
-                        context={"date": record.date.isoformat(), "issues": record_issues},
+                        context={
+                            "date": record.date.isoformat(),
+                            "issues": record_issues,
+                        },
                     )
                 )
             else:
@@ -228,7 +266,9 @@ class DataValidationService:
         score = int((valid / len(price_records)) * 100)
         return score, issues
 
-    def _check_volume_integrity(self, price_records) -> tuple[int, List[ValidationIssue]]:
+    def _check_volume_integrity(
+        self, price_records
+    ) -> tuple[int, List[ValidationIssue]]:
         issues: List[ValidationIssue] = []
         valid = 0
 
@@ -289,7 +329,9 @@ class DataValidationService:
             current = sorted_records[i]
             previous = sorted_records[i - 1]
             if previous.close_price and current.close_price:
-                change_ratio = abs(float(current.close_price) - float(previous.close_price)) / float(previous.close_price)
+                change_ratio = abs(
+                    float(current.close_price) - float(previous.close_price)
+                ) / float(previous.close_price)
                 if change_ratio > self.max_price_change_ratio:
                     outliers += 1
                     issues.append(
@@ -352,4 +394,3 @@ class DataValidationService:
             ],
             "recommendations": report.recommendations,
         }
-

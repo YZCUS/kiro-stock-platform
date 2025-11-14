@@ -17,6 +17,7 @@
     # 獲取所有策略資訊
     strategies_info = strategy_registry.get_strategies_info()
 """
+
 import logging
 from typing import Dict, List, Optional
 from domain.strategies.strategy_interface import IStrategyEngine, StrategyType
@@ -36,10 +37,10 @@ class StrategyRegistry:
         _strategies: 策略字典 {StrategyType: IStrategyEngine}
     """
 
-    _instance: Optional['StrategyRegistry'] = None
+    _instance: Optional["StrategyRegistry"] = None
     _strategies: Dict[StrategyType, IStrategyEngine] = {}
 
-    def __new__(cls) -> 'StrategyRegistry':
+    def __new__(cls) -> "StrategyRegistry":
         """
         實作單例模式
 
@@ -97,7 +98,9 @@ class StrategyRegistry:
         """
         if strategy_type in self._strategies:
             strategy = self._strategies.pop(strategy_type)
-            logger.info(f"Unregistered strategy: {strategy.name} (type={strategy_type})")
+            logger.info(
+                f"Unregistered strategy: {strategy.name} (type={strategy_type})"
+            )
             return True
         else:
             logger.warning(f"Strategy type {strategy_type} not found in registry")
@@ -168,7 +171,7 @@ class StrategyRegistry:
                 "type": strategy.strategy_type.value,
                 "name": strategy.name,
                 "description": strategy.description,
-                "default_params": strategy.get_default_params()
+                "default_params": strategy.get_default_params(),
             }
             for strategy in self._strategies.values()
         ]
@@ -202,7 +205,9 @@ class StrategyRegistry:
         """
         count = len(self._strategies)
         self._strategies.clear()
-        logger.warning(f"Cleared all strategies from registry (removed {count} strategies)")
+        logger.warning(
+            f"Cleared all strategies from registry (removed {count} strategies)"
+        )
 
 
 # 全局單例實例

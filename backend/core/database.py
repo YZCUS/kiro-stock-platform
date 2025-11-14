@@ -1,7 +1,9 @@
 """
 資料庫連接和設定
 """
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+
 try:
     from sqlalchemy.ext.asyncio import async_sessionmaker
 except ImportError:
@@ -19,39 +21,39 @@ logger = logging.getLogger(__name__)
 
 # 檢查是否在測試環境中
 _is_testing = (
-    'pytest' in sys.modules or
-    os.getenv('TESTING', '').lower() == 'true' or
-    os.getenv('ENV', '') == 'test'
+    "pytest" in sys.modules
+    or os.getenv("TESTING", "").lower() == "true"
+    or os.getenv("ENV", "") == "test"
 )
 
 if not _is_testing:
     try:
         from app.settings import settings
+
         # 建立異步資料庫引擎
         engine = create_async_engine(
             settings.database.url.replace("postgresql://", "postgresql+asyncpg://"),
             echo=settings.app.debug,
-            future=True
+            future=True,
         )
     except Exception as e:
         # 如果設定有問題，則使用記憶體資料庫
-        logger.warning(f"Failed to load database settings, using in-memory database: {e}")
+        logger.warning(
+            f"Failed to load database settings, using in-memory database: {e}"
+        )
         engine = create_async_engine(
-            "sqlite+aiosqlite:///:memory:",
-            echo=False,
-            future=True
+            "sqlite+aiosqlite:///:memory:", echo=False, future=True
         )
 else:
     # 測試環境中使用同步 SQLite 記憶體資料庫
     from sqlalchemy import create_engine
+
     engine = None  # 在測試中不創建引擎，讓測試自己處理
 
 # 建立異步會話工廠
 if engine is not None:
     AsyncSessionLocal = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False
+        engine, class_=AsyncSession, expire_on_commit=False
     )
 else:
     AsyncSessionLocal = None
@@ -63,7 +65,7 @@ convention = {
     "uq": "uq_%(table_name)s_%(column_0_name)s",
     "ck": "ck_%(table_name)s_%(constraint_name)s",
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-    "pk": "pk_%(table_name)s"
+    "pk": "pk_%(table_name)s",
 }
 
 # 在測試環境中，我們需要處理表重複定義的問題

@@ -2,6 +2,7 @@
 指標策略 - Domain Policies
 技術指標的計算邏輯和交易策略
 """
+
 from typing import List, Dict, Any, Tuple, Optional
 from enum import Enum
 import math
@@ -9,6 +10,7 @@ import math
 
 class IndicatorSignal(str, Enum):
     """指標信號"""
+
     STRONG_BUY = "strong_buy"
     BUY = "buy"
     NEUTRAL = "neutral"
@@ -18,6 +20,7 @@ class IndicatorSignal(str, Enum):
 
 class TrendStrength(str, Enum):
     """趨勢強度"""
+
     VERY_WEAK = "very_weak"
     WEAK = "weak"
     MODERATE = "moderate"
@@ -36,7 +39,7 @@ class IndicatorStrategies:
 
         sma_values = []
         for i in range(period - 1, len(prices)):
-            window = prices[i - period + 1:i + 1]
+            window = prices[i - period + 1 : i + 1]
             sma = sum(window) / period
             sma_values.append(sma)
 
@@ -106,9 +109,7 @@ class IndicatorStrategies:
 
     @staticmethod
     def calculate_bollinger_bands(
-        prices: List[float],
-        period: int = 20,
-        std_dev: float = 2.0
+        prices: List[float], period: int = 20, std_dev: float = 2.0
     ) -> Tuple[List[float], List[float], List[float]]:
         """計算布林帶 (上軌, 中軌, 下軌)"""
         if len(prices) < period:
@@ -119,7 +120,7 @@ class IndicatorStrategies:
         lower_band = []
 
         for i in range(period - 1, len(prices)):
-            window = prices[i - period + 1:i + 1]
+            window = prices[i - period + 1 : i + 1]
             sma = sum(window) / period
 
             # 計算標準差
@@ -136,7 +137,7 @@ class IndicatorStrategies:
         prices: List[float],
         fast_period: int = 12,
         slow_period: int = 26,
-        signal_period: int = 9
+        signal_period: int = 9,
     ) -> Tuple[List[float], List[float], List[float]]:
         """計算MACD (MACD線, 信號線, 柱狀圖)"""
         if len(prices) < slow_period:
@@ -180,10 +181,7 @@ class IndicatorStrategies:
 
     @staticmethod
     def interpret_bollinger_signal(
-        current_price: float,
-        upper_band: float,
-        lower_band: float,
-        middle_band: float
+        current_price: float, upper_band: float, lower_band: float, middle_band: float
     ) -> IndicatorSignal:
         """解釋布林帶信號"""
         if current_price <= lower_band:
@@ -197,10 +195,7 @@ class IndicatorStrategies:
 
     @staticmethod
     def interpret_macd_signal(
-        macd: float,
-        signal: float,
-        prev_macd: float,
-        prev_signal: float
+        macd: float, signal: float, prev_macd: float, prev_signal: float
     ) -> IndicatorSignal:
         """解釋MACD信號"""
         # 檢查金叉死叉
@@ -225,9 +220,7 @@ class IndicatorStrategies:
 
     @staticmethod
     def assess_trend_strength(
-        short_ma: float,
-        long_ma: float,
-        current_price: float
+        short_ma: float, long_ma: float, current_price: float
     ) -> TrendStrength:
         """評估趨勢強度"""
         if short_ma == 0 or long_ma == 0:
@@ -258,7 +251,7 @@ class IndicatorStrategies:
         lows: List[float],
         closes: List[float],
         k_period: int = 14,
-        d_period: int = 3
+        d_period: int = 3,
     ) -> Tuple[List[float], List[float]]:
         """計算隨機指標KD"""
         if len(highs) < k_period or len(lows) < k_period or len(closes) < k_period:
@@ -267,8 +260,8 @@ class IndicatorStrategies:
         k_values = []
 
         for i in range(k_period - 1, len(closes)):
-            window_high = max(highs[i - k_period + 1:i + 1])
-            window_low = min(lows[i - k_period + 1:i + 1])
+            window_high = max(highs[i - k_period + 1 : i + 1])
+            window_low = min(lows[i - k_period + 1 : i + 1])
 
             if window_high == window_low:
                 k = 50  # 避免除零
@@ -307,7 +300,7 @@ class IndicatorStrategies:
             IndicatorSignal.BUY: 1,
             IndicatorSignal.NEUTRAL: 0,
             IndicatorSignal.SELL: -1,
-            IndicatorSignal.STRONG_SELL: -2
+            IndicatorSignal.STRONG_SELL: -2,
         }
 
         total_weight = sum(signal_weights[signal] for signal in signals)
@@ -326,10 +319,7 @@ class IndicatorStrategies:
 
     @staticmethod
     def calculate_williams_r(
-        highs: List[float],
-        lows: List[float],
-        closes: List[float],
-        period: int = 14
+        highs: List[float], lows: List[float], closes: List[float], period: int = 14
     ) -> List[float]:
         """計算威廉指標"""
         if len(highs) < period or len(lows) < period or len(closes) < period:
@@ -338,8 +328,8 @@ class IndicatorStrategies:
         williams_r = []
 
         for i in range(period - 1, len(closes)):
-            window_high = max(highs[i - period + 1:i + 1])
-            window_low = min(lows[i - period + 1:i + 1])
+            window_high = max(highs[i - period + 1 : i + 1])
+            window_low = min(lows[i - period + 1 : i + 1])
 
             if window_high == window_low:
                 wr = -50  # 避免除零

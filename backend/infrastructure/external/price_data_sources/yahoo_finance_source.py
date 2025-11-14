@@ -3,6 +3,7 @@ Yahoo Finance 數據源實現
 
 使用 yfinance 庫作為價格數據源的具體實現。
 """
+
 import logging
 from datetime import date, datetime, timedelta
 from typing import Dict, Any, List, Optional
@@ -33,11 +34,7 @@ class YahooFinanceSource(IPriceDataSource):
         self._source_name = "Yahoo Finance"
 
     async def fetch_historical_prices(
-        self,
-        symbol: str,
-        start_date: date,
-        end_date: date,
-        market: str = "US"
+        self, symbol: str, start_date: date, end_date: date, market: str = "US"
     ) -> List[Dict[str, Any]]:
         """
         獲取指定日期範圍的歷史價格
@@ -75,9 +72,8 @@ class YahooFinanceSource(IPriceDataSource):
             df = await loop.run_in_executor(
                 None,
                 lambda: self.wrapper.get_ticker(formatted_symbol).history(
-                    start=start_date.isoformat(),
-                    end=end_date_inclusive.isoformat()
-                )
+                    start=start_date.isoformat(), end=end_date_inclusive.isoformat()
+                ),
             )
 
             if df.empty:
@@ -98,10 +94,7 @@ class YahooFinanceSource(IPriceDataSource):
             ) from e
 
     async def fetch_historical_prices_by_period(
-        self,
-        symbol: str,
-        period: str,
-        market: str = "US"
+        self, symbol: str, period: str, market: str = "US"
     ) -> List[Dict[str, Any]]:
         """
         使用預設時間段獲取歷史價格
@@ -125,7 +118,9 @@ class YahooFinanceSource(IPriceDataSource):
             loop = asyncio.get_event_loop()
             df = await loop.run_in_executor(
                 None,
-                lambda: self.wrapper.get_ticker(formatted_symbol).history(period=period)
+                lambda: self.wrapper.get_ticker(formatted_symbol).history(
+                    period=period
+                ),
             )
 
             if df.empty:
@@ -159,15 +154,11 @@ class YahooFinanceSource(IPriceDataSource):
 
             loop = asyncio.get_event_loop()
             ticker = await loop.run_in_executor(
-                None,
-                lambda: self.wrapper.get_ticker(formatted_symbol)
+                None, lambda: self.wrapper.get_ticker(formatted_symbol)
             )
 
             # 嘗試獲取短期歷史數據來驗證
-            hist = await loop.run_in_executor(
-                None,
-                lambda: ticker.history(period='5d')
-            )
+            hist = await loop.run_in_executor(None, lambda: ticker.history(period="5d"))
 
             return not hist.empty
 
@@ -201,24 +192,23 @@ class YahooFinanceSource(IPriceDataSource):
 
             loop = asyncio.get_event_loop()
             ticker = await loop.run_in_executor(
-                None,
-                lambda: self.wrapper.get_ticker(formatted_symbol)
+                None, lambda: self.wrapper.get_ticker(formatted_symbol)
             )
 
-            if not hasattr(ticker, 'info') or not ticker.info:
+            if not hasattr(ticker, "info") or not ticker.info:
                 raise SymbolNotFoundError(f"Stock info not available for {symbol}")
 
             # 轉換為標準格式
             info = ticker.info
             return {
-                'long_name': info.get('longName'),
-                'short_name': info.get('shortName'),
-                'sector': info.get('sector'),
-                'industry': info.get('industry'),
-                'market_cap': info.get('marketCap'),
-                'currency': info.get('currency'),
-                'website': info.get('website'),
-                'description': info.get('longBusinessSummary'),
+                "long_name": info.get("longName"),
+                "short_name": info.get("shortName"),
+                "sector": info.get("sector"),
+                "industry": info.get("industry"),
+                "market_cap": info.get("marketCap"),
+                "currency": info.get("currency"),
+                "website": info.get("website"),
+                "description": info.get("longBusinessSummary"),
             }
 
         except SymbolNotFoundError:
@@ -260,7 +250,7 @@ class YahooFinanceSource(IPriceDataSource):
         """
         if market == "TW":
             # 台股需要加上 .TW 後綴
-            if not symbol.endswith('.TW') and not symbol.endswith('.TWO'):
+            if not symbol.endswith(".TW") and not symbol.endswith(".TWO"):
                 return f"{symbol}.TW"
         return symbol
 
@@ -284,13 +274,13 @@ class YahooFinanceSource(IPriceDataSource):
                 date_value = idx
 
             price_data = {
-                'date': date_value,
-                'open': float(row.get('Open', 0)),
-                'high': float(row.get('High', 0)),
-                'low': float(row.get('Low', 0)),
-                'close': float(row.get('Close', 0)),
-                'volume': int(row.get('Volume', 0)),
-                'adj_close': float(row.get('Adj Close', row.get('Close', 0))),
+                "date": date_value,
+                "open": float(row.get("Open", 0)),
+                "high": float(row.get("High", 0)),
+                "low": float(row.get("Low", 0)),
+                "close": float(row.get("Close", 0)),
+                "volume": int(row.get("Volume", 0)),
+                "adj_close": float(row.get("Adj Close", row.get("Close", 0))),
             }
             result.append(price_data)
 

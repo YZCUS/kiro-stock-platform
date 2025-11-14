@@ -80,9 +80,11 @@ const createTestStore = () => {
 };
 
 const createWrapper = (store = createTestStore()) => {
-  return ({ children }: { children: React.ReactNode }) => (
+  const Wrapper = ({ children }: { children: React.ReactNode }) => (
     <Provider store={store}>{children}</Provider>
   );
+  Wrapper.displayName = 'TestWrapper';
+  return Wrapper;
 };
 
 // Mock stock data for testing
@@ -301,8 +303,8 @@ describe('RealtimePriceChart - 錯誤處理測試', () => {
 
   it('應該處理無效的價格數據', async () => {
     // Mock 返回無效數據的 hook
-    const { usePriceUpdates } = require('../../../hooks/useWebSocket');
-    usePriceUpdates.mockReturnValue({
+    const useWebSocketModule = await import('../../../hooks/useWebSocket');
+    useWebSocketModule.usePriceUpdates.mockReturnValue({
       priceData: null,
       lastUpdate: null,
       isSubscribed: false,
@@ -385,7 +387,7 @@ describe('RealtimePriceChart - WebSocket 集成測試', () => {
   });
 
   it('應該使用正確的 stockId 調用 WebSocket hooks', () => {
-    const { usePriceUpdates, useIndicatorUpdates } = require('../../../hooks/useWebSocket');
+    // Mock is already defined at the top via jest.mock()
 
     render(
       <RealtimePriceChart
@@ -400,7 +402,7 @@ describe('RealtimePriceChart - WebSocket 集成測試', () => {
   });
 
   it('應該在 stockId 變化時重新調用 WebSocket hooks', () => {
-    const { usePriceUpdates, useIndicatorUpdates } = require('../../../hooks/useWebSocket');
+    // Mock is already defined at the top via jest.mock()
 
     const { rerender } = render(
       <RealtimePriceChart

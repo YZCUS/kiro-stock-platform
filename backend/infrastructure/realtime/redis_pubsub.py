@@ -1,6 +1,7 @@
 """
 Redis Pub/Sub WebSocket 廣播服務
 """
+
 import json
 import asyncio
 import logging
@@ -26,14 +27,13 @@ class RedisWebSocketBroadcaster:
         """連接到Redis"""
         try:
             # 建立Redis連接池
-            auth_part = f":{settings.redis.password}@" if settings.redis.password else ""
+            auth_part = (
+                f":{settings.redis.password}@" if settings.redis.password else ""
+            )
             redis_url = f"redis://{auth_part}{settings.redis.host}:{settings.redis.port}/{settings.redis.db}"
 
             self.redis_pool = redis.ConnectionPool.from_url(
-                redis_url,
-                encoding="utf-8",
-                decode_responses=True,
-                max_connections=20
+                redis_url, encoding="utf-8", decode_responses=True, max_connections=20
             )
 
             # 建立發布者和訂閱者連接
@@ -75,14 +75,10 @@ class RedisWebSocketBroadcaster:
             return
 
         try:
-            message_data = {
-                "timestamp": datetime.now().isoformat(),
-                "data": message
-            }
+            message_data = {"timestamp": datetime.now().isoformat(), "data": message}
 
             await self.publisher.publish(
-                channel,
-                json.dumps(message_data, ensure_ascii=False)
+                channel, json.dumps(message_data, ensure_ascii=False)
             )
 
             logger.debug(f"消息已發布到頻道 {channel}: {message}")
@@ -93,20 +89,13 @@ class RedisWebSocketBroadcaster:
     async def publish_stock_update(self, stock_id: int, update_type: str, data: dict):
         """發布股票更新消息"""
         channel = f"stock_updates:{stock_id}"
-        message = {
-            "type": update_type,
-            "stock_id": stock_id,
-            "data": data
-        }
+        message = {"type": update_type, "stock_id": stock_id, "data": data}
         await self.publish_message(channel, message)
 
     async def publish_global_update(self, update_type: str, data: dict):
         """發布全局更新消息"""
         channel = "global_updates"
-        message = {
-            "type": update_type,
-            "data": data
-        }
+        message = {"type": update_type, "data": data}
         await self.publish_message(channel, message)
 
     async def publish_price_update(self, stock_id: int, price_data: dict):
@@ -211,15 +200,11 @@ class RedisWebSocketBroadcaster:
                 "status": "healthy",
                 "connected": True,
                 "active_subscriptions": len(self.subscriptions),
-                "subscriptions": list(self.subscriptions)
+                "subscriptions": list(self.subscriptions),
             }
 
         except Exception as e:
-            return {
-                "status": "error",
-                "error": str(e),
-                "connected": False
-            }
+            return {"status": "error", "error": str(e), "connected": False}
 
 
 # 全局廣播器實例

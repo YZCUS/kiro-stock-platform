@@ -2,6 +2,7 @@
 股票CRUD操作相關API端點
 負責: POST /, PUT /{stock_id}, DELETE /{stock_id}, /batch
 """
+
 from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,7 +13,7 @@ from api.schemas.stocks import (
     StockResponse,
     StockCreateRequest,
     StockUpdateRequest,
-    StockBatchCreateRequest
+    StockBatchCreateRequest,
 )
 from domain.services.stock_service import StockService
 
@@ -23,7 +24,7 @@ router = APIRouter()
 async def create_stock(
     stock: StockCreateRequest,
     db: AsyncSession = Depends(get_database_session),
-    stock_service: StockService = Depends(get_stock_service)
+    stock_service: StockService = Depends(get_stock_service),
 ):
     """
     創建新股票
@@ -39,25 +40,25 @@ async def create_stock(
         info = ticker.info
 
         # 檢查股票代號是否有效（必須有公司名稱或市場價格）
-        if not info or 'symbol' not in info:
+        if not info or "symbol" not in info:
             raise HTTPException(
                 status_code=400,
-                detail=f"股票代號 {stock.symbol} 無效或不存在於 Yahoo Finance"
+                detail=f"股票代號 {stock.symbol} 無效或不存在於 Yahoo Finance",
             )
 
         # 進一步驗證：有效股票應該有公司名稱或市場價格
-        has_name = info.get('longName') or info.get('shortName')
-        has_price = info.get('regularMarketPrice') or info.get('currentPrice')
+        has_name = info.get("longName") or info.get("shortName")
+        has_price = info.get("regularMarketPrice") or info.get("currentPrice")
 
         if not has_name and not has_price:
             raise HTTPException(
                 status_code=400,
-                detail=f"股票代號 {stock.symbol} 無法取得有效資訊，可能是無效或已下市的股票"
+                detail=f"股票代號 {stock.symbol} 無法取得有效資訊，可能是無效或已下市的股票",
             )
 
         # 如果未提供公司名稱，從 Yahoo Finance 獲取
         if not stock.name or stock.name == stock.symbol:
-            stock.name = info.get('longName') or info.get('shortName') or stock.symbol
+            stock.name = info.get("longName") or info.get("shortName") or stock.symbol
 
         created_stock = await stock_service.create_stock(db, stock)
         return StockResponse.model_validate(created_stock)
@@ -73,7 +74,7 @@ async def update_stock(
     stock_id: int,
     stock_update: StockUpdateRequest,
     db: AsyncSession = Depends(get_database_session),
-    stock_service: StockService = Depends(get_stock_service)
+    stock_service: StockService = Depends(get_stock_service),
 ):
     """
     更新股票資訊
@@ -92,7 +93,7 @@ async def update_stock(
 async def delete_stock(
     stock_id: int,
     db: AsyncSession = Depends(get_database_session),
-    stock_service: StockService = Depends(get_stock_service)
+    stock_service: StockService = Depends(get_stock_service),
 ):
     """
     刪除股票
@@ -110,7 +111,7 @@ async def delete_stock(
 async def create_stocks_batch(
     request: StockBatchCreateRequest,
     db: AsyncSession = Depends(get_database_session),
-    stock_service: StockService = Depends(get_stock_service)
+    stock_service: StockService = Depends(get_stock_service),
 ):
     """
     批次創建股票
@@ -118,7 +119,9 @@ async def create_stocks_batch(
     try:
         result = await stock_service.create_stocks_batch(db, request.stocks)
 
-        created_items = [StockResponse.model_validate(item) for item in result["created_stocks"]]
+        created_items = [
+            StockResponse.model_validate(item) for item in result["created_stocks"]
+        ]
         result["created_stocks"] = [item.model_dump() for item in created_items]
 
         return result

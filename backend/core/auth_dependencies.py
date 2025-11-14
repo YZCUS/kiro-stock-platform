@@ -1,6 +1,7 @@
 """
 認證相關的 FastAPI 依賴
 """
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +15,7 @@ security = HTTPBearer()
 
 
 async def get_current_user_id(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> uuid.UUID:
     """
     從 JWT token 取得當前用戶 ID
@@ -43,7 +44,7 @@ async def get_current_user_id(
 
 async def get_current_user(
     user_id: uuid.UUID = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ) -> User:
     """
     取得當前用戶物件
@@ -68,16 +69,13 @@ async def get_current_user(
         )
 
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="用戶已停用"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="用戶已停用")
 
     return user
 
 
 async def get_current_active_user(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ) -> User:
     """
     取得當前活躍用戶（已驗證且啟用）
@@ -92,8 +90,10 @@ async def get_current_active_user(
 
 
 async def get_optional_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
-    db: AsyncSession = Depends(get_db)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(
+        HTTPBearer(auto_error=False)
+    ),
+    db: AsyncSession = Depends(get_db),
 ) -> Optional[User]:
     """
     取得當前用戶（可選）

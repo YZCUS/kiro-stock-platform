@@ -37,9 +37,7 @@ const RealtimeSignals = dynamic(() => import('./RealtimeSignals'), {
   ),
 });
 
-export interface RealtimeDashboardProps {}
-
-const RealtimeDashboard: React.FC<RealtimeDashboardProps> = () => {
+const RealtimeDashboard: React.FC = () => {
   const dispatch = useAppDispatch();
   const searchParams = useSearchParams();
   const { isAuthenticated } = useAppSelector((state) => state.auth);

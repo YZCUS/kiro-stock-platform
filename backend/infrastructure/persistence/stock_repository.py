@@ -2,6 +2,7 @@
 股票儲存庫實現 - Infrastructure Layer
 實現Domain層的IStockRepository介面，封裝具體的ORM操作
 """
+
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
@@ -17,31 +18,30 @@ logger = logging.getLogger(__name__)
 class StockRepository(IStockRepository):
     """股票儲存庫實現"""
 
-    def __init__(self, db_session: AsyncSession, price_data_source: Optional[IPriceDataSource] = None):
+    def __init__(
+        self,
+        db_session: AsyncSession,
+        price_data_source: Optional[IPriceDataSource] = None,
+    ):
         self.db = db_session
         self.price_source = price_data_source
 
     async def get(self, db: AsyncSession, stock_id: int):
         """根據ID取得股票"""
-        result = await db.execute(
-            select(Stock).where(Stock.id == stock_id)
-        )
+        result = await db.execute(select(Stock).where(Stock.id == stock_id))
         return result.scalar_one_or_none()
 
     async def get_by_symbol(self, db: AsyncSession, symbol: str):
         """根據代號取得股票"""
-        result = await db.execute(
-            select(Stock).where(Stock.symbol == symbol)
-        )
+        result = await db.execute(select(Stock).where(Stock.symbol == symbol))
         return result.scalar_one_or_none()
 
-    async def get_by_symbol_and_market(self, db: AsyncSession, symbol: str, market: str):
+    async def get_by_symbol_and_market(
+        self, db: AsyncSession, symbol: str, market: str
+    ):
         """根據代號和市場取得股票"""
         result = await db.execute(
-            select(Stock).where(
-                Stock.symbol == symbol,
-                Stock.market == market
-            )
+            select(Stock).where(Stock.symbol == symbol, Stock.market == market)
         )
         return result.scalar_one_or_none()
 
@@ -52,7 +52,7 @@ class StockRepository(IStockRepository):
         is_active: Optional[bool] = None,
         search: Optional[str] = None,
         offset: int = 0,
-        limit: int = 100
+        limit: int = 100,
     ) -> Tuple[List, int]:
         """取得過濾後的股票清單和總數"""
 
@@ -71,8 +71,7 @@ class StockRepository(IStockRepository):
 
         if search:
             search_condition = or_(
-                Stock.symbol.ilike(f"%{search}%"),
-                Stock.name.ilike(f"%{search}%")
+                Stock.symbol.ilike(f"%{search}%"), Stock.name.ilike(f"%{search}%")
             )
             conditions.append(search_condition)
 
@@ -93,10 +92,7 @@ class StockRepository(IStockRepository):
         return list(stocks), total
 
     async def get_active_stocks(
-        self,
-        db: AsyncSession,
-        market: Optional[str] = None,
-        limit: int = 100
+        self, db: AsyncSession, market: Optional[str] = None, limit: int = 100
     ):
         """取得活躍股票清單"""
         query = select(Stock).where(Stock.is_active == True)
@@ -116,16 +112,19 @@ class StockRepository(IStockRepository):
 
         if not stock_name and self.price_source:
             try:
-                logger.info(f"Fetching company info for {obj_in.symbol} using price data source")
+                logger.info(
+                    f"Fetching company info for {obj_in.symbol} using price data source"
+                )
 
                 # 驗證股票代碼是否有效
                 is_valid = await self.price_source.validate_symbol(
-                    symbol=obj_in.symbol,
-                    market=obj_in.market
+                    symbol=obj_in.symbol, market=obj_in.market
                 )
 
                 if not is_valid:
-                    error_msg = f"股票 {obj_in.symbol} 無法獲取價格數據，可能已下市或代碼錯誤"
+                    error_msg = (
+                        f"股票 {obj_in.symbol} 無法獲取價格數據，可能已下市或代碼錯誤"
+                    )
                     logger.error(error_msg)
                     raise ValueError(error_msg)
 
@@ -134,21 +133,28 @@ class StockRepository(IStockRepository):
                 # 嘗試獲取公司資訊
                 try:
                     stock_info = await self.price_source.get_stock_info(
-                        symbol=obj_in.symbol,
-                        market=obj_in.market
+                        symbol=obj_in.symbol, market=obj_in.market
                     )
 
                     # 優先使用 long_name，其次使用 short_name
-                    stock_name = stock_info.get('long_name') or stock_info.get('short_name')
+                    stock_name = stock_info.get("long_name") or stock_info.get(
+                        "short_name"
+                    )
 
                     if stock_name:
-                        logger.info(f"Found company name: {stock_name} for {obj_in.symbol}")
+                        logger.info(
+                            f"Found company name: {stock_name} for {obj_in.symbol}"
+                        )
                     else:
-                        logger.warning(f"No company name found for {obj_in.symbol}, using symbol as name")
+                        logger.warning(
+                            f"No company name found for {obj_in.symbol}, using symbol as name"
+                        )
                         stock_name = obj_in.symbol
 
                 except Exception as e:
-                    logger.warning(f"Could not fetch company info for {obj_in.symbol}: {e}, using symbol as name")
+                    logger.warning(
+                        f"Could not fetch company info for {obj_in.symbol}: {e}, using symbol as name"
+                    )
                     stock_name = obj_in.symbol
 
             except ValueError:
@@ -160,15 +166,13 @@ class StockRepository(IStockRepository):
                 stock_name = obj_in.symbol
         elif not stock_name:
             # 如果沒有 price_source（向後兼容），使用 symbol 作為名稱
-            logger.warning(f"No price data source available, using symbol as name for {obj_in.symbol}")
+            logger.warning(
+                f"No price data source available, using symbol as name for {obj_in.symbol}"
+            )
             stock_name = obj_in.symbol
 
         # 創建Stock實例
-        db_obj = Stock(
-            symbol=obj_in.symbol,
-            market=obj_in.market,
-            name=stock_name
-        )
+        db_obj = Stock(symbol=obj_in.symbol, market=obj_in.market, name=stock_name)
 
         db.add(db_obj)
         await db.commit()
@@ -179,10 +183,10 @@ class StockRepository(IStockRepository):
     async def update(self, db: AsyncSession, db_obj, obj_in):
         """更新股票"""
         # 更新欄位
-        if hasattr(obj_in, 'name') and obj_in.name is not None:
+        if hasattr(obj_in, "name") and obj_in.name is not None:
             db_obj.name = obj_in.name
 
-        if hasattr(obj_in, 'is_active') and obj_in.is_active is not None:
+        if hasattr(obj_in, "is_active") and obj_in.is_active is not None:
             db_obj.is_active = obj_in.is_active
 
         await db.commit()
@@ -192,9 +196,7 @@ class StockRepository(IStockRepository):
 
     async def remove(self, db: AsyncSession, id: int):
         """刪除股票"""
-        result = await db.execute(
-            select(Stock).where(Stock.id == id)
-        )
+        result = await db.execute(select(Stock).where(Stock.id == id))
         stock = result.scalar_one_or_none()
 
         if stock:

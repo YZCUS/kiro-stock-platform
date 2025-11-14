@@ -17,6 +17,7 @@
 4. 團隊協作：不同開發者可並行開發不同模組
 5. 性能優化：按需載入，減少不必要的依賴
 """
+
 from fastapi import APIRouter
 
 from api.schemas.stocks import IndicatorCalculateRequest, IndicatorBatchCalculateRequest

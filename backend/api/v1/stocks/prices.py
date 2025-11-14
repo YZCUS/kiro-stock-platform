@@ -2,6 +2,7 @@
 股票價格相關API端點
 負責: /{stock_id}/data, /prices, /price-history, /price/latest, /price/backfill
 """
+
 from typing import List, Optional, Dict, Any
 from datetime import date
 import logging
@@ -14,7 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.dependencies import (
     get_database_session,
     get_stock_service,
-    get_data_collection_service_clean
+    get_data_collection_service_clean,
 )
 from api.schemas.stocks import PriceDataResponse
 from domain.services.stock_service import StockService
@@ -29,7 +30,7 @@ router = APIRouter()
 @router.get("/prices/data-exists")
 async def check_price_data_exists(
     date: str = Query(..., description="檢查日期 (YYYY-MM-DD)"),
-    db: AsyncSession = Depends(get_database_session)
+    db: AsyncSession = Depends(get_database_session),
 ) -> Dict[str, Any]:
     """
     檢查指定日期是否有價格數據
@@ -61,12 +62,14 @@ async def check_price_data_exists(
             "success": True,
             "date": date,
             "has_data": count > 0,
-            "stock_count": count
+            "stock_count": count,
         }
 
     except ValueError as e:
         logger.error(f"日期格式錯誤: {date}")
-        raise HTTPException(status_code=400, detail=f"日期格式錯誤，請使用 YYYY-MM-DD 格式")
+        raise HTTPException(
+            status_code=400, detail=f"日期格式錯誤，請使用 YYYY-MM-DD 格式"
+        )
     except Exception as e:
         logger.error(f"檢查價格數據時發生錯誤: {str(e)}")
         raise HTTPException(status_code=500, detail=f"檢查失敗: {str(e)}")
@@ -79,7 +82,7 @@ async def get_stock_prices(
     end_date: Optional[date] = Query(None, description="結束日期"),
     limit: int = Query(100, description="返回數量限制"),
     db: AsyncSession = Depends(get_database_session),
-    stock_service: StockService = Depends(get_stock_service)
+    stock_service: StockService = Depends(get_stock_service),
 ):
     """
     取得股票價格數據（輕量級版本）
@@ -108,7 +111,7 @@ async def get_stock_prices(
             stock_id=stock_id,
             start_date=start_date,
             end_date=end_date,
-            limit=limit
+            limit=limit,
         )
 
         return [PriceDataResponse(**price) for price in prices]
@@ -126,7 +129,7 @@ async def get_stock_price_history(
     end_date: Optional[date] = Query(None, description="結束日期"),
     interval: Optional[str] = Query("1d", description="時間間隔（暫未實現，保留參數）"),
     db: AsyncSession = Depends(get_database_session),
-    stock_service: StockService = Depends(get_stock_service)
+    stock_service: StockService = Depends(get_stock_service),
 ):
     """
     取得股票價格歷史（前端兼容端點）
@@ -140,7 +143,7 @@ async def get_stock_price_history(
             stock_id=stock_id,
             start_date=start_date,
             end_date=end_date,
-            limit=1000
+            limit=1000,
         )
 
     except HTTPException:
@@ -153,7 +156,7 @@ async def get_stock_price_history(
 async def get_stock_latest_price(
     stock_id: int,
     db: AsyncSession = Depends(get_database_session),
-    stock_service: StockService = Depends(get_stock_service)
+    stock_service: StockService = Depends(get_stock_service),
 ):
     """
     取得股票最新價格（前端兼容端點）
@@ -177,7 +180,9 @@ async def backfill_stock_data(
     end_date: Optional[date] = Query(None, description="結束日期"),
     force: bool = Query(False, description="強制回填（暫未實現，預留參數）"),
     db: AsyncSession = Depends(get_database_session),
-    data_collection_service: DataCollectionService = Depends(get_data_collection_service_clean)
+    data_collection_service: DataCollectionService = Depends(
+        get_data_collection_service_clean
+    ),
 ):
     """
     觸發股票數據回填（前端兼容端點）
@@ -190,10 +195,7 @@ async def backfill_stock_data(
 
         try:
             result = await data_collection_service.collect_stock_data(
-                db=db,
-                stock_id=stock_id,
-                start_date=start_date,
-                end_date=end_date
+                db=db, stock_id=stock_id, start_date=start_date, end_date=end_date
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -204,7 +206,7 @@ async def backfill_stock_data(
             "data_points": result.records_collected,
             "errors": result.errors,
             "warnings": result.warnings,
-            "execution_time": result.execution_time_seconds
+            "execution_time": result.execution_time_seconds,
         }
 
     except HTTPException:
@@ -216,7 +218,9 @@ async def backfill_stock_data(
 @router.post("/refresh-all", response_model=Dict[str, Any])
 async def refresh_all_stock_prices(
     db: AsyncSession = Depends(get_database_session),
-    data_collection_service: DataCollectionService = Depends(get_data_collection_service_clean)
+    data_collection_service: DataCollectionService = Depends(
+        get_data_collection_service_clean
+    ),
 ):
     """
     刷新所有活躍股票的最新價格數據
@@ -249,7 +253,7 @@ async def refresh_all_stock_prices(
                 "total_stocks": 0,
                 "successful": 0,
                 "failed": 0,
-                "results": []
+                "results": [],
             }
 
         # 計算開始日期（最近30天）
@@ -268,42 +272,48 @@ async def refresh_all_stock_prices(
                     db=db,
                     stock_id=stock.id,
                     start_date=start_date,
-                    end_date=None  # 到今天
+                    end_date=None,  # 到今天
                 )
 
                 if collect_result.status == collect_result.status.SUCCESS:
                     successful += 1
-                    results.append({
-                        "stock_id": stock.id,
-                        "symbol": stock.symbol,
-                        "name": stock.name,
-                        "success": True,
-                        "data_points": collect_result.records_collected,
-                        "message": "成功刷新數據"
-                    })
+                    results.append(
+                        {
+                            "stock_id": stock.id,
+                            "symbol": stock.symbol,
+                            "name": stock.name,
+                            "success": True,
+                            "data_points": collect_result.records_collected,
+                            "message": "成功刷新數據",
+                        }
+                    )
                 else:
                     failed += 1
-                    results.append({
+                    results.append(
+                        {
+                            "stock_id": stock.id,
+                            "symbol": stock.symbol,
+                            "name": stock.name,
+                            "success": False,
+                            "data_points": 0,
+                            "message": f"刷新失敗: {collect_result.status.value}",
+                            "errors": collect_result.errors,
+                        }
+                    )
+
+            except Exception as e:
+                failed += 1
+                logger.error(f"刷新股票 {stock.symbol} 時發生錯誤: {str(e)}")
+                results.append(
+                    {
                         "stock_id": stock.id,
                         "symbol": stock.symbol,
                         "name": stock.name,
                         "success": False,
                         "data_points": 0,
-                        "message": f"刷新失敗: {collect_result.status.value}",
-                        "errors": collect_result.errors
-                    })
-
-            except Exception as e:
-                failed += 1
-                logger.error(f"刷新股票 {stock.symbol} 時發生錯誤: {str(e)}")
-                results.append({
-                    "stock_id": stock.id,
-                    "symbol": stock.symbol,
-                    "name": stock.name,
-                    "success": False,
-                    "data_points": 0,
-                    "message": f"錯誤: {str(e)}"
-                })
+                        "message": f"錯誤: {str(e)}",
+                    }
+                )
 
         logger.info(f"批量刷新完成: 成功 {successful}, 失敗 {failed}")
 
@@ -313,7 +323,7 @@ async def refresh_all_stock_prices(
             "total_stocks": len(active_stocks),
             "successful": successful,
             "failed": failed,
-            "results": results
+            "results": results,
         }
 
     except Exception as e:
@@ -324,7 +334,9 @@ async def refresh_all_stock_prices(
 @router.post("/backfill-missing", response_model=Dict[str, Any])
 async def backfill_missing_prices(
     db: AsyncSession = Depends(get_database_session),
-    data_collection_service: DataCollectionService = Depends(get_data_collection_service_clean)
+    data_collection_service: DataCollectionService = Depends(
+        get_data_collection_service_clean
+    ),
 ):
     """
     自動回填所有缺失價格的股票數據（僅針對完全沒有數據的股票）
@@ -362,7 +374,7 @@ async def backfill_missing_prices(
                 "total_stocks": 0,
                 "successful": 0,
                 "failed": 0,
-                "results": []
+                "results": [],
             }
 
         # 逐一回填數據
@@ -378,42 +390,48 @@ async def backfill_missing_prices(
                     db=db,
                     stock_id=stock.id,
                     start_date=None,  # 使用預設日期範圍
-                    end_date=None
+                    end_date=None,
                 )
 
                 if collect_result.status == collect_result.status.SUCCESS:
                     successful += 1
-                    results.append({
-                        "stock_id": stock.id,
-                        "symbol": stock.symbol,
-                        "name": stock.name,
-                        "success": True,
-                        "data_points": collect_result.records_collected,
-                        "message": "成功回填數據"
-                    })
+                    results.append(
+                        {
+                            "stock_id": stock.id,
+                            "symbol": stock.symbol,
+                            "name": stock.name,
+                            "success": True,
+                            "data_points": collect_result.records_collected,
+                            "message": "成功回填數據",
+                        }
+                    )
                 else:
                     failed += 1
-                    results.append({
+                    results.append(
+                        {
+                            "stock_id": stock.id,
+                            "symbol": stock.symbol,
+                            "name": stock.name,
+                            "success": False,
+                            "data_points": 0,
+                            "message": f"回填失敗: {collect_result.status.value}",
+                            "errors": collect_result.errors,
+                        }
+                    )
+
+            except Exception as e:
+                failed += 1
+                logger.error(f"回填股票 {stock.symbol} 時發生錯誤: {str(e)}")
+                results.append(
+                    {
                         "stock_id": stock.id,
                         "symbol": stock.symbol,
                         "name": stock.name,
                         "success": False,
                         "data_points": 0,
-                        "message": f"回填失敗: {collect_result.status.value}",
-                        "errors": collect_result.errors
-                    })
-
-            except Exception as e:
-                failed += 1
-                logger.error(f"回填股票 {stock.symbol} 時發生錯誤: {str(e)}")
-                results.append({
-                    "stock_id": stock.id,
-                    "symbol": stock.symbol,
-                    "name": stock.name,
-                    "success": False,
-                    "data_points": 0,
-                    "message": f"錯誤: {str(e)}"
-                })
+                        "message": f"錯誤: {str(e)}",
+                    }
+                )
 
         logger.info(f"批量回填完成: 成功 {successful}, 失敗 {failed}")
 
@@ -423,7 +441,7 @@ async def backfill_missing_prices(
             "total_stocks": len(stocks_without_prices),
             "successful": successful,
             "failed": failed,
-            "results": results
+            "results": results,
         }
 
     except Exception as e:

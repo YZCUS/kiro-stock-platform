@@ -4,6 +4,7 @@
 提供策略信號的生成、管理和查詢功能，包括批量信號生成、
 信號狀態更新、過期信號處理等。
 """
+
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
@@ -35,9 +36,7 @@ class StrategySignalService:
         self.subscription_service = StrategySubscriptionService()
 
     async def generate_signals_for_subscription(
-        self,
-        db: AsyncSession,
-        subscription_id: int
+        self, db: AsyncSession, subscription_id: int
     ) -> List[StrategySignal]:
         """
         為特定訂閱生成交易信號
@@ -80,9 +79,7 @@ class StrategySignalService:
 
         # 3. 獲取需要監控的股票列表
         stocks = await self.subscription_service.get_monitored_stocks(
-            db=db,
-            user_id=subscription.user_id,
-            subscription_id=subscription_id
+            db=db, user_id=subscription.user_id, subscription_id=subscription_id
         )
 
         if not stocks:
@@ -97,18 +94,14 @@ class StrategySignalService:
         try:
             # 嘗試使用批量分析（效能更好）
             trading_signals = await strategy.batch_analyze(
-                stock_ids=stock_ids,
-                db=db,
-                params=subscription.parameters
+                stock_ids=stock_ids, db=db, params=subscription.parameters
             )
         except NotImplementedError:
             # 如果策略未實作 batch_analyze，則逐個分析
             trading_signals = []
             for stock in stocks:
                 signal = await strategy.analyze(
-                    stock_id=stock.id,
-                    db=db,
-                    params=subscription.parameters
+                    stock_id=stock.id, db=db, params=subscription.parameters
                 )
                 if signal:
                     trading_signals.append(signal)
@@ -121,7 +114,7 @@ class StrategySignalService:
                 user_id=subscription.user_id,
                 stock_id=trading_signal.stock_id,
                 strategy_type=trading_signal.strategy_type.value,
-                signal_date=trading_signal.signal_date
+                signal_date=trading_signal.signal_date,
             )
 
             if existing_signal:
@@ -142,7 +135,7 @@ class StrategySignalService:
                 valid_until=trading_signal.valid_until,
                 reason=trading_signal.reason,
                 extra_data=trading_signal.extra_data,
-                status='active'
+                status="active",
             )
             db.add(signal)
             signals_to_save.append(signal)
@@ -167,7 +160,7 @@ class StrategySignalService:
         sort_by: str = "signal_date",
         sort_order: str = "desc",
         limit: Optional[int] = None,
-        offset: Optional[int] = None
+        offset: Optional[int] = None,
     ) -> List[StrategySignal]:
         """
         獲取用戶的交易信號
@@ -189,10 +182,10 @@ class StrategySignalService:
             List[StrategySignal]: 信號列表
         """
         # 建立基礎查詢
-        query = select(StrategySignal).filter(
-            StrategySignal.user_id == user_id
-        ).options(
-            joinedload(StrategySignal.stock)
+        query = (
+            select(StrategySignal)
+            .filter(StrategySignal.user_id == user_id)
+            .options(joinedload(StrategySignal.stock))
         )
 
         # 應用過濾條件
@@ -235,7 +228,7 @@ class StrategySignalService:
         db: AsyncSession,
         signal_id: int,
         status: str,
-        user_id: Optional[uuid.UUID] = None
+        user_id: Optional[uuid.UUID] = None,
     ) -> StrategySignal:
         """
         更新信號狀態
@@ -253,7 +246,7 @@ class StrategySignalService:
             ValueError: 當信號不存在或狀態無效時
         """
         # 驗證狀態
-        valid_statuses = ['active', 'triggered', 'expired', 'cancelled']
+        valid_statuses = ["active", "triggered", "expired", "cancelled"]
         if status not in valid_statuses:
             raise ValueError(
                 f"Invalid status: {status}. Valid statuses: {', '.join(valid_statuses)}"
@@ -281,9 +274,7 @@ class StrategySignalService:
         return signal
 
     async def expire_old_signals(
-        self,
-        db: AsyncSession,
-        user_id: Optional[uuid.UUID] = None
+        self, db: AsyncSession, user_id: Optional[uuid.UUID] = None
     ) -> int:
         """
         將過期的信號標記為 expired
@@ -303,9 +294,9 @@ class StrategySignalService:
 
         # 建立查詢
         query = select(StrategySignal).filter(
-            StrategySignal.status == 'active',
+            StrategySignal.status == "active",
             StrategySignal.valid_until.isnot(None),
-            StrategySignal.valid_until < today
+            StrategySignal.valid_until < today,
         )
 
         if user_id:
@@ -318,7 +309,7 @@ class StrategySignalService:
         # 更新狀態
         count = 0
         for signal in expired_signals:
-            signal.status = 'expired'
+            signal.status = "expired"
             count += 1
 
         if count > 0:
@@ -331,7 +322,7 @@ class StrategySignalService:
         db: AsyncSession,
         user_id: uuid.UUID,
         date_from: Optional[date] = None,
-        date_to: Optional[date] = None
+        date_to: Optional[date] = None,
     ) -> Dict[str, Any]:
         """
         獲取用戶的信號統計資訊
@@ -369,10 +360,9 @@ class StrategySignalService:
 
         # 2. 按狀態統計
         status_result = await db.execute(
-            select(
-                StrategySignal.status,
-                func.count(StrategySignal.id)
-            ).filter(*filters).group_by(StrategySignal.status)
+            select(StrategySignal.status, func.count(StrategySignal.id))
+            .filter(*filters)
+            .group_by(StrategySignal.status)
         )
         status_counts = {row[0]: row[1] for row in status_result.all()}
 
@@ -381,23 +371,21 @@ class StrategySignalService:
             select(
                 StrategySignal.strategy_type,
                 func.count(StrategySignal.id),
-                func.avg(StrategySignal.confidence)
-            ).filter(*filters).group_by(StrategySignal.strategy_type)
+                func.avg(StrategySignal.confidence),
+            )
+            .filter(*filters)
+            .group_by(StrategySignal.strategy_type)
         )
         by_strategy = {
-            row[0]: {
-                'count': row[1],
-                'avg_confidence': float(row[2]) if row[2] else 0
-            }
+            row[0]: {"count": row[1], "avg_confidence": float(row[2]) if row[2] else 0}
             for row in strategy_result.all()
         }
 
         # 4. 按方向統計
         direction_result = await db.execute(
-            select(
-                StrategySignal.direction,
-                func.count(StrategySignal.id)
-            ).filter(*filters).group_by(StrategySignal.direction)
+            select(StrategySignal.direction, func.count(StrategySignal.id))
+            .filter(*filters)
+            .group_by(StrategySignal.direction)
         )
         by_direction = {row[0]: row[1] for row in direction_result.all()}
 
@@ -408,20 +396,18 @@ class StrategySignalService:
         avg_confidence = avg_confidence_result.scalar()
 
         return {
-            'total_count': total_count,
-            'active_count': status_counts.get('active', 0),
-            'triggered_count': status_counts.get('triggered', 0),
-            'expired_count': status_counts.get('expired', 0),
-            'cancelled_count': status_counts.get('cancelled', 0),
-            'by_strategy': by_strategy,
-            'by_direction': by_direction,
-            'avg_confidence': float(avg_confidence) if avg_confidence else 0
+            "total_count": total_count,
+            "active_count": status_counts.get("active", 0),
+            "triggered_count": status_counts.get("triggered", 0),
+            "expired_count": status_counts.get("expired", 0),
+            "cancelled_count": status_counts.get("cancelled", 0),
+            "by_strategy": by_strategy,
+            "by_direction": by_direction,
+            "avg_confidence": float(avg_confidence) if avg_confidence else 0,
         }
 
     async def batch_generate_signals(
-        self,
-        db: AsyncSession,
-        user_id: Optional[uuid.UUID] = None
+        self, db: AsyncSession, user_id: Optional[uuid.UUID] = None
     ) -> Dict[str, Any]:
         """
         批量為多個訂閱生成信號
@@ -460,22 +446,23 @@ class StrategySignalService:
         for subscription in subscriptions:
             try:
                 signals = await self.generate_signals_for_subscription(
-                    db=db,
-                    subscription_id=subscription.id
+                    db=db, subscription_id=subscription.id
                 )
                 processed_count += 1
                 total_signals += len(signals)
             except Exception as e:
-                errors.append({
-                    'subscription_id': subscription.id,
-                    'strategy_type': subscription.strategy_type,
-                    'error': str(e)
-                })
+                errors.append(
+                    {
+                        "subscription_id": subscription.id,
+                        "strategy_type": subscription.strategy_type,
+                        "error": str(e),
+                    }
+                )
 
         return {
-            'processed_subscriptions': processed_count,
-            'generated_signals': total_signals,
-            'errors': errors
+            "processed_subscriptions": processed_count,
+            "generated_signals": total_signals,
+            "errors": errors,
         }
 
     async def _check_duplicate_signal(
@@ -484,7 +471,7 @@ class StrategySignalService:
         user_id: uuid.UUID,
         stock_id: int,
         strategy_type: str,
-        signal_date: date
+        signal_date: date,
     ) -> Optional[StrategySignal]:
         """
         檢查是否存在重複的活躍信號
@@ -505,7 +492,7 @@ class StrategySignalService:
                 StrategySignal.stock_id == stock_id,
                 StrategySignal.strategy_type == strategy_type,
                 StrategySignal.signal_date == signal_date,
-                StrategySignal.status == 'active'
+                StrategySignal.status == "active",
             )
         )
         return result.scalar_one_or_none()

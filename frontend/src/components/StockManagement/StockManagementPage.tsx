@@ -20,9 +20,7 @@ import { ShoppingCart, TrendingDown, BarChart3, Trash2, ArrowUpDown, Plus } from
 import UnifiedStockSelector from './UnifiedStockSelector';
 import * as stockListApi from '../../services/stockListApi';
 
-export interface StockManagementPageProps {}
-
-const StockManagementPage: React.FC<StockManagementPageProps> = () => {
+const StockManagementPage: React.FC = () => {
   const router = useRouter();
   const dispatch = useAppDispatch();
   const [searchTerm, setSearchTerm] = useState('');

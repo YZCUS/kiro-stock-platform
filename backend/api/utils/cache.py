@@ -1,6 +1,7 @@
 """
 Redis 快取工具
 """
+
 import redis
 import json
 from typing import Optional, List, Dict, Any
@@ -15,7 +16,7 @@ try:
         db=settings.redis.db,
         password=settings.redis.password,
         decode_responses=True,
-        socket_timeout=settings.redis.socket_timeout
+        socket_timeout=settings.redis.socket_timeout,
     )
     # 測試連接
     redis_client.ping()

@@ -2,6 +2,7 @@
 風險評估 - Domain Policies
 風險管理相關的業務邏輯
 """
+
 from typing import List, Dict, Any, Tuple
 from enum import Enum
 from datetime import date, datetime, timedelta
@@ -9,6 +10,7 @@ from datetime import date, datetime, timedelta
 
 class RiskLevel(str, Enum):
     """風險等級"""
+
     LOW = "low"
     MODERATE = "moderate"
     HIGH = "high"
@@ -17,6 +19,7 @@ class RiskLevel(str, Enum):
 
 class RiskFactor(str, Enum):
     """風險因子"""
+
     VOLATILITY = "volatility"
     LIQUIDITY = "liquidity"
     CONCENTRATION = "concentration"
@@ -28,7 +31,9 @@ class RiskAssessment:
     """風險評估工具"""
 
     @staticmethod
-    def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
+    def safe_divide(
+        numerator: float, denominator: float, default: float = 0.0
+    ) -> float:
         """安全除法，避免除零錯誤"""
         try:
             if denominator == 0:
@@ -53,14 +58,13 @@ class RiskAssessment:
 
     @staticmethod
     def calculate_sharpe_ratio(
-        returns: List[float],
-        risk_free_rate: float = 0.02
+        returns: List[float], risk_free_rate: float = 0.02
     ) -> float:
         """計算夏普比率"""
         if not returns:
             return 0.0
 
-        excess_returns = [r - risk_free_rate/252 for r in returns]  # 日化無風險利率
+        excess_returns = [r - risk_free_rate / 252 for r in returns]  # 日化無風險利率
 
         if not excess_returns:
             return 0.0
@@ -71,8 +75,10 @@ class RiskAssessment:
             return 0.0
 
         # 計算標準差
-        variance = sum((r - mean_excess) ** 2 for r in excess_returns) / (len(excess_returns) - 1)
-        std_dev = variance ** 0.5
+        variance = sum((r - mean_excess) ** 2 for r in excess_returns) / (
+            len(excess_returns) - 1
+        )
+        std_dev = variance**0.5
 
         return RiskAssessment.safe_divide(mean_excess, std_dev)
 
@@ -119,9 +125,7 @@ class RiskAssessment:
 
     @staticmethod
     def assess_liquidity_risk(
-        avg_volume: float,
-        current_volume: float,
-        bid_ask_spread: float = None
+        avg_volume: float, current_volume: float, bid_ask_spread: float = None
     ) -> RiskLevel:
         """評估流動性風險"""
         volume_ratio = RiskAssessment.safe_divide(current_volume, avg_volume, 1.0)
@@ -145,8 +149,7 @@ class RiskAssessment:
 
     @staticmethod
     def assess_concentration_risk(
-        position_weights: List[float],
-        max_single_position: float = 0.10
+        position_weights: List[float], max_single_position: float = 0.10
     ) -> RiskLevel:
         """評估集中度風險"""
         if not position_weights:
@@ -165,8 +168,7 @@ class RiskAssessment:
 
     @staticmethod
     def calculate_portfolio_beta(
-        stock_returns: List[float],
-        market_returns: List[float]
+        stock_returns: List[float], market_returns: List[float]
     ) -> float:
         """計算投資組合Beta值"""
         if len(stock_returns) != len(market_returns) or len(stock_returns) < 2:
@@ -181,22 +183,23 @@ class RiskAssessment:
             for s, m in zip(stock_returns, market_returns)
         ) / len(stock_returns)
 
-        market_variance = sum(
-            (m - market_mean) ** 2 for m in market_returns
-        ) / len(market_returns)
+        market_variance = sum((m - market_mean) ** 2 for m in market_returns) / len(
+            market_returns
+        )
 
         return RiskAssessment.safe_divide(covariance, market_variance, 1.0)
 
     @staticmethod
     def assess_momentum_risk(
-        price_changes: List[float],
-        threshold: float = 0.05
+        price_changes: List[float], threshold: float = 0.05
     ) -> RiskLevel:
         """評估動能風險"""
         if not price_changes:
             return RiskLevel.LOW
 
-        recent_changes = price_changes[-5:] if len(price_changes) >= 5 else price_changes
+        recent_changes = (
+            price_changes[-5:] if len(price_changes) >= 5 else price_changes
+        )
         avg_change = sum(recent_changes) / len(recent_changes)
 
         # 檢查是否有極端動能
@@ -213,7 +216,7 @@ class RiskAssessment:
         liquidity_risk: RiskLevel,
         concentration_risk: RiskLevel,
         momentum_risk: RiskLevel,
-        weights: Dict[RiskFactor, float] = None
+        weights: Dict[RiskFactor, float] = None,
     ) -> float:
         """計算綜合風險分數 (0-1之間)"""
         if weights is None:
@@ -221,37 +224,32 @@ class RiskAssessment:
                 RiskFactor.VOLATILITY: 0.3,
                 RiskFactor.LIQUIDITY: 0.25,
                 RiskFactor.CONCENTRATION: 0.25,
-                RiskFactor.MOMENTUM: 0.2
+                RiskFactor.MOMENTUM: 0.2,
             }
 
         risk_values = {
             RiskLevel.LOW: 0.2,
             RiskLevel.MODERATE: 0.5,
             RiskLevel.HIGH: 0.8,
-            RiskLevel.EXTREME: 1.0
+            RiskLevel.EXTREME: 1.0,
         }
 
         score = (
-            weights[RiskFactor.VOLATILITY] * risk_values[volatility_risk] +
-            weights[RiskFactor.LIQUIDITY] * risk_values[liquidity_risk] +
-            weights[RiskFactor.CONCENTRATION] * risk_values[concentration_risk] +
-            weights[RiskFactor.MOMENTUM] * risk_values[momentum_risk]
+            weights[RiskFactor.VOLATILITY] * risk_values[volatility_risk]
+            + weights[RiskFactor.LIQUIDITY] * risk_values[liquidity_risk]
+            + weights[RiskFactor.CONCENTRATION] * risk_values[concentration_risk]
+            + weights[RiskFactor.MOMENTUM] * risk_values[momentum_risk]
         )
 
         return min(1.0, max(0.0, score))
 
     @staticmethod
     def recommend_position_adjustment(
-        current_risk_score: float,
-        target_risk_score: float = 0.6
+        current_risk_score: float, target_risk_score: float = 0.6
     ) -> Dict[str, Any]:
         """建議倉位調整"""
         if current_risk_score <= target_risk_score:
-            return {
-                "action": "hold",
-                "adjustment": 0.0,
-                "reason": "風險在可接受範圍內"
-            }
+            return {"action": "hold", "adjustment": 0.0, "reason": "風險在可接受範圍內"}
 
         risk_excess = current_risk_score - target_risk_score
 
@@ -259,17 +257,17 @@ class RiskAssessment:
             return {
                 "action": "reduce_significantly",
                 "adjustment": -0.3,
-                "reason": "風險過高，建議大幅減倉"
+                "reason": "風險過高，建議大幅減倉",
             }
         elif risk_excess > 0.15:
             return {
                 "action": "reduce_moderately",
                 "adjustment": -0.15,
-                "reason": "風險偏高，建議適度減倉"
+                "reason": "風險偏高，建議適度減倉",
             }
         else:
             return {
                 "action": "reduce_slightly",
                 "adjustment": -0.05,
-                "reason": "風險略高，建議小幅減倉"
+                "reason": "風險略高，建議小幅減倉",
             }

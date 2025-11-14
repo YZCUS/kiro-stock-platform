@@ -6,4 +6,4 @@
 
 from .yahoo_finance_source import YahooFinanceSource
 
-__all__ = ['YahooFinanceSource']
+__all__ = ["YahooFinanceSource"]

@@ -2,6 +2,7 @@
 Redis 快取服務 - 統一的快取實現
 整合原本分散在多個位置的快取邏輯
 """
+
 import json
 import redis
 from typing import Any, Optional, Dict, List
@@ -256,10 +257,13 @@ class RedisCacheService(ICacheService):
                 "keyspace_hits": info.get("keyspace_hits"),
                 "keyspace_misses": info.get("keyspace_misses"),
                 "hit_rate": round(
-                    info.get("keyspace_hits", 0) /
-                    max(info.get("keyspace_hits", 0) + info.get("keyspace_misses", 0), 1) * 100,
-                    2
-                )
+                    info.get("keyspace_hits", 0)
+                    / max(
+                        info.get("keyspace_hits", 0) + info.get("keyspace_misses", 0), 1
+                    )
+                    * 100,
+                    2,
+                ),
             }
         except Exception as e:
             print(f"Redis stats 操作失敗: {e}")

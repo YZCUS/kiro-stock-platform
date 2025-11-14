@@ -2,6 +2,7 @@
 股票詳情相關API端點
 負責: GET /{stock_id}, /{symbol}/signals
 """
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any
@@ -9,7 +10,7 @@ from typing import List, Dict, Any
 from app.dependencies import (
     get_database_session,
     get_stock_service,
-    get_trading_signal_service_clean
+    get_trading_signal_service_clean,
 )
 from domain.services.stock_service import StockService
 from domain.services.trading_signal_service import TradingSignalService
@@ -22,7 +23,7 @@ router = APIRouter()
 async def get_stock(
     stock_id: int,
     db: AsyncSession = Depends(get_database_session),
-    stock_service: StockService = Depends(get_stock_service)
+    stock_service: StockService = Depends(get_stock_service),
 ):
     """
     取得單個股票詳細資訊
@@ -46,7 +47,9 @@ async def get_stock_data(
     include_signals: bool = Query(True, description="是否包含交易信號"),
     db: AsyncSession = Depends(get_database_session),
     stock_service: StockService = Depends(get_stock_service),
-    trading_signal_service: TradingSignalService = Depends(get_trading_signal_service_clean)
+    trading_signal_service: TradingSignalService = Depends(
+        get_trading_signal_service_clean
+    ),
 ):
     """
     取得股票完整數據（包含價格、指標、信號等）
@@ -55,9 +58,7 @@ async def get_stock_data(
         # 檢查股票是否存在
         stock = await stock_service.get_stock_by_id(db, stock_id)
 
-        result = {
-            "stock": StockResponse.model_validate(stock)
-        }
+        result = {"stock": StockResponse.model_validate(stock)}
 
         # 根據請求參數添加相關數據
         if include_prices:
@@ -71,12 +72,11 @@ async def get_stock_data(
         if include_signals:
             # 獲取最近的交易信號
             signal_results = await trading_signal_service.get_recent_signals(
-                db,
-                stock_id=stock_id,
-                limit=10
+                db, stock_id=stock_id, limit=10
             )
             result["signals"] = [
-                TradingSignalResponse.model_validate(signal) for signal in signal_results
+                TradingSignalResponse.model_validate(signal)
+                for signal in signal_results
             ]
 
         return result
@@ -94,7 +94,9 @@ async def get_stock_signals_by_symbol(
     signal_type: str = Query(None, description="信號類型過濾"),
     db: AsyncSession = Depends(get_database_session),
     stock_service: StockService = Depends(get_stock_service),
-    trading_signal_service: TradingSignalService = Depends(get_trading_signal_service_clean)
+    trading_signal_service: TradingSignalService = Depends(
+        get_trading_signal_service_clean
+    ),
 ):
     """
     根據股票代號取得交易信號
@@ -104,10 +106,7 @@ async def get_stock_signals_by_symbol(
         stock = await stock_service.get_stock_by_symbol(db, symbol)
 
         signals = await trading_signal_service.get_recent_signals(
-            db,
-            stock_id=stock.id,
-            limit=limit,
-            signal_type=signal_type
+            db, stock_id=stock.id, limit=limit, signal_type=signal_type
         )
 
         return [TradingSignalResponse.model_validate(signal) for signal in signals]

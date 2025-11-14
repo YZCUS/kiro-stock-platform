@@ -4,6 +4,7 @@
 定義統一的價格數據源接口，支持多種數據提供商（Yahoo Finance、Alpha Vantage、FMP 等）
 遵循依賴倒置原則，業務邏輯依賴於抽象接口而非具體實現
 """
+
 from abc import ABC, abstractmethod
 from datetime import date
 from typing import List, Dict, Any, Optional
@@ -14,11 +15,7 @@ class IPriceDataSource(ABC):
 
     @abstractmethod
     async def fetch_historical_prices(
-        self,
-        symbol: str,
-        start_date: date,
-        end_date: date,
-        market: str = "US"
+        self, symbol: str, start_date: date, end_date: date, market: str = "US"
     ) -> List[Dict[str, Any]]:
         """
         獲取歷史價格數據
@@ -47,10 +44,7 @@ class IPriceDataSource(ABC):
 
     @abstractmethod
     async def fetch_historical_prices_by_period(
-        self,
-        symbol: str,
-        period: str,
-        market: str = "US"
+        self, symbol: str, period: str, market: str = "US"
     ) -> List[Dict[str, Any]]:
         """
         使用 period 參數獲取歷史價格數據
@@ -70,11 +64,7 @@ class IPriceDataSource(ABC):
         pass
 
     @abstractmethod
-    async def validate_symbol(
-        self,
-        symbol: str,
-        market: str = "US"
-    ) -> bool:
+    async def validate_symbol(self, symbol: str, market: str = "US") -> bool:
         """
         驗證股票代碼是否有效
 
@@ -91,11 +81,7 @@ class IPriceDataSource(ABC):
         pass
 
     @abstractmethod
-    async def get_stock_info(
-        self,
-        symbol: str,
-        market: str = "US"
-    ) -> Dict[str, Any]:
+    async def get_stock_info(self, symbol: str, market: str = "US") -> Dict[str, Any]:
         """
         獲取股票基本資訊
 
@@ -145,24 +131,29 @@ class IPriceDataSource(ABC):
 
 class PriceDataSourceError(Exception):
     """價格數據源通用錯誤"""
+
     pass
 
 
 class SymbolNotFoundError(PriceDataSourceError):
     """股票代碼不存在錯誤"""
+
     pass
 
 
 class DataUnavailableError(PriceDataSourceError):
     """數據不可用錯誤（可能是非交易日、數據延遲等）"""
+
     pass
 
 
 class RateLimitError(PriceDataSourceError):
     """API 調用頻率限制錯誤"""
+
     pass
 
 
 class AuthenticationError(PriceDataSourceError):
     """認證失敗錯誤（API 密鑰無效等）"""
+
     pass

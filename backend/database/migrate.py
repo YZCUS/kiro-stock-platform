@@ -32,9 +32,9 @@ class DatabaseManager:
 
         self.engine = create_async_engine(
             settings.database.url.replace("postgresql://", "postgresql+asyncpg://"),
-            echo=True
+            echo=True,
         )
-    
+
     async def create_database(self):
         """建立資料庫（如果不存在）"""
         try:
@@ -45,7 +45,7 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"資料庫連接失敗: {e}")
             raise
-    
+
     def run_migrations(self):
         """執行資料庫遷移"""
         try:
@@ -60,7 +60,9 @@ class DatabaseManager:
         """建立新的遷移檔案"""
         try:
             logger.info(f"建立新的遷移檔案: {message}")
-            alembic_command.revision(self.alembic_cfg, message=message, autogenerate=True)
+            alembic_command.revision(
+                self.alembic_cfg, message=message, autogenerate=True
+            )
             logger.info("遷移檔案建立完成")
         except Exception as e:
             logger.error(f"建立遷移檔案失敗: {e}")
@@ -91,7 +93,7 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"資料庫降級失敗: {e}")
             raise
-    
+
     async def reset_database(self):
         """重置資料庫（危險操作）"""
         try:
@@ -103,7 +105,7 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"資料庫重置失敗: {e}")
             raise
-    
+
     async def close(self):
         """關閉資料庫連接"""
         await self.engine.dispose()
@@ -121,7 +123,7 @@ async def main():
         print("  python migrate.py revision <msg> # 建立新遷移")
         print("  python migrate.py reset         # 重置資料庫（危險）")
         return
-    
+
     db_manager = DatabaseManager()
 
     try:
@@ -153,18 +155,18 @@ async def main():
 
         elif cmd == "reset":
             confirm = input("確定要重置資料庫嗎？這將刪除所有數據 (y/N): ")
-            if confirm.lower() == 'y':
+            if confirm.lower() == "y":
                 await db_manager.reset_database()
             else:
                 print("操作已取消")
 
         else:
             print(f"未知命令: {cmd}")
-    
+
     except Exception as e:
         logger.error(f"操作失敗: {e}")
         sys.exit(1)
-    
+
     finally:
         await db_manager.close()
 

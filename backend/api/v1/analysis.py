@@ -1,6 +1,7 @@
 """
 分析相關API端點
 """
+
 from typing import List, Optional, Dict, Any
 from datetime import datetime, date
 from enum import Enum
@@ -72,7 +73,9 @@ async def calculate_technical_indicator(
     request: TechnicalAnalysisRequest,
     db: AsyncSession = Depends(get_database_session),
     stock_service: StockService = Depends(get_stock_service),
-    technical_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean),
+    technical_service: TechnicalAnalysisService = Depends(
+        get_technical_analysis_service_clean
+    ),
 ):
     try:
         await stock_service.get_stock_by_id(db, request.stock_id)
@@ -104,13 +107,17 @@ async def calculate_technical_indicator(
         raise HTTPException(status_code=500, detail=f"技術分析計算失敗: {str(e)}")
 
 
-@router.get("/technical-analysis/{stock_id}", response_model=List[TechnicalAnalysisResponse])
+@router.get(
+    "/technical-analysis/{stock_id}", response_model=List[TechnicalAnalysisResponse]
+)
 async def get_all_technical_indicators(
     stock_id: int,
     days: int = Query(30, description="計算天數"),
     db: AsyncSession = Depends(get_database_session),
     stock_service: StockService = Depends(get_stock_service),
-    technical_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean),
+    technical_service: TechnicalAnalysisService = Depends(
+        get_technical_analysis_service_clean
+    ),
 ):
     try:
         await stock_service.get_stock_by_id(db, stock_id)
@@ -184,7 +191,11 @@ async def detect_trading_signals(
                     symbol=stock.symbol,
                     signal_type=signal.signal_type.value,
                     strength=signal.signal_strength.value,
-                    price=float(signal.metadata.get("price", 0)) if signal.metadata else None,
+                    price=(
+                        float(signal.metadata.get("price", 0))
+                        if signal.metadata
+                        else None
+                    ),
                     timestamp=signal.signal_date,
                     indicators=signal.metadata or {},
                 )
@@ -246,7 +257,9 @@ async def batch_technical_analysis(
     limit: int = Query(20, description="股票數量限制"),
     db: AsyncSession = Depends(get_database_session),
     stock_service: StockService = Depends(get_stock_service),
-    technical_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean),
+    technical_service: TechnicalAnalysisService = Depends(
+        get_technical_analysis_service_clean
+    ),
 ):
     try:
         stock_list = await stock_service.get_stock_list(
@@ -313,7 +326,7 @@ async def get_market_overview(
 
         for item in stocks["items"][:20]:
             try:
-                analysis = await signal_service.generate_trading_signals(db, item["id"]) 
+                analysis = await signal_service.generate_trading_signals(db, item["id"])
                 if analysis.primary_signal:
                     signal_type = analysis.primary_signal.signal_type.value.upper()
                     signal_stats[signal_type] = signal_stats.get(signal_type, 0) + 1
@@ -326,7 +339,11 @@ async def get_market_overview(
             sentiment = "neutral"
         else:
             buy_ratio = signal_stats["BUY"] / total_signal
-            sentiment = "bullish" if buy_ratio > 0.6 else "bearish" if buy_ratio < 0.4 else "neutral"
+            sentiment = (
+                "bullish"
+                if buy_ratio > 0.6
+                else "bearish" if buy_ratio < 0.4 else "neutral"
+            )
 
         return {
             "market": market or "ALL",

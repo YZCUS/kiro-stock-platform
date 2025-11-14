@@ -1,6 +1,7 @@
 """
 Redis 連接和快取設定
 """
+
 import redis.asyncio as redis
 import json
 import asyncio
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 def with_retry(max_retries: int = 3, delay: float = 1.0):
     """Redis操作重試裝飾器"""
+
     def decorator(func):
         @wraps(func)
         async def wrapper(self, *args, **kwargs):
@@ -24,28 +26,35 @@ def with_retry(max_retries: int = 3, delay: float = 1.0):
                 try:
                     # 檢查連接狀態
                     if not await self._ensure_connection():
-                        return None if func.__name__ == 'get' else False
+                        return None if func.__name__ == "get" else False
 
                     return await func(self, *args, **kwargs)
 
-                except (redis.ConnectionError, redis.TimeoutError, redis.RedisError) as e:
+                except (
+                    redis.ConnectionError,
+                    redis.TimeoutError,
+                    redis.RedisError,
+                ) as e:
                     last_exception = e
-                    logger.warning(f"Redis操作失敗 (嘗試 {attempt + 1}/{max_retries}): {e}")
+                    logger.warning(
+                        f"Redis操作失敗 (嘗試 {attempt + 1}/{max_retries}): {e}"
+                    )
 
                     if attempt < max_retries - 1:
-                        await asyncio.sleep(delay * (2 ** attempt))  # 指數退避
+                        await asyncio.sleep(delay * (2**attempt))  # 指數退避
                         # 嘗試重新連接
                         await self._reconnect()
 
                 except Exception as e:
                     # 非Redis相關錯誤，不重試
                     logger.error(f"Redis操作錯誤: {e}")
-                    return None if func.__name__ == 'get' else False
+                    return None if func.__name__ == "get" else False
 
             logger.error(f"Redis操作最終失敗: {last_exception}")
-            return None if func.__name__ == 'get' else False
+            return None if func.__name__ == "get" else False
 
         return wrapper
+
     return decorator
 
 
@@ -56,7 +65,7 @@ class RedisClient:
         self.redis_client: Optional[redis.Redis] = None
         self.connection_pool: Optional[redis.ConnectionPool] = None
         self._is_connected: bool = False
-    
+
     async def connect(self):
         """建立 Redis 連接"""
         try:
@@ -68,7 +77,11 @@ class RedisClient:
                 redis_url = getattr(settings.redis, "url", None)
 
             if not redis_url:
-                password = getattr(settings.redis, "password", None) if hasattr(settings, "redis") else None
+                password = (
+                    getattr(settings.redis, "password", None)
+                    if hasattr(settings, "redis")
+                    else None
+                )
                 host = getattr(settings.redis, "host", "localhost")
                 port = getattr(settings.redis, "port", 6379)
                 db = getattr(settings.redis, "db", 0)
@@ -84,7 +97,7 @@ class RedisClient:
                 retry_on_timeout=True,
                 socket_keepalive=True,
                 socket_keepalive_options={},
-                health_check_interval=30
+                health_check_interval=30,
             )
 
             # 創建Redis客戶端
@@ -100,7 +113,7 @@ class RedisClient:
             self.redis_client = None
             self.connection_pool = None
             self._is_connected = False
-    
+
     async def disconnect(self):
         """關閉 Redis 連接"""
         try:
@@ -145,7 +158,7 @@ class RedisClient:
     def is_connected(self) -> bool:
         """檢查連接狀態"""
         return self._is_connected and self.redis_client is not None
-    
+
     @with_retry(max_retries=3, delay=0.5)
     async def get(self, key: str) -> Optional[Any]:
         """取得快取值"""
@@ -155,16 +168,11 @@ class RedisClient:
         return None
 
     @with_retry(max_retries=3, delay=0.5)
-    async def set(
-        self,
-        key: str,
-        value: Any,
-        expire: Optional[int] = None
-    ) -> bool:
+    async def set(self, key: str, value: Any, expire: Optional[int] = None) -> bool:
         """設定快取值"""
         # 如果沒有指定過期時間，使用預設值
         if expire is None:
-            expire = getattr(settings, 'CACHE_EXPIRE_SECONDS', 3600)  # 預設 1 小時
+            expire = getattr(settings, "CACHE_EXPIRE_SECONDS", 3600)  # 預設 1 小時
 
         json_value = json.dumps(value, ensure_ascii=False, default=str)
         await self.redis_client.set(key, json_value, ex=expire)
@@ -192,7 +200,7 @@ class RedisClient:
         info = {
             "is_connected": self.is_connected,
             "redis_client_exists": self.redis_client is not None,
-            "connection_pool_exists": self.connection_pool is not None
+            "connection_pool_exists": self.connection_pool is not None,
         }
 
         if self.redis_client:
@@ -200,13 +208,18 @@ class RedisClient:
                 # 獲取連接池統計信息
                 if self.connection_pool:
                     pool_info = {
-                        "max_connections": getattr(self.connection_pool, 'max_connections', 'unknown'),
-                        "created_connections": getattr(self.connection_pool, 'created_connections', 'unknown')
+                        "max_connections": getattr(
+                            self.connection_pool, "max_connections", "unknown"
+                        ),
+                        "created_connections": getattr(
+                            self.connection_pool, "created_connections", "unknown"
+                        ),
                     }
                     info.update(pool_info)
 
                 # 測試ping響應時間
                 import time
+
                 start_time = time.time()
                 await self.redis_client.ping()
                 ping_time = (time.time() - start_time) * 1000

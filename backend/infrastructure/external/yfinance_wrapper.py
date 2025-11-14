@@ -4,6 +4,7 @@ YFinance 安全封裝層
 提供對 yfinance 的安全訪問，處理導入錯誤和版本不相容問題。
 在測試環境中自動使用 mock 數據。
 """
+
 import logging
 from typing import Optional, Dict, Any, List
 import os
@@ -61,10 +62,11 @@ class YFinanceWrapper:
     def _is_testing_environment() -> bool:
         """檢測是否在測試環境"""
         import sys
+
         return (
-            'pytest' in sys.modules or
-            os.getenv('TESTING', '').lower() == 'true' or
-            os.getenv('ENV', '') == 'test'
+            "pytest" in sys.modules
+            or os.getenv("TESTING", "").lower() == "true"
+            or os.getenv("ENV", "") == "test"
         )
 
     def get_ticker(self, symbol: str):
@@ -98,7 +100,7 @@ class YFinanceWrapper:
         tickers: str,
         start: Optional[str] = None,
         end: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ):
         """
         下載股票歷史數據
@@ -143,19 +145,19 @@ class YFinanceWrapper:
         else:
             start_date = pd.to_datetime(start)
 
-        dates = pd.date_range(start=start_date, end=end_date, freq='D')
+        dates = pd.date_range(start=start_date, end=end_date, freq="D")
 
         # 生成模擬數據
         n = len(dates)
         base_price = 100
 
         data = {
-            'Open': base_price + np.random.randn(n).cumsum(),
-            'High': base_price + np.random.randn(n).cumsum() + 2,
-            'Low': base_price + np.random.randn(n).cumsum() - 2,
-            'Close': base_price + np.random.randn(n).cumsum(),
-            'Volume': np.random.randint(1000000, 10000000, n),
-            'Adj Close': base_price + np.random.randn(n).cumsum(),
+            "Open": base_price + np.random.randn(n).cumsum(),
+            "High": base_price + np.random.randn(n).cumsum() + 2,
+            "Low": base_price + np.random.randn(n).cumsum() - 2,
+            "Close": base_price + np.random.randn(n).cumsum(),
+            "Volume": np.random.randint(1000000, 10000000, n),
+            "Adj Close": base_price + np.random.randn(n).cumsum(),
         }
 
         df = pd.DataFrame(data, index=dates)
@@ -172,11 +174,11 @@ class MockTicker:
     def __init__(self, symbol: str):
         self.symbol = symbol
         self.info = {
-            'symbol': symbol,
-            'longName': f'Mock Company {symbol}',
-            'currency': 'USD',
-            'marketCap': 1000000000,
-            'regularMarketPrice': 100.0,
+            "symbol": symbol,
+            "longName": f"Mock Company {symbol}",
+            "currency": "USD",
+            "marketCap": 1000000000,
+            "regularMarketPrice": 100.0,
         }
 
     def history(
@@ -185,7 +187,7 @@ class MockTicker:
         interval: str = "1d",
         start: Optional[str] = None,
         end: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ):
         """返回 mock 歷史數據"""
         import pandas as pd
@@ -203,33 +205,33 @@ class MockTicker:
         else:
             # 解析 period
             period_days = {
-                '1d': 1,
-                '5d': 5,
-                '1mo': 30,
-                '3mo': 90,
-                '6mo': 180,
-                '1y': 365,
-                '2y': 730,
-                '5y': 1825,
-                'max': 3650
+                "1d": 1,
+                "5d": 5,
+                "1mo": 30,
+                "3mo": 90,
+                "6mo": 180,
+                "1y": 365,
+                "2y": 730,
+                "5y": 1825,
+                "max": 3650,
             }
             days = period_days.get(period, 30)
             start_date = end_date - timedelta(days=days)
 
-        dates = pd.date_range(start=start_date, end=end_date, freq='D')
+        dates = pd.date_range(start=start_date, end=end_date, freq="D")
         n = len(dates)
         base_price = 100
 
         data = {
-            'Open': base_price + np.random.randn(n).cumsum() * 0.5,
-            'High': base_price + np.random.randn(n).cumsum() * 0.5 + 2,
-            'Low': base_price + np.random.randn(n).cumsum() * 0.5 - 2,
-            'Close': base_price + np.random.randn(n).cumsum() * 0.5,
-            'Volume': np.random.randint(1000000, 10000000, n),
+            "Open": base_price + np.random.randn(n).cumsum() * 0.5,
+            "High": base_price + np.random.randn(n).cumsum() * 0.5 + 2,
+            "Low": base_price + np.random.randn(n).cumsum() * 0.5 - 2,
+            "Close": base_price + np.random.randn(n).cumsum() * 0.5,
+            "Volume": np.random.randint(1000000, 10000000, n),
         }
 
         df = pd.DataFrame(data, index=dates)
-        df.index.name = 'Date'
+        df.index.name = "Date"
         return df
 
 
@@ -245,5 +247,5 @@ def is_yfinance_available() -> bool:
 def get_yfinance_version() -> Optional[str]:
     """取得 yfinance 版本"""
     if _yf_module:
-        return getattr(_yf_module, '__version__', 'unknown')
+        return getattr(_yf_module, "__version__", "unknown")
     return None

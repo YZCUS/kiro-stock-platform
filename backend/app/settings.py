@@ -2,6 +2,7 @@
 應用程式設定 - 統一配置管理
 使用 Pydantic Settings 實現類型安全的配置
 """
+
 try:
     from pydantic_settings import BaseSettings
 except ImportError:
@@ -13,6 +14,7 @@ from typing import Optional
 
 class DatabaseSettings(BaseSettings):
     """資料庫設定"""
+
     url: str = Field(..., env="URL")
     echo: bool = Field(False, env="ECHO")
     pool_size: int = Field(10, env="POOL_SIZE")
@@ -24,6 +26,7 @@ class DatabaseSettings(BaseSettings):
 
 class RedisSettings(BaseSettings):
     """Redis 設定"""
+
     host: str = Field("localhost", env="HOST")
     port: int = Field(6379, env="PORT")
     db: int = Field(0, env="DB")
@@ -41,6 +44,7 @@ class RedisSettings(BaseSettings):
 
 class ExternalAPISettings(BaseSettings):
     """外部 API 設定"""
+
     # 價格數據源配置（不使用 env_prefix，直接讀取 PRICE_DATA_SOURCE）
     price_data_source: str = Field("yahoo_finance")
 
@@ -58,6 +62,7 @@ class ExternalAPISettings(BaseSettings):
 
 class SecuritySettings(BaseSettings):
     """安全設定"""
+
     secret_key: str = Field("dev-secret-key-change-in-production", env="SECRET_KEY")
     algorithm: str = Field("HS256", env="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
@@ -72,10 +77,10 @@ class SecuritySettings(BaseSettings):
 
 class LoggingSettings(BaseSettings):
     """日誌設定"""
+
     level: str = Field("INFO", env="LEVEL")
     format: str = Field(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        env="FORMAT"
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s", env="FORMAT"
     )
     file_path: Optional[str] = Field(None, env="FILE_PATH")
     max_file_size: int = Field(10485760, env="MAX_FILE_SIZE")  # 10MB
@@ -87,6 +92,7 @@ class LoggingSettings(BaseSettings):
 
 class ApplicationSettings(BaseSettings):
     """主應用程式設定"""
+
     app_name: str = Field("Kiro Stock Platform", env="NAME")
     app_version: str = Field("1.0.0", env="VERSION")
     debug: bool = Field(False, env="DEBUG")
@@ -109,6 +115,7 @@ class ApplicationSettings(BaseSettings):
 
 class Settings(BaseSettings):
     """整合所有設定的主要設定類"""
+
     database: DatabaseSettings = DatabaseSettings()
     redis: RedisSettings = RedisSettings()
     external_api: ExternalAPISettings = ExternalAPISettings()
@@ -134,7 +141,9 @@ class Settings(BaseSettings):
 
     SECRET_KEY: Optional[str] = Field(None, alias="SECRET_KEY")
     JWT_ALGORITHM: Optional[str] = Field(None, alias="JWT_ALGORITHM")
-    ACCESS_TOKEN_EXPIRE_MINUTES: Optional[int] = Field(None, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    ACCESS_TOKEN_EXPIRE_MINUTES: Optional[int] = Field(
+        None, alias="ACCESS_TOKEN_EXPIRE_MINUTES"
+    )
     CACHE_EXPIRE_SECONDS: Optional[int] = Field(None, alias="CACHE_EXPIRE_SECONDS")
 
     APP_NAME: Optional[str] = Field(None, alias="APP_NAME")
@@ -194,7 +203,9 @@ class Settings(BaseSettings):
         if settings.JWT_ALGORITHM:
             settings.security.algorithm = settings.JWT_ALGORITHM
         if settings.ACCESS_TOKEN_EXPIRE_MINUTES is not None:
-            settings.security.access_token_expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+            settings.security.access_token_expire_minutes = (
+                settings.ACCESS_TOKEN_EXPIRE_MINUTES
+            )
         if settings.CACHE_EXPIRE_SECONDS is not None:
             settings.redis.default_ttl = settings.CACHE_EXPIRE_SECONDS
 
@@ -219,8 +230,12 @@ class Settings(BaseSettings):
             settings.logging.backup_count = settings.LOG_BACKUP_COUNT
 
         if settings.ALLOWED_HOSTS:
-            if ',' in settings.ALLOWED_HOSTS:
-                settings.ALLOWED_HOSTS = [host.strip() for host in settings.ALLOWED_HOSTS.split(',') if host.strip()]
+            if "," in settings.ALLOWED_HOSTS:
+                settings.ALLOWED_HOSTS = [
+                    host.strip()
+                    for host in settings.ALLOWED_HOSTS.split(",")
+                    if host.strip()
+                ]
             else:
                 settings.ALLOWED_HOSTS = [settings.ALLOWED_HOSTS.strip()]
         else:

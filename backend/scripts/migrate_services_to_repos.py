@@ -8,46 +8,47 @@ from pathlib import Path
 
 # CRUD 到 Repository 的映射
 CRUD_TO_REPO_MAP = {
-    'crud_stock': {
-        'import': 'from infrastructure.persistence.stock_repository import StockRepository',
-        'crud_var': 'stock_crud',
-        'repo_class': 'StockRepository',
-        'repo_var': 'stock_repo'
+    "crud_stock": {
+        "import": "from infrastructure.persistence.stock_repository import StockRepository",
+        "crud_var": "stock_crud",
+        "repo_class": "StockRepository",
+        "repo_var": "stock_repo",
     },
-    'crud_price_history': {
-        'import': 'from infrastructure.persistence.price_history_repository import PriceHistoryRepository',
-        'crud_var': 'price_history_crud',
-        'repo_class': 'PriceHistoryRepository',
-        'repo_var': 'price_repo'
+    "crud_price_history": {
+        "import": "from infrastructure.persistence.price_history_repository import PriceHistoryRepository",
+        "crud_var": "price_history_crud",
+        "repo_class": "PriceHistoryRepository",
+        "repo_var": "price_repo",
     },
-    'crud_technical_indicator': {
-        'import': 'from infrastructure.persistence.technical_indicator_repository import TechnicalIndicatorRepository',
-        'crud_var': 'technical_indicator_crud',
-        'repo_class': 'TechnicalIndicatorRepository',
-        'repo_var': 'indicator_repo'
+    "crud_technical_indicator": {
+        "import": "from infrastructure.persistence.technical_indicator_repository import TechnicalIndicatorRepository",
+        "crud_var": "technical_indicator_crud",
+        "repo_class": "TechnicalIndicatorRepository",
+        "repo_var": "indicator_repo",
     },
-    'crud_trading_signal': {
-        'import': 'from infrastructure.persistence.trading_signal_repository import TradingSignalRepository',
-        'crud_var': 'trading_signal_crud',
-        'repo_class': 'TradingSignalRepository',
-        'repo_var': 'signal_repo'
-    }
+    "crud_trading_signal": {
+        "import": "from infrastructure.persistence.trading_signal_repository import TradingSignalRepository",
+        "crud_var": "trading_signal_crud",
+        "repo_class": "TradingSignalRepository",
+        "repo_var": "signal_repo",
+    },
 }
 
 # 需要遷移的服務文件
 SERVICE_FILES = [
-    'backend/services/infrastructure/storage.py',
-    'backend/services/infrastructure/sync.py',
-    'backend/services/infrastructure/scheduler.py',
-    'backend/services/data/collection.py',
-    'backend/services/data/validation.py',
-    'backend/services/data/cleaning.py',
-    'backend/services/data/backfill.py',
-    'backend/services/analysis/signal_detector.py',
-    'backend/services/analysis/technical_analysis.py',
-    'backend/services/trading/buy_sell_generator.py',
-    'backend/services/trading/signal_notification.py',
+    "backend/services/infrastructure/storage.py",
+    "backend/services/infrastructure/sync.py",
+    "backend/services/infrastructure/scheduler.py",
+    "backend/services/data/collection.py",
+    "backend/services/data/validation.py",
+    "backend/services/data/cleaning.py",
+    "backend/services/data/backfill.py",
+    "backend/services/analysis/signal_detector.py",
+    "backend/services/analysis/technical_analysis.py",
+    "backend/services/trading/buy_sell_generator.py",
+    "backend/services/trading/signal_notification.py",
 ]
+
 
 def migrate_file(filepath):
     """遷移單個文件"""
@@ -55,7 +56,7 @@ def migrate_file(filepath):
         print(f"⚠ File not found: {filepath}")
         return False
 
-    with open(filepath, 'r', encoding='utf-8') as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         content = f.read()
 
     original_content = content
@@ -64,19 +65,21 @@ def migrate_file(filepath):
 
     # 步驟 1: 替換 import 語句
     for crud_name, mapping in CRUD_TO_REPO_MAP.items():
-        old_import = f"from models.repositories.{crud_name} import {mapping['crud_var']}"
+        old_import = (
+            f"from models.repositories.{crud_name} import {mapping['crud_var']}"
+        )
         if old_import in content:
             # 移除舊 import
-            content = content.replace(old_import, '')
+            content = content.replace(old_import, "")
             # 添加新 import (稍後統一添加)
-            imports_added.add(mapping['import'])
+            imports_added.add(mapping["import"])
             replacements_made.append(f"Import: {old_import} → {mapping['import']}")
 
     # 步驟 2: 替換 CRUD 調用
     for crud_name, mapping in CRUD_TO_REPO_MAP.items():
-        crud_var = mapping['crud_var']
-        repo_class = mapping['repo_class']
-        repo_var = mapping['repo_var']
+        crud_var = mapping["crud_var"]
+        repo_class = mapping["repo_class"]
+        repo_var = mapping["repo_var"]
 
         # 查找所有 crud 調用
         # 模式: crud_var.method_name(
@@ -96,11 +99,11 @@ def migrate_file(filepath):
     # 步驟 3: 在適當位置添加新的 imports
     if imports_added:
         # 找到現有 imports 的位置
-        import_section_match = re.search(r'(from [^\n]+ import [^\n]+\n)+', content)
+        import_section_match = re.search(r"(from [^\n]+ import [^\n]+\n)+", content)
         if import_section_match:
             insert_pos = import_section_match.end()
-            new_imports = '\n# ✅ Clean Architecture: 使用 repository implementations\n'
-            new_imports += '\n'.join(sorted(imports_added)) + '\n'
+            new_imports = "\n# ✅ Clean Architecture: 使用 repository implementations\n"
+            new_imports += "\n".join(sorted(imports_added)) + "\n"
             content = content[:insert_pos] + new_imports + content[insert_pos:]
 
     # 步驟 4: 添加 repository 初始化 (在函數開頭)
@@ -110,12 +113,12 @@ def migrate_file(filepath):
     # 只有在內容改變時才寫回文件
     if content != original_content:
         # 備份原文件
-        backup_path = filepath + '.bak'
-        with open(backup_path, 'w', encoding='utf-8') as f:
+        backup_path = filepath + ".bak"
+        with open(backup_path, "w", encoding="utf-8") as f:
             f.write(original_content)
 
         # 寫入新內容
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
         print(f"✓ Migrated: {filepath}")
@@ -129,6 +132,7 @@ def migrate_file(filepath):
     else:
         print(f"- No changes needed: {filepath}")
         return False
+
 
 def main():
     print("=" * 80)
@@ -163,5 +167,6 @@ def main():
     print("  4. Remove .bak files after verification")
     print()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

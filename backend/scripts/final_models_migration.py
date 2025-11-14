@@ -8,15 +8,16 @@ from pathlib import Path
 
 # Import 遷移映射
 MIGRATIONS = {
-    'from domain.models.base import': 'from domain.models.base import',
-    'from domain.models': 'from domain.models',
-    'from domain.models import': 'from domain.models import',
+    "from domain.models.base import": "from domain.models.base import",
+    "from domain.models": "from domain.models",
+    "from domain.models import": "from domain.models import",
 }
+
 
 def migrate_file(filepath: Path):
     """遷移單個文件"""
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
 
         original = content
@@ -25,7 +26,7 @@ def migrate_file(filepath: Path):
             content = content.replace(old, new)
 
         if content != original:
-            with open(filepath, 'w', encoding='utf-8') as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 f.write(content)
             print(f"✓ {filepath}")
             return True
@@ -36,19 +37,20 @@ def migrate_file(filepath: Path):
         print(f"✗ {filepath}: {e}")
         return False
 
+
 def main():
-    backend_dir = Path('/home/opc/projects/kiro-stock-platform/backend')
+    backend_dir = Path("/home/opc/projects/kiro-stock-platform/backend")
 
     # 遷移所有目錄
     dirs_to_migrate = [
-        'domain',
-        'infrastructure',
-        'api',
-        'tests',
-        'scripts',
-        'alembic',
-        'app',
-        'core',
+        "domain",
+        "infrastructure",
+        "api",
+        "tests",
+        "scripts",
+        "alembic",
+        "app",
+        "core",
     ]
 
     count = 0
@@ -57,12 +59,13 @@ def main():
         if not dir_path.exists():
             continue
 
-        for py_file in dir_path.rglob('*.py'):
+        for py_file in dir_path.rglob("*.py"):
             if migrate_file(py_file):
                 count += 1
 
     print(f"\n總共遷移 {count} 個文件")
     print("\n下一步: 刪除 backend/models/")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

@@ -1,13 +1,16 @@
 """
 WebSocket manager - Infrastructure Layer
 """
+
 from typing import Dict, Any, Optional, Set
 from fastapi import WebSocket
 import asyncio
 
 
 class IWebSocketManager:
-    async def connect(self, websocket: WebSocket, client_id: Optional[str] = None) -> None:
+    async def connect(
+        self, websocket: WebSocket, client_id: Optional[str] = None
+    ) -> None:
         raise NotImplementedError
 
     async def disconnect(self, websocket: WebSocket) -> None:
@@ -45,7 +48,9 @@ class SimpleWebSocketManager(IWebSocketManager):
     async def shutdown(self) -> None:
         return None
 
-    async def connect(self, websocket: WebSocket, client_id: Optional[str] = None) -> None:
+    async def connect(
+        self, websocket: WebSocket, client_id: Optional[str] = None
+    ) -> None:
         await websocket.accept()
         self.active_connections[websocket] = {
             "client_id": client_id or f"client_{id(websocket)}",
@@ -106,7 +111,9 @@ class RedisBackedWebSocketManager(IWebSocketManager):
         for websocket in list(self.active_connections.keys()):
             await self.disconnect(websocket)
 
-    async def connect(self, websocket: WebSocket, client_id: Optional[str] = None) -> None:
+    async def connect(
+        self, websocket: WebSocket, client_id: Optional[str] = None
+    ) -> None:
         await websocket.accept()
         self.active_connections[websocket] = {
             "client_id": client_id or f"client_{id(websocket)}",

@@ -2,6 +2,7 @@
 數據收集業務服務 - Domain Layer
 專注於股票數據收集的業務邏輯，不依賴具體的基礎設施實現
 """
+
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, date, timedelta
 from dataclasses import dataclass
@@ -9,13 +10,16 @@ from enum import Enum
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.repositories.stock_repository_interface import IStockRepository
-from domain.repositories.price_history_repository_interface import IPriceHistoryRepository
+from domain.repositories.price_history_repository_interface import (
+    IPriceHistoryRepository,
+)
 from domain.repositories.price_data_source_interface import IPriceDataSource
 from infrastructure.cache.redis_cache_service import ICacheService
 
 
 class DataCollectionStatus(str, Enum):
     """數據收集狀態"""
+
     SUCCESS = "success"
     PARTIAL_SUCCESS = "partial_success"
     FAILED = "failed"
@@ -25,6 +29,7 @@ class DataCollectionStatus(str, Enum):
 
 class ThrottleLevel(str, Enum):
     """API節流等級"""
+
     NONE = "none"
     LIGHT = "light"
     MODERATE = "moderate"
@@ -34,6 +39,7 @@ class ThrottleLevel(str, Enum):
 @dataclass
 class CollectionResult:
     """數據收集結果"""
+
     stock_id: int
     symbol: str
     status: DataCollectionStatus
@@ -48,6 +54,7 @@ class CollectionResult:
 @dataclass
 class BatchCollectionSummary:
     """批次收集摘要"""
+
     total_stocks: int
     successful_stocks: int
     failed_stocks: int
@@ -66,7 +73,7 @@ class DataCollectionService:
         stock_repository: IStockRepository,
         price_repository: IPriceHistoryRepository,
         cache_service: ICacheService,
-        price_data_source: IPriceDataSource
+        price_data_source: IPriceDataSource,
     ):
         self.stock_repo = stock_repository
         self.price_repo = price_repository
@@ -84,7 +91,7 @@ class DataCollectionService:
         db: AsyncSession,
         stock_id: int,
         start_date: Optional[date] = None,
-        end_date: Optional[date] = None
+        end_date: Optional[date] = None,
     ) -> CollectionResult:
         """
         收集單一股票數據
@@ -126,7 +133,7 @@ class DataCollectionService:
                 end_date=end_date,
                 errors=[],
                 warnings=["數據已是最新，跳過收集"],
-                execution_time_seconds=execution_time
+                execution_time_seconds=execution_time,
             )
 
         # 執行數據收集 (這裡會調用Infrastructure層的實現)
@@ -141,14 +148,14 @@ class DataCollectionService:
                 formatted_data = []
                 for data_point in collected_data:
                     formatted_point = {
-                        'stock_id': stock_id,
-                        'date': data_point['date'],
-                        'open_price': data_point['open'],
-                        'high_price': data_point['high'],
-                        'low_price': data_point['low'],
-                        'close_price': data_point['close'],
-                        'volume': data_point.get('volume', 0),
-                        'adjusted_close': data_point.get('adj_close')
+                        "stock_id": stock_id,
+                        "date": data_point["date"],
+                        "open_price": data_point["open"],
+                        "high_price": data_point["high"],
+                        "low_price": data_point["low"],
+                        "close_price": data_point["close"],
+                        "volume": data_point.get("volume", 0),
+                        "adjusted_close": data_point.get("adj_close"),
                     }
                     formatted_data.append(formatted_point)
 
@@ -177,16 +184,13 @@ class DataCollectionService:
             end_date=end_date,
             errors=errors,
             warnings=[],
-            execution_time_seconds=execution_time
+            execution_time_seconds=execution_time,
         )
 
         return result
 
     async def collect_active_stocks_data(
-        self,
-        db: AsyncSession,
-        market: Optional[str] = None,
-        days: int = 7
+        self, db: AsyncSession, market: Optional[str] = None, days: int = 7
     ) -> BatchCollectionSummary:
         """
         收集活躍股票數據
@@ -211,7 +215,7 @@ class DataCollectionService:
                 throttle_level=self.throttle_level,
                 execution_time_seconds=0,
                 collection_date=datetime.now(),
-                results=[]
+                results=[],
             )
 
         # 計算收集期間
@@ -255,7 +259,7 @@ class DataCollectionService:
                     end_date=end_date,
                     errors=[str(e)],
                     warnings=[],
-                    execution_time_seconds=0
+                    execution_time_seconds=0,
                 )
                 results.append(error_result)
 
@@ -273,7 +277,7 @@ class DataCollectionService:
             throttle_level=self.throttle_level,
             execution_time_seconds=execution_time,
             collection_date=datetime.now(),
-            results=results
+            results=results,
         )
 
     async def collect_batch_stocks_data(
@@ -281,7 +285,7 @@ class DataCollectionService:
         db: AsyncSession,
         stock_list: list[dict],
         start_date: Optional[date] = None,
-        end_date: Optional[date] = None
+        end_date: Optional[date] = None,
     ) -> dict:
         """
         批次收集指定股票清單的數據
@@ -320,7 +324,9 @@ class DataCollectionService:
                     await self._apply_throttle_delay()
 
                 # 根據 symbol 和 market 找到股票
-                stock = await self.stock_repo.get_by_symbol_and_market(db, symbol, market)
+                stock = await self.stock_repo.get_by_symbol_and_market(
+                    db, symbol, market
+                )
                 if not stock:
                     collection_errors.append(f"{symbol}: 股票不存在")
                     failed_count += 1
@@ -328,10 +334,7 @@ class DataCollectionService:
 
                 # 收集數據
                 result = await self.collect_stock_data(
-                    db,
-                    stock_id=stock.id,
-                    start_date=start_date,
-                    end_date=end_date
+                    db, stock_id=stock.id, start_date=start_date, end_date=end_date
                 )
 
                 results.append(result)
@@ -342,7 +345,9 @@ class DataCollectionService:
                 else:
                     failed_count += 1
                     if result.errors:
-                        collection_errors.append(f"{symbol}: {', '.join(result.errors)}")
+                        collection_errors.append(
+                            f"{symbol}: {', '.join(result.errors)}"
+                        )
 
                 # 更新節流狀態
                 await self._update_throttle_status(result)
@@ -355,17 +360,19 @@ class DataCollectionService:
                 failed_count += 1
                 error_msg = str(e)
                 collection_errors.append(f"{symbol}: {error_msg}")
-                results.append(CollectionResult(
-                    stock_id=0,
-                    symbol=symbol,
-                    status=DataCollectionStatus.FAILED,
-                    records_collected=0,
-                    start_date=start_date,
-                    end_date=end_date,
-                    errors=[error_msg],
-                    warnings=[],
-                    execution_time_seconds=0
-                ))
+                results.append(
+                    CollectionResult(
+                        stock_id=0,
+                        symbol=symbol,
+                        status=DataCollectionStatus.FAILED,
+                        records_collected=0,
+                        start_date=start_date,
+                        end_date=end_date,
+                        errors=[error_msg],
+                        warnings=[],
+                        execution_time_seconds=0,
+                    )
+                )
 
         execution_time = (datetime.now() - start_time).total_seconds()
 
@@ -389,7 +396,7 @@ class DataCollectionService:
             "total_records": total_records,
             "execution_time": execution_time,
             "collection_errors": collection_errors,
-            "throttle_level": self.throttle_level.value
+            "throttle_level": self.throttle_level.value,
         }
 
     async def get_collection_health_status(self, db: AsyncSession) -> Dict[str, Any]:
@@ -415,7 +422,7 @@ class DataCollectionService:
             "api_availability": await self._check_api_availability(),
             "data_freshness": await self._check_overall_data_freshness(db),
             "collection_rate": await self._calculate_collection_rate(),
-            "last_updated": datetime.now().isoformat()
+            "last_updated": datetime.now().isoformat(),
         }
 
         # 評估整體健康狀態
@@ -430,11 +437,7 @@ class DataCollectionService:
         return health_status
 
     async def _check_data_freshness(
-        self,
-        db: AsyncSession,
-        stock_id: int,
-        start_date: date,
-        end_date: date
+        self, db: AsyncSession, stock_id: int, start_date: date, end_date: date
     ) -> bool:
         """檢查數據新鮮度，決定是否需要收集"""
         latest_price = await self.price_repo.get_latest_price(db, stock_id)
@@ -448,11 +451,7 @@ class DataCollectionService:
         return days_behind >= 1
 
     async def _perform_data_collection(
-        self,
-        symbol: str,
-        start_date: date,
-        end_date: date,
-        market: str = "US"
+        self, symbol: str, start_date: date, end_date: date, market: str = "US"
     ) -> List[Dict[str, Any]]:
         """執行實際的數據收集，包含重試邏輯"""
         import asyncio
@@ -466,8 +465,10 @@ class DataCollectionService:
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    delay = base_delay * (2 ** attempt)
-                    logger.info(f"Retry {attempt + 1}/{max_retries} for {symbol}, waiting {delay}s")
+                    delay = base_delay * (2**attempt)
+                    logger.info(
+                        f"Retry {attempt + 1}/{max_retries} for {symbol}, waiting {delay}s"
+                    )
                     await asyncio.sleep(delay)
 
                 # 使用抽象數據源獲取歷史價格
@@ -475,25 +476,35 @@ class DataCollectionService:
                     symbol=symbol,
                     start_date=start_date,
                     end_date=end_date,
-                    market=market
+                    market=market,
                 )
 
                 if not result_data:
                     logger.warning(f"No data returned for {symbol}")
                     return []
 
-                logger.info(f"Successfully collected {len(result_data)} records for {symbol}")
+                logger.info(
+                    f"Successfully collected {len(result_data)} records for {symbol}"
+                )
                 return result_data
 
             except Exception as e:
                 error_msg = str(e)
-                logger.error(f"Attempt {attempt + 1}/{max_retries} failed for {symbol}: {error_msg}")
+                logger.error(
+                    f"Attempt {attempt + 1}/{max_retries} failed for {symbol}: {error_msg}"
+                )
 
-                if '429' in error_msg or 'Too Many Requests' in error_msg or 'rate limit' in error_msg.lower():
+                if (
+                    "429" in error_msg
+                    or "Too Many Requests" in error_msg
+                    or "rate limit" in error_msg.lower()
+                ):
                     if attempt < max_retries - 1:
                         continue
                     else:
-                        logger.error(f"Rate limit exceeded for {symbol} after {max_retries} attempts")
+                        logger.error(
+                            f"Rate limit exceeded for {symbol} after {max_retries} attempts"
+                        )
                 else:
                     break
 
@@ -506,10 +517,11 @@ class DataCollectionService:
     async def _apply_throttle_delay(self):
         """應用節流延遲"""
         import asyncio
+
         delay_map = {
             ThrottleLevel.LIGHT: 1,
             ThrottleLevel.MODERATE: 3,
-            ThrottleLevel.SEVERE: 10
+            ThrottleLevel.SEVERE: 10,
         }
         delay = delay_map.get(self.throttle_level, 0)
         if delay > 0:
@@ -518,6 +530,7 @@ class DataCollectionService:
     async def _apply_batch_delay(self):
         """應用批次間延遲"""
         import asyncio
+
         await asyncio.sleep(0.5)  # 500ms基本延遲
 
     async def _update_throttle_status(self, result: CollectionResult):
@@ -550,7 +563,7 @@ class DataCollectionService:
         return {
             "latest_collection": datetime.now().isoformat(),
             "coverage_percentage": 95.0,
-            "stale_stocks_count": 2
+            "stale_stocks_count": 2,
         }
 
     async def _calculate_collection_rate(self) -> Dict[str, float]:
@@ -558,7 +571,7 @@ class DataCollectionService:
         return {
             "stocks_per_minute": 25.0,
             "records_per_minute": 150.0,
-            "success_rate": 0.92
+            "success_rate": 0.92,
         }
 
     async def collect_stock_prices(
@@ -566,7 +579,7 @@ class DataCollectionService:
         db: AsyncSession,
         stock_id: int,
         days: Optional[int] = None,
-        period: Optional[str] = None
+        period: Optional[str] = None,
     ) -> int:
         """
         收集股票價格資料（支援 yfinance period 參數）
@@ -597,9 +610,7 @@ class DataCollectionService:
                 logger.info(f"Collecting {stock.symbol} with period={period}")
                 # 使用抽象數據源獲取價格數據（by period）
                 price_data = await self.price_source.fetch_historical_prices_by_period(
-                    symbol=stock.symbol,
-                    period=period,
-                    market=stock.market
+                    symbol=stock.symbol, period=period, market=stock.market
                 )
             else:
                 if not days:
@@ -612,7 +623,7 @@ class DataCollectionService:
                     symbol=stock.symbol,
                     start_date=start_dt,
                     end_date=end_dt,
-                    market=stock.market
+                    market=stock.market,
                 )
 
             # 批次儲存
@@ -620,19 +631,21 @@ class DataCollectionService:
                 records = []
                 for price_point in price_data:
                     record = {
-                        'stock_id': stock_id,
-                        'date': price_point['date'],
-                        'open_price': price_point.get('open'),
-                        'high_price': price_point.get('high'),
-                        'low_price': price_point.get('low'),
-                        'close_price': price_point.get('close'),
-                        'volume': price_point.get('volume', 0),
-                        'adjusted_close': price_point.get('adj_close')
+                        "stock_id": stock_id,
+                        "date": price_point["date"],
+                        "open_price": price_point.get("open"),
+                        "high_price": price_point.get("high"),
+                        "low_price": price_point.get("low"),
+                        "close_price": price_point.get("close"),
+                        "volume": price_point.get("volume", 0),
+                        "adjusted_close": price_point.get("adj_close"),
                     }
                     records.append(record)
 
                 await self.price_repo.create_batch(db, records)
-                logger.info(f"Successfully saved {len(records)} records for {stock.symbol}")
+                logger.info(
+                    f"Successfully saved {len(records)} records for {stock.symbol}"
+                )
                 return len(records)
             else:
                 logger.warning(f"No data retrieved for {stock.symbol}")

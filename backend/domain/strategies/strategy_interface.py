@@ -4,6 +4,7 @@
 定義統一的策略介面規範，所有交易策略都必須實作此介面。
 這確保了策略的可插拔性和擴展性。
 """
+
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import date
@@ -18,9 +19,10 @@ class SignalDirection(str, Enum):
 
     定義交易信號的方向類型
     """
-    LONG = "LONG"          # 做多（看漲）- 建議買入
-    SHORT = "SHORT"        # 做空（看跌）- 建議賣出或放空
-    NEUTRAL = "NEUTRAL"    # 中性 - 觀望或持有
+
+    LONG = "LONG"  # 做多（看漲）- 建議買入
+    SHORT = "SHORT"  # 做空（看跌）- 建議賣出或放空
+    NEUTRAL = "NEUTRAL"  # 中性 - 觀望或持有
 
 
 class StrategyType(str, Enum):
@@ -30,14 +32,15 @@ class StrategyType(str, Enum):
     定義系統支援的所有策略類型
     新增策略時需要在此添加新的類型
     """
-    GOLDEN_CROSS = "golden_cross"              # 黃金交叉策略
-    DEATH_CROSS = "death_cross"                # 死亡交叉策略
-    RSI_REVERSAL = "rsi_reversal"              # RSI 反轉策略
-    MACD_DIVERGENCE = "macd_divergence"        # MACD 背離策略
+
+    GOLDEN_CROSS = "golden_cross"  # 黃金交叉策略
+    DEATH_CROSS = "death_cross"  # 死亡交叉策略
+    RSI_REVERSAL = "rsi_reversal"  # RSI 反轉策略
+    MACD_DIVERGENCE = "macd_divergence"  # MACD 背離策略
     BOLLINGER_BREAKOUT = "bollinger_breakout"  # 布林帶突破策略
-    VOLUME_SPIKE = "volume_spike"              # 成交量異常策略
-    PATTERN_RECOGNITION = "pattern_recognition" # 型態辨識策略
-    ML_PREDICTION = "ml_prediction"            # 機器學習預測策略
+    VOLUME_SPIKE = "volume_spike"  # 成交量異常策略
+    PATTERN_RECOGNITION = "pattern_recognition"  # 型態辨識策略
+    ML_PREDICTION = "ml_prediction"  # 機器學習預測策略
 
 
 @dataclass
@@ -64,6 +67,7 @@ class TradingSignal:
         reason: 信號產生原因說明（給用戶看）
         extra_data: 額外元數據（策略特有的數據，如技術指標值）
     """
+
     stock_id: int
     stock_symbol: str
     strategy_type: StrategyType
@@ -153,10 +157,7 @@ class IStrategyEngine(ABC):
 
     @abstractmethod
     async def analyze(
-        self,
-        stock_id: int,
-        db: AsyncSession,
-        params: Optional[Dict[str, Any]] = None
+        self, stock_id: int, db: AsyncSession, params: Optional[Dict[str, Any]] = None
     ) -> Optional[TradingSignal]:
         """
         分析單一股票並產生交易信號
@@ -186,7 +187,7 @@ class IStrategyEngine(ABC):
         self,
         stock_ids: List[int],
         db: AsyncSession,
-        params: Optional[Dict[str, Any]] = None
+        params: Optional[Dict[str, Any]] = None,
     ) -> List[TradingSignal]:
         """
         批量分析多支股票

@@ -2,6 +2,7 @@
 技術指標相關API端點
 負責: /indicators, /indicators/calculate, /summary, /specific, /batch
 """
+
 from typing import List, Optional, Dict, Any
 from datetime import date
 
@@ -11,17 +12,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import (
     get_database_session,
     get_stock_service,
-    get_technical_analysis_service_clean
+    get_technical_analysis_service_clean,
 )
 from api.schemas.stocks import (
     IndicatorCalculateRequest,
     IndicatorBatchCalculateRequest,
-    IndicatorSummaryResponse
+    IndicatorSummaryResponse,
 )
 from domain.services.stock_service import StockService
 from domain.services.technical_analysis_service import (
     TechnicalAnalysisService,
-    IndicatorType
+    IndicatorType,
 )
 
 router = APIRouter()
@@ -40,8 +41,8 @@ def _extract_period_from_indicator(indicator_type: str) -> int:
         indicator_upper = indicator_type.upper()
 
         # 從指標名稱中提取數字（如 SMA_20 -> 20）
-        if '_' in indicator_upper:
-            parts = indicator_upper.split('_')
+        if "_" in indicator_upper:
+            parts = indicator_upper.split("_")
             if len(parts) >= 2:
                 try:
                     return int(parts[-1])  # 取最後一個數字部分
@@ -50,19 +51,19 @@ def _extract_period_from_indicator(indicator_type: str) -> int:
 
         # 預設週期對應表
         default_periods = {
-            'RSI': 14,
-            'MACD': 26,  # MACD 使用較長週期
-            'MACD_SIGNAL': 9,
-            'MACD_HISTOGRAM': 9,
-            'BB_UPPER': 20,
-            'BB_MIDDLE': 20,
-            'BB_LOWER': 20,
-            'KD_K': 14,
-            'KD_D': 14,
-            'ATR': 14,
-            'CCI': 20,
-            'WILLIAMS_R': 14,
-            'VOLUME_SMA': 20
+            "RSI": 14,
+            "MACD": 26,  # MACD 使用較長週期
+            "MACD_SIGNAL": 9,
+            "MACD_HISTOGRAM": 9,
+            "BB_UPPER": 20,
+            "BB_MIDDLE": 20,
+            "BB_LOWER": 20,
+            "KD_K": 14,
+            "KD_D": 14,
+            "ATR": 14,
+            "CCI": 20,
+            "WILLIAMS_R": 14,
+            "VOLUME_SMA": 20,
         }
 
         return default_periods.get(indicator_upper, 14)  # 預設使用 14
@@ -81,7 +82,9 @@ async def get_stock_indicators(
     page_size: int = Query(100, ge=1, le=1000, description="每頁數量"),
     db: AsyncSession = Depends(get_database_session),
     stock_service: StockService = Depends(get_stock_service),
-    analysis_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean)
+    analysis_service: TechnicalAnalysisService = Depends(
+        get_technical_analysis_service_clean
+    ),
 ):
     """
     取得股票技術指標
@@ -96,7 +99,7 @@ async def get_stock_indicators(
             start_date=start_date,
             end_date=end_date,
             page=page,
-            page_size=page_size
+            page_size=page_size,
         )
 
         return {
@@ -106,7 +109,7 @@ async def get_stock_indicators(
             "per_page": indicators_data["per_page"],
             "total_pages": indicators_data["total_pages"],
             "stock_id": stock_id,
-            "symbol": stock.symbol
+            "symbol": stock.symbol,
         }
 
     except HTTPException:
@@ -123,7 +126,9 @@ async def calculate_stock_indicators_get(
     timeframe: str = Query("1d", description="時間框架"),
     db: AsyncSession = Depends(get_database_session),
     stock_service: StockService = Depends(get_stock_service),
-    analysis_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean)
+    analysis_service: TechnicalAnalysisService = Depends(
+        get_technical_analysis_service_clean
+    ),
 ):
     """
     計算股票技術指標（GET版本，用於快速查詢）
@@ -132,7 +137,7 @@ async def calculate_stock_indicators_get(
         stock = await stock_service.get_stock_by_id(db, stock_id)
 
         if indicators:
-            indicator_list = [t.strip().upper() for t in indicators.split(',')]
+            indicator_list = [t.strip().upper() for t in indicators.split(",")]
         else:
             indicator_list = ["RSI", "SMA_20", "MACD"]  # 預設指標
 
@@ -146,7 +151,7 @@ async def calculate_stock_indicators_get(
             stock_id=stock_id,
             indicators=[IndicatorType(ind) for ind in indicator_list],
             days=days,
-            save_to_db=True
+            save_to_db=True,
         )
 
         return {
@@ -154,7 +159,7 @@ async def calculate_stock_indicators_get(
             "data": analysis_result,
             "indicators_calculated": len(indicator_list),
             "timeframe": timeframe,
-            "message": "指標計算完成"
+            "message": "指標計算完成",
         }
 
     except HTTPException:
@@ -169,7 +174,9 @@ async def calculate_stock_indicators_post(
     request: IndicatorCalculateRequest,
     db: AsyncSession = Depends(get_database_session),
     stock_service: StockService = Depends(get_stock_service),
-    analysis_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean)
+    analysis_service: TechnicalAnalysisService = Depends(
+        get_technical_analysis_service_clean
+    ),
 ):
     """
     計算股票技術指標（POST版本，支援詳細參數）
@@ -180,7 +187,9 @@ async def calculate_stock_indicators_post(
         requested_indicators = [IndicatorType(request.indicator_type.upper())]
 
         # 決定週期和所需天數
-        period = request.period or _extract_period_from_indicator(request.indicator_type)
+        period = request.period or _extract_period_from_indicator(
+            request.indicator_type
+        )
         buffer_size = max(period * 2, 50)  # 緩衝區大小
 
         analysis_result = await analysis_service.calculate_stock_indicators(
@@ -188,7 +197,7 @@ async def calculate_stock_indicators_post(
             stock_id=stock_id,
             indicators=requested_indicators,
             days=period + buffer_size,
-            save_to_db=True
+            save_to_db=True,
         )
 
         return {
@@ -197,7 +206,7 @@ async def calculate_stock_indicators_post(
             "indicator_type": request.indicator_type,
             "period": period,
             "timeframe": request.timeframe,
-            "message": "指標計算完成"
+            "message": "指標計算完成",
         }
 
     except HTTPException:
@@ -212,7 +221,9 @@ async def calculate_stock_indicators_batch(
     request: IndicatorBatchCalculateRequest,
     db: AsyncSession = Depends(get_database_session),
     stock_service: StockService = Depends(get_stock_service),
-    analysis_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean)
+    analysis_service: TechnicalAnalysisService = Depends(
+        get_technical_analysis_service_clean
+    ),
 ):
     """
     批次計算股票技術指標
@@ -220,7 +231,9 @@ async def calculate_stock_indicators_batch(
     try:
         stock = await stock_service.get_stock_by_id(db, stock_id)
 
-        requested_indicators = [IndicatorType(item.type.upper()) for item in request.indicators]
+        requested_indicators = [
+            IndicatorType(item.type.upper()) for item in request.indicators
+        ]
 
         # 計算最大所需天數
         max_period = 0
@@ -235,7 +248,7 @@ async def calculate_stock_indicators_batch(
             stock_id=stock_id,
             indicators=requested_indicators,
             days=max_period + buffer_size,
-            save_to_db=True
+            save_to_db=True,
         )
 
         return {
@@ -243,7 +256,7 @@ async def calculate_stock_indicators_batch(
             "data": analysis_result,
             "indicators_calculated": len(requested_indicators),
             "timeframe": request.timeframe,
-            "message": f"批次計算完成，共處理 {len(requested_indicators)} 個指標"
+            "message": f"批次計算完成，共處理 {len(requested_indicators)} 個指標",
         }
 
     except HTTPException:
@@ -260,7 +273,9 @@ async def get_specific_indicator(
     limit: int = Query(100, ge=1, le=1000, description="返回數量"),
     db: AsyncSession = Depends(get_database_session),
     stock_service: StockService = Depends(get_stock_service),
-    analysis_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean)
+    analysis_service: TechnicalAnalysisService = Depends(
+        get_technical_analysis_service_clean
+    ),
 ):
     """
     取得特定類型的技術指標
@@ -273,7 +288,9 @@ async def get_specific_indicator(
         try:
             indicator_enum = IndicatorType(indicator_type.upper())
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"無效的指標類型: {indicator_type}")
+            raise HTTPException(
+                status_code=400, detail=f"無效的指標類型: {indicator_type}"
+            )
 
         # 決定週期和所需天數
         used_period = period or _extract_period_from_indicator(indicator_type)
@@ -284,7 +301,7 @@ async def get_specific_indicator(
             db_session=db,
             stock_id=stock_id,
             indicator_types=[indicator_type.upper()],
-            days=required_days
+            days=required_days,
         )
 
         if indicator_data and indicator_type.upper() in indicator_data:
@@ -298,14 +315,14 @@ async def get_specific_indicator(
                     "period": used_period,
                     "timestamp": date.today().isoformat(),
                     "success": True,
-                    "data_points": len(raw_data) if isinstance(raw_data, list) else 1
+                    "data_points": len(raw_data) if isinstance(raw_data, list) else 1,
                 }
 
                 return {
                     "success": True,
                     "data": formatted_response,
                     "indicator_type": indicator_type,
-                    "period": used_period
+                    "period": used_period,
                 }
 
         # 如果沒有數據，返回空響應
@@ -317,11 +334,11 @@ async def get_specific_indicator(
                 "period": used_period,
                 "timestamp": date.today().isoformat(),
                 "success": False,
-                "data_points": 0
+                "data_points": 0,
             },
             "indicator_type": indicator_type,
             "period": used_period,
-            "message": "沒有找到指標數據"
+            "message": "沒有找到指標數據",
         }
 
     except HTTPException:
@@ -340,7 +357,9 @@ async def get_stock_indicators_summary(
     end_date: Optional[date] = Query(None, description="結束日期"),
     db: AsyncSession = Depends(get_database_session),
     stock_service: StockService = Depends(get_stock_service),
-    analysis_service: TechnicalAnalysisService = Depends(get_technical_analysis_service_clean)
+    analysis_service: TechnicalAnalysisService = Depends(
+        get_technical_analysis_service_clean
+    ),
 ):
     """
     取得股票技術指標摘要（前端 getIndicators 專用格式）
@@ -356,15 +375,12 @@ async def get_stock_indicators_summary(
     try:
         # 注意：start_date 和 end_date 參數暫未實現，保留供未來使用
         _ = start_date  # 消除未使用警告
-        _ = end_date    # 消除未使用警告
+        _ = end_date  # 消除未使用警告
 
         stock = await stock_service.get_stock_by_id(db, stock_id)
 
         response = await analysis_service.get_indicators_summary(
-            db=db,
-            stock_id=stock_id,
-            indicator_types=indicator_types,
-            period=period
+            db=db, stock_id=stock_id, indicator_types=indicator_types, period=period
         )
 
         response["symbol"] = stock.symbol

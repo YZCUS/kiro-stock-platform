@@ -6,6 +6,7 @@
 - 需要成交量確認（當日成交量 > 20日平均成交量的1.5倍）
 - 計算進場區間、停損和止盈
 """
+
 from typing import Optional, Dict, Any, List
 from datetime import date, timedelta
 from sqlalchemy import select, func, and_
@@ -16,7 +17,7 @@ from domain.strategies.strategy_interface import (
     IStrategyEngine,
     TradingSignal,
     SignalDirection,
-    StrategyType
+    StrategyType,
 )
 from domain.models.technical_indicator import TechnicalIndicator
 from domain.models.price_history import PriceHistory
@@ -75,19 +76,16 @@ class GoldenCrossStrategy(IStrategyEngine):
     def get_default_params(self) -> Dict[str, Any]:
         """獲取預設參數"""
         return {
-            "short_period": 5,          # 短期均線週期
-            "long_period": 20,          # 長期均線週期
-            "volume_confirmation": True, # 是否需要成交量確認
-            "volume_threshold": 1.5,    # 成交量閾值（倍數）
-            "volume_period": 20,        # 平均成交量計算週期
-            "signal_validity_days": 5   # 信號有效天數
+            "short_period": 5,  # 短期均線週期
+            "long_period": 20,  # 長期均線週期
+            "volume_confirmation": True,  # 是否需要成交量確認
+            "volume_threshold": 1.5,  # 成交量閾值（倍數）
+            "volume_period": 20,  # 平均成交量計算週期
+            "signal_validity_days": 5,  # 信號有效天數
         }
 
     async def analyze(
-        self,
-        stock_id: int,
-        db: AsyncSession,
-        params: Optional[Dict[str, Any]] = None
+        self, stock_id: int, db: AsyncSession, params: Optional[Dict[str, Any]] = None
     ) -> Optional[TradingSignal]:
         """
         分析單一股票並產生交易信號
@@ -115,9 +113,7 @@ class GoldenCrossStrategy(IStrategyEngine):
 
         try:
             # 1. 獲取股票資訊
-            stock_result = await db.execute(
-                select(Stock).where(Stock.id == stock_id)
-            )
+            stock_result = await db.execute(select(Stock).where(Stock.id == stock_id))
             stock = stock_result.scalar_one_or_none()
 
             if not stock:
@@ -133,7 +129,7 @@ class GoldenCrossStrategy(IStrategyEngine):
                 .where(
                     and_(
                         PriceHistory.stock_id == stock_id,
-                        PriceHistory.date >= today - timedelta(days=lookback_days)
+                        PriceHistory.date >= today - timedelta(days=lookback_days),
                     )
                 )
                 .order_by(PriceHistory.date.desc())
@@ -154,15 +150,13 @@ class GoldenCrossStrategy(IStrategyEngine):
 
             # 查詢今日的 SMA
             today_sma_result = await db.execute(
-                select(TechnicalIndicator)
-                .where(
+                select(TechnicalIndicator).where(
                     and_(
                         TechnicalIndicator.stock_id == stock_id,
                         TechnicalIndicator.date == today_date,
-                        TechnicalIndicator.indicator_type.in_([
-                            f'SMA_{short_period}',
-                            f'SMA_{long_period}'
-                        ])
+                        TechnicalIndicator.indicator_type.in_(
+                            [f"SMA_{short_period}", f"SMA_{long_period}"]
+                        ),
                     )
                 )
             )
@@ -170,15 +164,13 @@ class GoldenCrossStrategy(IStrategyEngine):
 
             # 查詢昨日的 SMA
             yesterday_sma_result = await db.execute(
-                select(TechnicalIndicator)
-                .where(
+                select(TechnicalIndicator).where(
                     and_(
                         TechnicalIndicator.stock_id == stock_id,
                         TechnicalIndicator.date == yesterday_date,
-                        TechnicalIndicator.indicator_type.in_([
-                            f'SMA_{short_period}',
-                            f'SMA_{long_period}'
-                        ])
+                        TechnicalIndicator.indicator_type.in_(
+                            [f"SMA_{short_period}", f"SMA_{long_period}"]
+                        ),
                     )
                 )
             )
@@ -186,23 +178,27 @@ class GoldenCrossStrategy(IStrategyEngine):
 
             # 將列表轉換為字典以便查找
             today_sma = {ind.indicator_type: ind.float_value for ind in today_sma_list}
-            yesterday_sma = {ind.indicator_type: ind.float_value for ind in yesterday_sma_list}
+            yesterday_sma = {
+                ind.indicator_type: ind.float_value for ind in yesterday_sma_list
+            }
 
             # 檢查是否有所需的指標數據
-            today_short_ma = today_sma.get(f'SMA_{short_period}')
-            today_long_ma = today_sma.get(f'SMA_{long_period}')
-            yesterday_short_ma = yesterday_sma.get(f'SMA_{short_period}')
-            yesterday_long_ma = yesterday_sma.get(f'SMA_{long_period}')
+            today_short_ma = today_sma.get(f"SMA_{short_period}")
+            today_long_ma = today_sma.get(f"SMA_{long_period}")
+            yesterday_short_ma = yesterday_sma.get(f"SMA_{short_period}")
+            yesterday_long_ma = yesterday_sma.get(f"SMA_{long_period}")
 
-            if not all([today_short_ma, today_long_ma, yesterday_short_ma, yesterday_long_ma]):
+            if not all(
+                [today_short_ma, today_long_ma, yesterday_short_ma, yesterday_long_ma]
+            ):
                 logger.warning(f"Missing SMA indicators for stock {stock_id}")
                 return None
 
             # 4. 檢測黃金交叉
             # 條件：昨日短期MA < 長期MA，今日短期MA > 長期MA
             is_golden_cross = (
-                yesterday_short_ma < yesterday_long_ma and
-                today_short_ma > today_long_ma
+                yesterday_short_ma < yesterday_long_ma
+                and today_short_ma > today_long_ma
             )
 
             if not is_golden_cross:
@@ -213,7 +209,9 @@ class GoldenCrossStrategy(IStrategyEngine):
             volume_ratio = 1.0
             if volume_confirmation:
                 # 計算平均成交量
-                recent_volumes = [p.volume for p in price_data[:volume_period] if p.volume]
+                recent_volumes = [
+                    p.volume for p in price_data[:volume_period] if p.volume
+                ]
                 if len(recent_volumes) < volume_period * 0.8:  # 至少要有80%的數據
                     logger.warning(f"Insufficient volume data for stock {stock_id}")
                     return None
@@ -239,7 +237,9 @@ class GoldenCrossStrategy(IStrategyEngine):
             base_confidence = 60.0
 
             # 成交量加成（最多+20）
-            volume_boost = min(20.0, (volume_ratio - 1.0) * 10.0) if volume_confirmation else 0.0
+            volume_boost = (
+                min(20.0, (volume_ratio - 1.0) * 10.0) if volume_confirmation else 0.0
+            )
 
             # 動能加成（短期趨勢強度，最多+20）
             # 使用短期MA與長期MA的差距百分比作為動能指標
@@ -262,7 +262,7 @@ class GoldenCrossStrategy(IStrategyEngine):
             take_profit = [
                 current_price * 1.05,  # +5%
                 current_price * 1.10,  # +10%
-                current_price * 1.15   # +15%
+                current_price * 1.15,  # +15%
             ]
 
             # 8. 計算信號有效期
@@ -295,8 +295,8 @@ class GoldenCrossStrategy(IStrategyEngine):
                     "long_ma": today_long_ma,
                     "volume_ratio": volume_ratio,
                     "ma_diff_percent": ma_diff_percent,
-                    "current_price": current_price
-                }
+                    "current_price": current_price,
+                },
             )
 
             logger.info(
@@ -314,7 +314,7 @@ class GoldenCrossStrategy(IStrategyEngine):
         self,
         stock_ids: List[int],
         db: AsyncSession,
-        params: Optional[Dict[str, Any]] = None
+        params: Optional[Dict[str, Any]] = None,
     ) -> List[TradingSignal]:
         """
         批量分析多支股票

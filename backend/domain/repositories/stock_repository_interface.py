@@ -2,6 +2,7 @@
 股票儲存庫介面 - Domain Layer
 定義股票數據訪問的業務需求，不依賴具體實現
 """
+
 from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,17 +29,14 @@ class IStockRepository(ABC):
         is_active: Optional[bool] = None,
         search: Optional[str] = None,
         offset: int = 0,
-        limit: int = 100
+        limit: int = 100,
     ) -> Tuple[List, int]:
         """取得過濾後的股票清單和總數"""
         pass
 
     @abstractmethod
     async def get_active_stocks(
-        self,
-        db: AsyncSession,
-        market: Optional[str] = None,
-        limit: int = 100
+        self, db: AsyncSession, market: Optional[str] = None, limit: int = 100
     ):
         """取得活躍股票清單"""
         pass

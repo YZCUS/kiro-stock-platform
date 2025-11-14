@@ -2,6 +2,7 @@
 股票清單相關API端點
 負責: GET /, /active, /search, /simple
 """
+
 from typing import List, Optional, Dict, Any
 import logging
 
@@ -27,7 +28,7 @@ async def get_stocks(
     page: int = Query(1, ge=1, description="頁碼"),
     per_page: int = Query(50, ge=1, le=200, description="每頁數量"),
     db: AsyncSession = Depends(get_database_session),
-    stock_service: StockService = Depends(get_stock_service)
+    stock_service: StockService = Depends(get_stock_service),
 ):
     """
     取得股票清單（支援過濾和分頁）
@@ -39,19 +40,22 @@ async def get_stocks(
             is_active=is_active,
             search=search,
             page=page,
-            per_page=per_page
+            per_page=per_page,
         )
 
         # 為每個股票獲取最新價格資訊
         stock_responses = []
         for stock in result["items"]:
             # stock_service 返回的是 dict，需要用 ['id'] 訪問
-            stock_id = stock.id if hasattr(stock, 'id') else stock['id']
+            stock_id = stock.id if hasattr(stock, "id") else stock["id"]
 
             # 查詢最新兩個交易日的價格（用於計算漲跌）
-            price_query = select(PriceHistory).where(
-                PriceHistory.stock_id == stock_id
-            ).order_by(desc(PriceHistory.date)).limit(2)
+            price_query = (
+                select(PriceHistory)
+                .where(PriceHistory.stock_id == stock_id)
+                .order_by(desc(PriceHistory.date))
+                .limit(2)
+            )
 
             price_result = await db.execute(price_query)
             prices = price_result.scalars().all()
@@ -67,17 +71,19 @@ async def get_stocks(
                 change = None
                 change_percent = None
                 if close_price and len(prices) > 1:
-                    prev_close = float(prices[1].close_price) if prices[1].close_price else None
+                    prev_close = (
+                        float(prices[1].close_price) if prices[1].close_price else None
+                    )
                     if prev_close and prev_close != 0:
                         change = close_price - prev_close
                         change_percent = (change / prev_close) * 100
 
-                stock_data['latest_price'] = {
-                    'close': close_price,
-                    'change': change,
-                    'change_percent': change_percent,
-                    'date': latest.date.isoformat() if latest.date else None,
-                    'volume': latest.volume
+                stock_data["latest_price"] = {
+                    "close": close_price,
+                    "change": change,
+                    "change_percent": change_percent,
+                    "date": latest.date.isoformat() if latest.date else None,
+                    "volume": latest.volume,
                 }
 
             stock_responses.append(StockResponse(**stock_data))
@@ -87,7 +93,7 @@ async def get_stocks(
             total=result["total"],
             page=result["page"],
             per_page=result["per_page"],
-            total_pages=result["total_pages"]
+            total_pages=result["total_pages"],
         )
 
     except Exception as e:
@@ -98,7 +104,7 @@ async def get_stocks(
 async def get_active_stocks(
     market: Optional[str] = Query(None, description="市場代碼 (TW/US)"),
     db: AsyncSession = Depends(get_database_session),
-    stock_service: StockService = Depends(get_stock_service)
+    stock_service: StockService = Depends(get_stock_service),
 ):
     """
     取得活躍股票清單（快速API，用於下拉選單等）
@@ -118,19 +124,14 @@ async def search_stocks(
     page: int = Query(1, ge=1, description="頁碼"),
     per_page: int = Query(20, ge=1, le=100, description="每頁數量"),
     db: AsyncSession = Depends(get_database_session),
-    stock_service: StockService = Depends(get_stock_service)
+    stock_service: StockService = Depends(get_stock_service),
 ):
     """
     搜尋股票（支援股票代號和名稱模糊搜尋）
     """
     try:
         result = await stock_service.get_stock_list(
-            db=db,
-            market=market,
-            is_active=True,
-            search=q,
-            page=page,
-            per_page=per_page
+            db=db, market=market, is_active=True, search=q, page=page, per_page=per_page
         )
 
         items = [StockResponse.model_validate(item) for item in result["items"]]
@@ -140,7 +141,7 @@ async def search_stocks(
             total=result["total"],
             page=result["page"],
             per_page=result["per_page"],
-            total_pages=result["total_pages"]
+            total_pages=result["total_pages"],
         )
 
     except Exception as e:
@@ -152,19 +153,14 @@ async def get_simple_stocks(
     market: Optional[str] = Query(None, description="市場代碼 (TW/US)"),
     limit: int = Query(100, ge=1, le=1000, description="返回數量限制"),
     db: AsyncSession = Depends(get_database_session),
-    stock_service: StockService = Depends(get_stock_service)
+    stock_service: StockService = Depends(get_stock_service),
 ):
     """
     取得簡化股票清單（不分頁，用於快速載入）
     """
     try:
         result = await stock_service.get_stock_list(
-            db=db,
-            market=market,
-            is_active=True,
-            search=None,
-            page=1,
-            per_page=limit
+            db=db, market=market, is_active=True, search=None, page=1, per_page=limit
         )
 
         items = [StockResponse.model_validate(item) for item in result["items"]]

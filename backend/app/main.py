@@ -1,6 +1,7 @@
 """
 股票分析平台 - FastAPI 主應用程式
 """
+
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -16,7 +17,7 @@ from api.v1.websocket import (
     shutdown_websocket_manager,
     get_websocket_cluster_stats,
     health_check_websocket_service,
-    websocket_service_state
+    websocket_service_state,
 )
 
 # 設定日誌
@@ -72,7 +73,7 @@ app = FastAPI(
     title="股票分析平台 API",
     description="自動化股票數據收集與技術分析平台",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # 設定 CORS
@@ -91,11 +92,7 @@ app.include_router(api_router, prefix="/api/v1")
 @app.get("/")
 async def root():
     """根端點"""
-    return {
-        "message": "歡迎使用股票分析平台 API",
-        "version": "1.0.0",
-        "docs": "/docs"
-    }
+    return {"message": "歡迎使用股票分析平台 API", "version": "1.0.0", "docs": "/docs"}
 
 
 @app.get("/health")
@@ -113,11 +110,9 @@ async def health_check():
         "service": "stock-analysis-platform",
         "components": {
             "websocket": websocket_health,
-            "database": {
-                "status": "healthy"  # 可以添加更詳細的資料庫檢查
-            }
+            "database": {"status": "healthy"},  # 可以添加更詳細的資料庫檢查
         },
-        "timestamp": websocket_health["timestamp"]
+        "timestamp": websocket_health["timestamp"],
     }
 
 
@@ -126,10 +121,7 @@ async def websocket_stats():
     """WebSocket 叢集統計端點"""
     try:
         stats = await get_websocket_cluster_stats()
-        return {
-            "status": "success",
-            "data": stats
-        }
+        return {"status": "success", "data": stats}
     except Exception as e:
         logger.error(f"取得WebSocket統計失敗: {e}")
         raise HTTPException(status_code=500, detail=f"取得WebSocket統計失敗: {str(e)}")
@@ -140,25 +132,27 @@ async def websocket_stats():
 async def websocket_global(websocket: WebSocket, client_id: Optional[str] = None):
     """全局 WebSocket 端點"""
     if websocket_service_state.degraded_mode:
-        await websocket.close(code=1013, reason="WebSocket service temporarily unavailable")
+        await websocket.close(
+            code=1013, reason="WebSocket service temporarily unavailable"
+        )
         return
     await websocket_endpoint(websocket, None, client_id)
 
 
 @app.websocket("/ws/stocks/{stock_id}")
-async def websocket_stock(websocket: WebSocket, stock_id: int, client_id: Optional[str] = None):
+async def websocket_stock(
+    websocket: WebSocket, stock_id: int, client_id: Optional[str] = None
+):
     """股票專用 WebSocket 端點"""
     if websocket_service_state.degraded_mode:
-        await websocket.close(code=1013, reason="WebSocket service temporarily unavailable")
+        await websocket.close(
+            code=1013, reason="WebSocket service temporarily unavailable"
+        )
         return
     await websocket_endpoint(websocket, stock_id, client_id)
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True
-    )
+
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -31,7 +31,9 @@ from infrastructure.cache.unified_cache_service import MockCacheService
 # Core
 from core.database import get_db_session
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -50,15 +52,21 @@ class CleanArchitectureCLI:
 
         # Domain Services
         stock_service = StockService(stock_repo, price_repo, self.cache_service)
-        technical_service = TechnicalAnalysisService(stock_repo, price_repo, self.cache_service)
-        signal_service = TradingSignalService(stock_repo, price_repo, self.cache_service)
-        collection_service = DataCollectionService(stock_repo, price_repo, self.cache_service)
+        technical_service = TechnicalAnalysisService(
+            stock_repo, price_repo, self.cache_service
+        )
+        signal_service = TradingSignalService(
+            stock_repo, price_repo, self.cache_service
+        )
+        collection_service = DataCollectionService(
+            stock_repo, price_repo, self.cache_service
+        )
 
         return {
-            'stock': stock_service,
-            'technical': technical_service,
-            'signal': signal_service,
-            'collection': collection_service
+            "stock": stock_service,
+            "technical": technical_service,
+            "signal": signal_service,
+            "collection": collection_service,
         }
 
     async def list_stocks(self, market: Optional[str] = None, limit: int = 20):
@@ -68,18 +76,16 @@ class CleanArchitectureCLI:
                 services = await self._get_services(session)
 
                 # 使用Stock Service
-                result = await services['stock'].get_stock_list(
-                    db=session,
-                    market=market,
-                    is_active=True,
-                    page=1,
-                    per_page=limit
+                result = await services["stock"].get_stock_list(
+                    db=session, market=market, is_active=True, page=1, per_page=limit
                 )
 
-                print(f"\n📊 股票清單 {'(' + market + ' 市場)' if market else '(所有市場)'}")
+                print(
+                    f"\n📊 股票清單 {'(' + market + ' 市場)' if market else '(所有市場)'}"
+                )
                 print("=" * 60)
 
-                for stock in result['items']:
+                for stock in result["items"]:
                     print(f"• {stock.symbol:8} | {stock.name:20} | {stock.market}")
 
                 print(f"\n總計: {result['total']} 支股票")
@@ -94,16 +100,14 @@ class CleanArchitectureCLI:
                 services = await self._get_services(session)
 
                 # 取得股票
-                stock = await services['stock'].get_stock_by_symbol(session, symbol)
+                stock = await services["stock"].get_stock_by_symbol(session, symbol)
 
                 print(f"\n🔍 分析股票: {stock.symbol} - {stock.name}")
                 print("=" * 60)
 
                 # 技術分析
-                analysis = await services['technical'].calculate_stock_indicators(
-                    db=session,
-                    stock_id=stock.id,
-                    analysis_days=days
+                analysis = await services["technical"].calculate_stock_indicators(
+                    db=session, stock_id=stock.id, analysis_days=days
                 )
 
                 print(f"📈 技術分析結果:")
@@ -115,9 +119,8 @@ class CleanArchitectureCLI:
                     print(f"  ⚠️  錯誤: {', '.join(analysis.errors)}")
 
                 # 技術摘要
-                summary = await services['technical'].get_stock_technical_summary(
-                    db=session,
-                    stock_id=stock.id
+                summary = await services["technical"].get_stock_technical_summary(
+                    db=session, stock_id=stock.id
                 )
 
                 print(f"\n📊 技術面摘要:")
@@ -137,16 +140,14 @@ class CleanArchitectureCLI:
                 services = await self._get_services(session)
 
                 # 取得股票
-                stock = await services['stock'].get_stock_by_symbol(session, symbol)
+                stock = await services["stock"].get_stock_by_symbol(session, symbol)
 
                 print(f"\n📡 生成交易信號: {stock.symbol} - {stock.name}")
                 print("=" * 60)
 
                 # 生成信號
-                analysis = await services['signal'].generate_trading_signals(
-                    db=session,
-                    stock_id=stock.id,
-                    analysis_days=days
+                analysis = await services["signal"].generate_trading_signals(
+                    db=session, stock_id=stock.id, analysis_days=days
                 )
 
                 print(f"🎯 信號分析結果:")
@@ -170,7 +171,9 @@ class CleanArchitectureCLI:
                 if analysis.supporting_signals:
                     print(f"\n🔄 支持信號:")
                     for i, signal in enumerate(analysis.supporting_signals, 1):
-                        print(f"  {i}. {signal.signal_type.value} ({signal.confidence:.1%}) - {signal.description}")
+                        print(
+                            f"  {i}. {signal.signal_type.value} ({signal.confidence:.1%}) - {signal.description}"
+                        )
 
                 print(f"\n💡 投資理由:")
                 for reason in analysis.reasoning:
@@ -179,20 +182,22 @@ class CleanArchitectureCLI:
             except Exception as e:
                 logger.error(f"生成交易信號失敗: {e}")
 
-    async def scan_market(self, market: Optional[str] = None, min_confidence: float = 0.8):
+    async def scan_market(
+        self, market: Optional[str] = None, min_confidence: float = 0.8
+    ):
         """掃描市場信號"""
         async for session in get_db_session():
             try:
                 services = await self._get_services(session)
 
-                print(f"\n🌐 掃描市場信號 {'(' + market + ' 市場)' if market else '(所有市場)'}")
+                print(
+                    f"\n🌐 掃描市場信號 {'(' + market + ' 市場)' if market else '(所有市場)'}"
+                )
                 print("=" * 60)
 
                 # 掃描市場
-                portfolio_signals = await services['signal'].scan_market_signals(
-                    db=session,
-                    market=market,
-                    min_confidence=min_confidence
+                portfolio_signals = await services["signal"].scan_market_signals(
+                    db=session, market=market, min_confidence=min_confidence
                 )
 
                 print(f"📊 市場概況:")
@@ -205,7 +210,9 @@ class CleanArchitectureCLI:
                 if portfolio_signals.high_confidence_signals:
                     print(f"\n⭐ 高信心信號 (>={min_confidence:.0%}):")
                     for signal in portfolio_signals.high_confidence_signals:
-                        print(f"  • {signal.symbol:8} | {signal.signal_type.value:10} | {signal.confidence:.1%} | {signal.description}")
+                        print(
+                            f"  • {signal.symbol:8} | {signal.signal_type.value:10} | {signal.confidence:.1%} | {signal.description}"
+                        )
 
                 if portfolio_signals.risk_alerts:
                     print(f"\n⚠️  風險警告:")
@@ -222,7 +229,7 @@ class CleanArchitectureCLI:
                 services = await self._get_services(session)
 
                 # 取得股票
-                stock = await services['stock'].get_stock_by_symbol(session, symbol)
+                stock = await services["stock"].get_stock_by_symbol(session, symbol)
 
                 print(f"\n📥 收集數據: {stock.symbol} - {stock.name}")
                 print("=" * 60)
@@ -231,11 +238,11 @@ class CleanArchitectureCLI:
                 end_date = date.today()
                 start_date = end_date - timedelta(days=days)
 
-                result = await services['collection'].collect_stock_data(
+                result = await services["collection"].collect_stock_data(
                     db=session,
                     stock_id=stock.id,
                     start_date=start_date,
-                    end_date=end_date
+                    end_date=end_date,
                 )
 
                 print(f"📦 收集結果:")
@@ -263,18 +270,28 @@ class CleanArchitectureCLI:
                 print("=" * 60)
 
                 # 收集系統健康狀態
-                health = await services['collection'].get_collection_health_status(session)
+                health = await services["collection"].get_collection_health_status(
+                    session
+                )
 
                 print(f"📊 系統狀態:")
                 print(f"  整體狀態: {health['status']}")
                 print(f"  節流等級: {health['throttle_level']}")
                 print(f"  API可用性: {health['api_availability']:.1%}")
-                print(f"  數據新鮮度: {health['data_freshness']['coverage_percentage']:.1f}%")
-                print(f"  收集速率: {health['collection_rate']['stocks_per_minute']:.1f} 股票/分鐘")
+                print(
+                    f"  數據新鮮度: {health['data_freshness']['coverage_percentage']:.1f}%"
+                )
+                print(
+                    f"  收集速率: {health['collection_rate']['stocks_per_minute']:.1f} 股票/分鐘"
+                )
                 print(f"  成功率: {health['collection_rate']['success_rate']:.1%}")
 
                 # 快取統計
-                cache_stats = self.cache_service.get_statistics() if hasattr(self.cache_service, 'get_statistics') else {}
+                cache_stats = (
+                    self.cache_service.get_statistics()
+                    if hasattr(self.cache_service, "get_statistics")
+                    else {}
+                )
                 if cache_stats:
                     print(f"\n💾 快取統計:")
                     print(f"  命中次數: {cache_stats.get('hit_count', 0)}")
@@ -287,36 +304,38 @@ class CleanArchitectureCLI:
 
 async def main():
     """主函數"""
-    parser = argparse.ArgumentParser(description='Clean Architecture CLI - 股票分析工具')
-    subparsers = parser.add_subparsers(dest='command', help='可用命令')
+    parser = argparse.ArgumentParser(
+        description="Clean Architecture CLI - 股票分析工具"
+    )
+    subparsers = parser.add_subparsers(dest="command", help="可用命令")
 
     # 列出股票
-    list_parser = subparsers.add_parser('list', help='列出股票')
-    list_parser.add_argument('--market', choices=['TW', 'US'], help='市場代碼')
-    list_parser.add_argument('--limit', type=int, default=20, help='顯示數量')
+    list_parser = subparsers.add_parser("list", help="列出股票")
+    list_parser.add_argument("--market", choices=["TW", "US"], help="市場代碼")
+    list_parser.add_argument("--limit", type=int, default=20, help="顯示數量")
 
     # 分析股票
-    analyze_parser = subparsers.add_parser('analyze', help='分析股票')
-    analyze_parser.add_argument('symbol', help='股票代號')
-    analyze_parser.add_argument('--days', type=int, default=60, help='分析天數')
+    analyze_parser = subparsers.add_parser("analyze", help="分析股票")
+    analyze_parser.add_argument("symbol", help="股票代號")
+    analyze_parser.add_argument("--days", type=int, default=60, help="分析天數")
 
     # 生成信號
-    signal_parser = subparsers.add_parser('signal', help='生成交易信號')
-    signal_parser.add_argument('symbol', help='股票代號')
-    signal_parser.add_argument('--days', type=int, default=60, help='分析天數')
+    signal_parser = subparsers.add_parser("signal", help="生成交易信號")
+    signal_parser.add_argument("symbol", help="股票代號")
+    signal_parser.add_argument("--days", type=int, default=60, help="分析天數")
 
     # 掃描市場
-    scan_parser = subparsers.add_parser('scan', help='掃描市場信號')
-    scan_parser.add_argument('--market', choices=['TW', 'US'], help='市場代碼')
-    scan_parser.add_argument('--confidence', type=float, default=0.8, help='最低信心度')
+    scan_parser = subparsers.add_parser("scan", help="掃描市場信號")
+    scan_parser.add_argument("--market", choices=["TW", "US"], help="市場代碼")
+    scan_parser.add_argument("--confidence", type=float, default=0.8, help="最低信心度")
 
     # 收集數據
-    collect_parser = subparsers.add_parser('collect', help='收集股票數據')
-    collect_parser.add_argument('symbol', help='股票代號')
-    collect_parser.add_argument('--days', type=int, default=30, help='收集天數')
+    collect_parser = subparsers.add_parser("collect", help="收集股票數據")
+    collect_parser.add_argument("symbol", help="股票代號")
+    collect_parser.add_argument("--days", type=int, default=30, help="收集天數")
 
     # 健康檢查
-    subparsers.add_parser('health', help='系統健康檢查')
+    subparsers.add_parser("health", help="系統健康檢查")
 
     args = parser.parse_args()
 
@@ -327,17 +346,17 @@ async def main():
     cli = CleanArchitectureCLI()
 
     try:
-        if args.command == 'list':
+        if args.command == "list":
             await cli.list_stocks(args.market, args.limit)
-        elif args.command == 'analyze':
+        elif args.command == "analyze":
             await cli.analyze_stock(args.symbol, args.days)
-        elif args.command == 'signal':
+        elif args.command == "signal":
             await cli.generate_signals(args.symbol, args.days)
-        elif args.command == 'scan':
+        elif args.command == "scan":
             await cli.scan_market(args.market, args.confidence)
-        elif args.command == 'collect':
+        elif args.command == "collect":
             await cli.collect_data(args.symbol, args.days)
-        elif args.command == 'health':
+        elif args.command == "health":
             await cli.health_check()
 
     except KeyboardInterrupt:

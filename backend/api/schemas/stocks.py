@@ -1,6 +1,7 @@
 """
 股票相關API Schema模型
 """
+
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime
@@ -10,6 +11,7 @@ from .common import PaginatedResponse
 # 價格資訊模型
 class LatestPriceInfo(BaseModel):
     """最新價格資訊"""
+
     close: Optional[float] = None
     change: Optional[float] = None  # 漲跌金額
     change_percent: Optional[float] = None  # 漲跌幅度 (%)
@@ -53,6 +55,7 @@ class StockBatchCreateRequest(BaseModel):
 
 class StockListResponse(BaseModel):
     """股票清單響應模型（與前端PaginatedResponse兼容）"""
+
     items: List[StockResponse]
     total: int
     page: int
@@ -168,7 +171,9 @@ class IndicatorBatchCalculateRequest(BaseModel):
 
     @field_validator("indicators")
     @classmethod
-    def validate_indicators(cls, value: List[IndicatorBatchItem]) -> List[IndicatorBatchItem]:
+    def validate_indicators(
+        cls, value: List[IndicatorBatchItem]
+    ) -> List[IndicatorBatchItem]:
         if not value:
             raise ValueError("指標列表不可為空")
         return value
@@ -176,6 +181,7 @@ class IndicatorBatchCalculateRequest(BaseModel):
 
 class IndicatorSummaryResponse(BaseModel):
     """指標摘要響應格式（前端 getIndicators 專用）"""
+
     stock_id: int
     symbol: str
     timeframe: str

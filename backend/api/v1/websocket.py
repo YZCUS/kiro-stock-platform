@@ -1,6 +1,7 @@
 """
 WebSocket 即時數據服務 - 支援多Worker環境
 """
+
 from __future__ import annotations
 
 import json
@@ -83,7 +84,10 @@ class WebSocketService:
 
                 # 如果 stock 是 None，可能是事務隔離問題，直接返回錯誤但不中斷連線
                 if stock is None:
-                    logger.warning("股票 %s 暫時無法取得（可能正在創建中），跳過初始數據發送", stock_id)
+                    logger.warning(
+                        "股票 %s 暫時無法取得（可能正在創建中），跳過初始數據發送",
+                        stock_id,
+                    )
                     return
 
             except Exception as exc:  # noqa: BLE001
@@ -127,7 +131,9 @@ class WebSocketService:
             {"type": "price_update", "data": price_data},
         )
 
-    async def broadcast_indicator_update(self, stock_id: int, indicator_data: dict) -> None:
+    async def broadcast_indicator_update(
+        self, stock_id: int, indicator_data: dict
+    ) -> None:
         await self.manager.broadcast_stock_update(
             stock_id,
             {"type": "indicator_update", "data": indicator_data},

@@ -44,9 +44,11 @@ const createWrapper = () => {
     },
   });
 
-  return ({ children }: { children: React.ReactNode }) => (
+  const Wrapper = ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
+  Wrapper.displayName = 'QueryWrapper';
+  return Wrapper;
 };
 
 describe('useStocks', () => {
@@ -226,9 +228,13 @@ describe('useBackfillStockData - 優化後的緩存失效測試', () => {
     jest.spyOn(queryClient, 'invalidateQueries');
   });
 
-  const createWrapperWithClient = () => ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  );
+  const createWrapperWithClient = () => {
+    const Wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    Wrapper.displayName = 'QueryWrapperWithClient';
+    return Wrapper;
+  };
 
   it('應該使用精確的 queryKey 進行緩存失效而不是 predicate', async () => {
     const mockBackfillResponse = {

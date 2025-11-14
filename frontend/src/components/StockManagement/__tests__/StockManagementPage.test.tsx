@@ -83,13 +83,15 @@ const createQueryClient = () => {
 };
 
 const createWrapper = (store = createTestStore(), queryClient = createQueryClient()) => {
-  return ({ children }: { children: React.ReactNode }) => (
+  const Wrapper = ({ children }: { children: React.ReactNode }) => (
     <Provider store={store}>
       <QueryClientProvider client={queryClient}>
         {children}
       </QueryClientProvider>
     </Provider>
   );
+  Wrapper.displayName = 'TestWrapper';
+  return Wrapper;
 };
 
 // Mock window.confirm

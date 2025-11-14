@@ -2,6 +2,7 @@
 交易信號業務服務 - Domain Layer
 專注於交易信號生成和分析的業務邏輯，不依賴具體的基礎設施實現
 """
+
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, date, timedelta
 from dataclasses import dataclass
@@ -9,13 +10,18 @@ from enum import Enum
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.repositories.stock_repository_interface import IStockRepository
-from domain.repositories.price_history_repository_interface import IPriceHistoryRepository
-from domain.repositories.trading_signal_repository_interface import ITradingSignalRepository
+from domain.repositories.price_history_repository_interface import (
+    IPriceHistoryRepository,
+)
+from domain.repositories.trading_signal_repository_interface import (
+    ITradingSignalRepository,
+)
 from infrastructure.cache.redis_cache_service import ICacheService
 
 
 class SignalType(str, Enum):
     """信號類型"""
+
     BUY = "buy"
     SELL = "sell"
     HOLD = "hold"
@@ -25,6 +31,7 @@ class SignalType(str, Enum):
 
 class SignalStrength(str, Enum):
     """信號強度"""
+
     WEAK = "weak"
     MODERATE = "moderate"
     STRONG = "strong"
@@ -33,6 +40,7 @@ class SignalStrength(str, Enum):
 
 class SignalSource(str, Enum):
     """信號來源"""
+
     TECHNICAL_ANALYSIS = "technical_analysis"
     GOLDEN_CROSS = "golden_cross"
     DEATH_CROSS = "death_cross"
@@ -46,6 +54,7 @@ class SignalSource(str, Enum):
 @dataclass
 class TradingSignal:
     """交易信號"""
+
     stock_id: int
     symbol: str
     signal_type: SignalType
@@ -62,6 +71,7 @@ class TradingSignal:
 @dataclass
 class SignalAnalysis:
     """信號分析結果"""
+
     stock_id: int
     symbol: str
     analysis_date: datetime
@@ -76,6 +86,7 @@ class SignalAnalysis:
 @dataclass
 class PortfolioSignals:
     """投資組合信號摘要"""
+
     analysis_date: datetime
     total_stocks_analyzed: int
     buy_signals: int
@@ -94,7 +105,7 @@ class TradingSignalService:
         stock_repository: IStockRepository,
         price_repository: IPriceHistoryRepository,
         cache_service: ICacheService,
-        signal_repository: ITradingSignalRepository
+        signal_repository: ITradingSignalRepository,
     ):
         self.stock_repo = stock_repository
         self.price_repo = price_repository
@@ -106,10 +117,7 @@ class TradingSignalService:
         self.signal_freshness_hours = 4
 
     async def generate_trading_signals(
-        self,
-        db: AsyncSession,
-        stock_id: int,
-        analysis_days: int = 60
+        self, db: AsyncSession, stock_id: int, analysis_days: int = 60
     ) -> SignalAnalysis:
         """
         生成交易信號
@@ -128,9 +136,7 @@ class TradingSignalService:
 
         # 檢查快取
         cache_key = self.cache.get_cache_key(
-            "trading_signals",
-            stock_id=stock_id,
-            analysis_days=analysis_days
+            "trading_signals", stock_id=stock_id, analysis_days=analysis_days
         )
 
         cached_analysis = await self.cache.get(cache_key)
@@ -166,7 +172,9 @@ class TradingSignalService:
         signals.extend(momentum_signals)
 
         # 篩選和排序信號
-        valid_signals = [s for s in signals if s.confidence >= self.confidence_threshold]
+        valid_signals = [
+            s for s in signals if s.confidence >= self.confidence_threshold
+        ]
         valid_signals.sort(key=lambda x: x.confidence, reverse=True)
 
         # 確定主要信號
@@ -190,7 +198,7 @@ class TradingSignalService:
             supporting_signals=supporting_signals,
             risk_score=risk_score,
             recommendation=recommendation,
-            reasoning=reasoning
+            reasoning=reasoning,
         )
 
         # 快取分析結果
@@ -202,7 +210,7 @@ class TradingSignalService:
         self,
         db: AsyncSession,
         market: Optional[str] = None,
-        min_confidence: float = 0.8
+        min_confidence: float = 0.8,
     ) -> PortfolioSignals:
         """
         掃描市場信號
@@ -225,7 +233,7 @@ class TradingSignalService:
                 hold_signals=0,
                 high_confidence_signals=[],
                 risk_alerts=[],
-                market_sentiment="neutral"
+                market_sentiment="neutral",
             )
 
         # 批次分析
@@ -240,9 +248,15 @@ class TradingSignalService:
                 analysis = await self.generate_trading_signals(db, stock.id)
 
                 if analysis.primary_signal:
-                    if analysis.primary_signal.signal_type in [SignalType.BUY, SignalType.STRONG_BUY]:
+                    if analysis.primary_signal.signal_type in [
+                        SignalType.BUY,
+                        SignalType.STRONG_BUY,
+                    ]:
                         buy_signals += 1
-                    elif analysis.primary_signal.signal_type in [SignalType.SELL, SignalType.STRONG_SELL]:
+                    elif analysis.primary_signal.signal_type in [
+                        SignalType.SELL,
+                        SignalType.STRONG_SELL,
+                    ]:
                         sell_signals += 1
                     else:
                         hold_signals += 1
@@ -253,7 +267,9 @@ class TradingSignalService:
 
                     # 收集風險警告
                     if analysis.risk_score > 0.8:
-                        risk_alerts.append(f"{stock.symbol}: 高風險 ({analysis.risk_score:.2f})")
+                        risk_alerts.append(
+                            f"{stock.symbol}: 高風險 ({analysis.risk_score:.2f})"
+                        )
 
             except Exception as e:
                 risk_alerts.append(f"{stock.symbol}: 分析失敗 - {str(e)}")
@@ -279,7 +295,7 @@ class TradingSignalService:
             hold_signals=hold_signals,
             high_confidence_signals=high_confidence_signals,
             risk_alerts=risk_alerts,
-            market_sentiment=market_sentiment
+            market_sentiment=market_sentiment,
         )
 
     async def get_recent_signals(
@@ -287,13 +303,10 @@ class TradingSignalService:
         db: AsyncSession,
         stock_id: int,
         limit: int = 10,
-        signal_type: Optional[str] = None
+        signal_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         return await self.signal_repo.get_recent_signals(
-            db,
-            stock_id=stock_id,
-            limit=limit,
-            signal_type=signal_type
+            db, stock_id=stock_id, limit=limit, signal_type=signal_type
         )
 
     async def list_signals(
@@ -302,21 +315,17 @@ class TradingSignalService:
         filters: Optional[Dict[str, Any]] = None,
         market: Optional[str] = None,
         offset: int = 0,
-        limit: int = 50
+        limit: int = 50,
     ) -> List[Dict[str, Any]]:
         return await self.signal_repo.list_signals(
-            db,
-            filters=filters,
-            market=market,
-            offset=offset,
-            limit=limit
+            db, filters=filters, market=market, offset=offset, limit=limit
         )
 
     async def count_signals(
         self,
         db: AsyncSession,
         filters: Optional[Dict[str, Any]] = None,
-        market: Optional[str] = None
+        market: Optional[str] = None,
     ) -> int:
         return await self.signal_repo.count_signals(db, filters=filters, market=market)
 
@@ -324,35 +333,37 @@ class TradingSignalService:
         self,
         db: AsyncSession,
         filters: Optional[Dict[str, Any]] = None,
-        market: Optional[str] = None
+        market: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return await self.signal_repo.get_signal_stats(db, filters=filters, market=market)
+        return await self.signal_repo.get_signal_stats(
+            db, filters=filters, market=market
+        )
 
     async def get_detailed_signal_stats(
         self,
         db: AsyncSession,
         filters: Optional[Dict[str, Any]] = None,
-        market: Optional[str] = None
+        market: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return await self.signal_repo.get_detailed_signal_stats(db, filters=filters, market=market)
+        return await self.signal_repo.get_detailed_signal_stats(
+            db, filters=filters, market=market
+        )
 
     async def create_signal(
-        self,
-        db: AsyncSession,
-        signal_data: Dict[str, Any]
+        self, db: AsyncSession, signal_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         return await self.signal_repo.create_signal(db, signal_data)
 
     async def delete_signal(self, db: AsyncSession, signal_id: int) -> None:
         await self.signal_repo.delete_signal(db, signal_id)
 
-    async def get_signal(self, db: AsyncSession, signal_id: int) -> Optional[Dict[str, Any]]:
+    async def get_signal(
+        self, db: AsyncSession, signal_id: int
+    ) -> Optional[Dict[str, Any]]:
         return await self.signal_repo.get_signal(db, signal_id)
 
     async def get_signal_performance(
-        self,
-        db: AsyncSession,
-        days: int = 30
+        self, db: AsyncSession, days: int = 30
     ) -> Dict[str, Any]:
         """
         取得信號表現統計
@@ -371,24 +382,21 @@ class TradingSignalService:
             "signal_type_performance": {
                 "buy_signals": {"count": 80, "success_rate": 0.75},
                 "sell_signals": {"count": 45, "success_rate": 0.68},
-                "hold_signals": {"count": 25, "success_rate": 0.85}
+                "hold_signals": {"count": 25, "success_rate": 0.85},
             },
             "signal_source_performance": {
                 "golden_cross": 0.78,
                 "rsi_oversold": 0.65,
                 "bollinger_breakout": 0.82,
-                "volume_spike": 0.58
+                "volume_spike": 0.58,
             },
             "average_return": 0.032,
             "sharpe_ratio": 1.45,
-            "max_drawdown": 0.08
+            "max_drawdown": 0.08,
         }
 
     async def get_price_history(
-        self,
-        db: AsyncSession,
-        stock_id: int,
-        limit: int = 100
+        self, db: AsyncSession, stock_id: int, limit: int = 100
     ) -> List[Dict[str, Any]]:
         prices = await self.price_repo.get_by_stock(db, stock_id, limit=limit)
 
@@ -405,10 +413,7 @@ class TradingSignalService:
         ]
 
     async def get_indicator_history(
-        self,
-        db: AsyncSession,
-        stock_id: int,
-        limit: int = 50
+        self, db: AsyncSession, stock_id: int, limit: int = 50
     ) -> Dict[str, List[Dict[str, Any]]]:
         cache_key = self.cache.get_cache_key(
             "indicator_history",
@@ -426,10 +431,7 @@ class TradingSignalService:
         return indicators
 
     async def get_signal_history(
-        self,
-        db: AsyncSession,
-        stock_id: int,
-        limit: int = 10
+        self, db: AsyncSession, stock_id: int, limit: int = 10
     ) -> List[Dict[str, Any]]:
         signals = await self.signal_repo.list_signals(
             db,
@@ -464,7 +466,7 @@ class TradingSignalService:
                 stop_loss=float(prices[0].close_price) * 0.95,
                 signal_date=datetime.now(),
                 description="短期均線向上突破中期均線",
-                metadata={"recent_trend": recent_trend, "medium_trend": medium_trend}
+                metadata={"recent_trend": recent_trend, "medium_trend": medium_trend},
             )
             signals.append(signal)
 
@@ -481,7 +483,7 @@ class TradingSignalService:
                 stop_loss=float(prices[0].close_price) * 1.03,
                 signal_date=datetime.now(),
                 description="短期均線向下跌破中期均線",
-                metadata={"recent_trend": recent_trend, "medium_trend": medium_trend}
+                metadata={"recent_trend": recent_trend, "medium_trend": medium_trend},
             )
             signals.append(signal)
 
@@ -508,7 +510,7 @@ class TradingSignalService:
                     stop_loss=float(prices[0].close_price) * 0.95,
                     signal_date=datetime.now(),
                     description=f"RSI超賣 ({rsi_value:.1f})",
-                    metadata={"rsi": rsi_value}
+                    metadata={"rsi": rsi_value},
                 )
                 signals.append(signal)
 
@@ -525,7 +527,7 @@ class TradingSignalService:
                     stop_loss=float(prices[0].close_price) * 1.05,
                     signal_date=datetime.now(),
                     description=f"RSI超買 ({rsi_value:.1f})",
-                    metadata={"rsi": rsi_value}
+                    metadata={"rsi": rsi_value},
                 )
                 signals.append(signal)
 
@@ -547,15 +549,14 @@ class TradingSignalService:
         return []
 
     async def _calculate_risk_score(
-        self,
-        stock_id: int,
-        prices: List,
-        signals: List[TradingSignal]
+        self, stock_id: int, prices: List, signals: List[TradingSignal]
     ) -> float:
         """計算風險分數"""
         # 簡化的風險評估
         volatility = self._calculate_price_volatility(prices[:20])
-        signal_consensus = len([s for s in signals if s.confidence > 0.7]) / max(len(signals), 1)
+        signal_consensus = len([s for s in signals if s.confidence > 0.7]) / max(
+            len(signals), 1
+        )
 
         # 基礎風險分數
         risk_score = volatility * 0.6 + (1 - signal_consensus) * 0.4
@@ -566,7 +567,7 @@ class TradingSignalService:
         self,
         primary_signal: Optional[TradingSignal],
         supporting_signals: List[TradingSignal],
-        risk_score: float
+        risk_score: float,
     ) -> Tuple[str, List[str]]:
         """生成投資建議"""
         if not primary_signal:
@@ -577,10 +578,14 @@ class TradingSignalService:
         if primary_signal.signal_type in [SignalType.BUY, SignalType.STRONG_BUY]:
             if risk_score < 0.5:
                 recommendation = "建議買入"
-                reasoning.append(f"主要信號為{primary_signal.signal_type.value}，風險較低")
+                reasoning.append(
+                    f"主要信號為{primary_signal.signal_type.value}，風險較低"
+                )
             else:
                 recommendation = "謹慎買入"
-                reasoning.append(f"主要信號為{primary_signal.signal_type.value}，但風險較高")
+                reasoning.append(
+                    f"主要信號為{primary_signal.signal_type.value}，但風險較高"
+                )
         elif primary_signal.signal_type in [SignalType.SELL, SignalType.STRONG_SELL]:
             recommendation = "建議賣出"
             reasoning.append(f"主要信號為{primary_signal.signal_type.value}")
@@ -617,6 +622,7 @@ class TradingSignalService:
             price_changes.append(change)
 
         import statistics
+
         return statistics.mean(price_changes) if price_changes else 0.0
 
     def _calculate_simplified_rsi(self, prices: List) -> float:
