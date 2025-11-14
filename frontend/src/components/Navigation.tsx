@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAppSelector, useAppDispatch } from '@/store';
 import { logout } from '@/store/slices/authSlice';
 import { Button } from '@/components/ui/button';
-import { BarChart3, Star, User, LogOut } from 'lucide-react';
+import { BarChart3, Star, User, LogOut, Target } from 'lucide-react';
 import WebSocketStatus from './ui/WebSocketStatus';
 
 export default function Navigation() {
@@ -56,6 +56,12 @@ export default function Navigation() {
 
             {isAuthenticated ? (
               <>
+                <Button variant="ghost" size="sm" asChild>
+                  <Link href="/strategies" onClick={(e) => handleNavClick(e, '/strategies')} className="flex items-center gap-1">
+                    <Target className="w-4 h-4" />
+                    策略中心
+                  </Link>
+                </Button>
                 <Button variant="ghost" size="sm" asChild>
                   <Link href="/portfolio" onClick={(e) => handleNavClick(e, '/portfolio')} className="flex items-center gap-1">
                     <Star className="w-4 h-4" />

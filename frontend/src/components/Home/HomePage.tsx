@@ -8,7 +8,6 @@ import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ArrowRight, BarChart3, TrendingUp, Bell, Activity, Database, Zap } from 'lucide-react';
-import { useStocks } from '@/hooks/useStocks';
 import { useAppSelector } from '@/store';
 import { getStockLists } from '@/services/stockListApi';
 
@@ -22,16 +21,31 @@ export default function HomePage() {
   const [trackedStocksCount, setTrackedStocksCount] = useState<number>(0);
   const [isMounted, setIsMounted] = useState(false);
 
-  // 獲取股票數據用於統計（後端限制 per_page 最大為 200）
-  const { data: stocksResponse } = useStocks({ page: 1, pageSize: 200 });
-
-  // 計算統計數據
-  const totalStocks = stocksResponse?.total || 0;
+  const [totalStocks, setTotalStocks] = useState<number>(0);
 
   // 處理客戶端掛載
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  // 延遲載入股票統計數據（非關鍵數據）
+  useEffect(() => {
+    if (!isMounted) return;
+
+    const loadStockCount = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/v1/stocks?page=1&per_page=1');
+        const data = await response.json();
+        setTotalStocks(data.total || 0);
+      } catch (error) {
+        console.error('載入股票數量失敗:', error);
+      }
+    };
+
+    // 延遲 500ms 載入，讓關鍵內容先渲染
+    const timer = setTimeout(loadStockCount, 500);
+    return () => clearTimeout(timer);
+  }, [isMounted]);
 
   // 檢查系統狀態
   useEffect(() => {

@@ -9,6 +9,8 @@ const nextConfig = {
     esmExternals: true,
     // Enable server components
     serverComponentsExternalPackages: [],
+    // 優化特定包的導入（減少 bundle 大小）
+    optimizePackageImports: ['lucide-react', '@tanstack/react-query'],
   },
 
   // Performance optimizations
@@ -161,11 +163,14 @@ const nextConfig = {
   // Power pack features
   poweredByHeader: false,
 
-  // Development only configurations
-  ...(process.env.NODE_ENV === 'development' && {
-    // Enable React strict mode in development
-    reactStrictMode: true,
-  }),
+  // React configuration
+  reactStrictMode: true,
+
+  // 生產環境優化
+  productionBrowserSourceMaps: false, // 禁用生產環境 source maps
+
+  // SWC minification (faster than Terser)
+  swcMinify: true,
 };
 
 module.exports = nextConfig;

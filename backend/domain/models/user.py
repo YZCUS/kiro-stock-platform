@@ -27,6 +27,9 @@ class User(BaseModel, TimestampMixin):
     portfolios = relationship("UserPortfolio", back_populates="user", cascade="all, delete-orphan")
     transactions = relationship("Transaction", back_populates="user", cascade="all, delete-orphan")
     stock_lists = relationship("UserStockList", back_populates="user", cascade="all, delete-orphan")
+    watchlists = relationship("UserWatchlist", back_populates="user", cascade="all, delete-orphan")
+    strategy_subscriptions = relationship("UserStrategySubscription", back_populates="user", cascade="all, delete-orphan")
+    strategy_signals = relationship("StrategySignal", back_populates="user", cascade="all, delete-orphan")
 
     __table_args__ = (
         {'comment': '用戶表'}

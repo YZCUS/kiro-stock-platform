@@ -63,7 +63,7 @@ class UserStrategySubscription(BaseModel, TimestampMixin):
     )
 
     # 關聯關係
-    user = relationship("User", backref="strategy_subscriptions")
+    user = relationship("User", back_populates="strategy_subscriptions")
     stock_lists = relationship(
         "UserStrategyStockList",
         back_populates="subscription",

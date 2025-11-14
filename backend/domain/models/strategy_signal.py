@@ -113,8 +113,8 @@ class StrategySignal(BaseModel, TimestampMixin):
     )
 
     # 關聯關係
-    user = relationship("User", backref="strategy_signals")
-    stock = relationship("Stock", backref="strategy_signals")
+    user = relationship("User", back_populates="strategy_signals")
+    stock = relationship("Stock", back_populates="strategy_signals")
 
     @classmethod
     def create_signal(

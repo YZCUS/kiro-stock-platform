@@ -1,0 +1,211 @@
+name: Lighthouse Performance Test
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/lighthouse.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'frontend/**'
+  schedule:
+    # 每週一 10:00 自動執行
+    - cron: '0 10 * * 1'
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  lighthouse:
+    name: Lighthouse Performance Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Build frontend
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+          NEXT_PUBLIC_WS_URL: ws://localhost:8000/ws
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Start frontend server
+        run: |
+          cd frontend
+          npm start &
+          npx wait-on http://localhost:3000 --timeout 60000
+
+      - name: Install Lighthouse CI
+        run: |
+          npm install -g @lhci/cli@0.13.x
+
+      - name: Run Lighthouse CI
+        run: |
+          lhci autorun
+
+      - name: Upload Lighthouse Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lighthouse-reports
+          path: .lighthouseci/
+          retention-days: 30
+
+      - name: Check Lighthouse Scores
+        run: |
+          # 從 Lighthouse CI 結果中提取分數
+          if [ -f ".lighthouseci/manifest.json" ]; then
+            echo "✅ Lighthouse CI 執行完成"
+            echo "📊 查看 Artifacts 下載完整報告"
+          fi
+
+      - name: Comment PR with Lighthouse Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // 讀取 Lighthouse 結果
+            const manifestPath = '.lighthouseci/manifest.json';
+            if (!fs.existsSync(manifestPath)) {
+              console.log('No manifest found');
+              return;
+            }
+
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            const results = manifest[0];
+
+            if (!results) {
+              console.log('No results found');
+              return;
+            }
+
+            // 讀取 JSON 結果
+            const jsonPath = results.jsonPath;
+            const lhr = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+
+            // 格式化分數
+            const formatScore = (score) => {
+              const percentage = Math.round(score * 100);
+              const emoji = percentage >= 90 ? '🟢' : percentage >= 50 ? '🟡' : '🔴';
+              return `${emoji} ${percentage}`;
+            };
+
+            // 構建評論內容
+            const comment = `
+            ## 🏎️ Lighthouse Performance Report
+
+            | Category | Score |
+            |----------|-------|
+            | Performance | ${formatScore(lhr.categories.performance.score)} |
+            | Accessibility | ${formatScore(lhr.categories.accessibility.score)} |
+            | Best Practices | ${formatScore(lhr.categories['best-practices'].score)} |
+            | SEO | ${formatScore(lhr.categories.seo.score)} |
+
+            ### Core Web Vitals
+
+            | Metric | Value |
+            |--------|-------|
+            | First Contentful Paint | ${Math.round(lhr.audits['first-contentful-paint'].numericValue)}ms |
+            | Largest Contentful Paint | ${Math.round(lhr.audits['largest-contentful-paint'].numericValue)}ms |
+            | Cumulative Layout Shift | ${lhr.audits['cumulative-layout-shift'].numericValue.toFixed(3)} |
+            | Total Blocking Time | ${Math.round(lhr.audits['total-blocking-time'].numericValue)}ms |
+            | Speed Index | ${Math.round(lhr.audits['speed-index'].numericValue)}ms |
+
+            📄 [View Full Report in Artifacts](${context.payload.pull_request.html_url}/checks)
+            `;
+
+            // 發布評論
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  lighthouse-mobile:
+    name: Lighthouse Mobile Performance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies and build
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Start server
+        run: |
+          cd frontend
+          npm start &
+          npx wait-on http://localhost:3000 --timeout 60000
+
+      - name: Run Lighthouse (Mobile)
+        run: |
+          npm install -g lighthouse
+          mkdir -p lighthouse-reports
+
+          # 測試主要頁面（Mobile）
+          lighthouse http://localhost:3000 \
+            --preset=mobile \
+            --output=html,json \
+            --output-path=./lighthouse-reports/mobile-home \
+            --chrome-flags="--no-sandbox --disable-dev-shm-usage --headless"
+
+          lighthouse http://localhost:3000/login \
+            --preset=mobile \
+            --output=html,json \
+            --output-path=./lighthouse-reports/mobile-login \
+            --chrome-flags="--no-sandbox --disable-dev-shm-usage --headless"
+
+      - name: Upload Mobile Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lighthouse-mobile-reports
+          path: lighthouse-reports/
+          retention-days: 30
+
+      - name: Check Mobile Performance Scores
+        run: |
+          # 檢查性能分數是否達標
+          if command -v jq &> /dev/null; then
+            for json in lighthouse-reports/*.json; do
+              score=$(jq '.categories.performance.score * 100' "$json")
+              echo "Mobile Performance Score: $score"
+
+              if (( $(echo "$score < 70" | bc -l) )); then
+                echo "⚠️ Warning: Mobile performance score is below 70!"
+              fi
+            done
+          fi

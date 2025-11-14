@@ -61,7 +61,21 @@ class Stock(BaseModel, TimestampMixin):
         cascade="all, delete-orphan",
         lazy="dynamic"
     )
-    
+
+    user_watchlists = relationship(
+        "UserWatchlist",
+        back_populates="stock",
+        cascade="all, delete-orphan",
+        lazy="dynamic"
+    )
+
+    strategy_signals = relationship(
+        "StrategySignal",
+        back_populates="stock",
+        cascade="all, delete-orphan",
+        lazy="dynamic"
+    )
+
     @classmethod
     def validate_symbol(cls, symbol: str, market: str) -> bool:
         """驗證股票代號格式"""

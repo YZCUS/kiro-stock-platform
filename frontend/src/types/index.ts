@@ -320,6 +320,8 @@ export interface Portfolio {
   profit_loss_percent?: number | null;
   created_at: string;
   updated_at: string;
+  // 為了與 Stock 類型兼容，添加 latest_price 欄位
+  latest_price?: LatestPriceInfo | null;
 }
 
 // 持倉列表響應

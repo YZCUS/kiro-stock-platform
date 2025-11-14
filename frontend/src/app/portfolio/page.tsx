@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useAppSelector, useAppDispatch } from '@/store';
 import { fetchPortfolioList, fetchPortfolioSummary, removePortfolio } from '@/store/slices/portfolioSlice';
@@ -9,10 +10,18 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import TransactionModal from '@/components/Portfolio/TransactionModal';
 import { useStocks } from '@/hooks/useStocks';
 import Link from 'next/link';
 import { TrendingUp, TrendingDown, Plus, Trash2, ShoppingCart } from 'lucide-react';
+
+// 動態載入 TransactionModal（僅在需要時載入）
+const TransactionModal = dynamic(
+  () => import('@/components/Portfolio/TransactionModal'),
+  {
+    ssr: false,
+    loading: () => null, // 模態框不需要loading state
+  }
+);
 
 export default function PortfolioPage() {
   const router = useRouter();

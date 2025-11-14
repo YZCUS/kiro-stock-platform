@@ -1,0 +1,280 @@
+name: CD - Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  DEPLOY_USER: opc
+  DEPLOY_HOST: 158.101.102.77
+  DEPLOY_PATH: /home/opc/projects/kiro-stock-platform
+
+jobs:
+  # ============================================================================
+  # 構建並推送 Docker 映像到 GitHub Container Registry
+  # ============================================================================
+  build-and-push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+
+      - name: Extract metadata for Frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/frontend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push Backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_WS_URL=${{ secrets.NEXT_PUBLIC_WS_URL }}
+
+  # ============================================================================
+  # 部署到 OCI 生產環境
+  # ============================================================================
+  deploy-to-oci:
+    name: Deploy to OCI
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment:
+      name: production
+      url: http://158.101.102.77
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+
+      - name: Add OCI host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Create deployment package
+        run: |
+          tar -czf deploy.tar.gz \
+            docker-compose.prod.yml \
+            nginx/ \
+            scripts/ \
+            .env.production.example
+
+      - name: Copy files to OCI
+        run: |
+          scp deploy.tar.gz ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:${{ env.DEPLOY_PATH }}/
+
+      - name: Backup database before deployment
+        run: |
+          ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} << 'ENDSSH'
+            cd ${{ env.DEPLOY_PATH }}
+            echo "📦 Creating pre-deployment backup..."
+            bash scripts/backup.sh || echo "⚠️ Backup failed, but continuing deployment"
+          ENDSSH
+
+      - name: Deploy to OCI server
+        run: |
+          ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} << 'ENDSSH'
+            set -e
+
+            cd ${{ env.DEPLOY_PATH }}
+
+            echo "📦 Extracting deployment package..."
+            tar -xzf deploy.tar.gz
+            rm deploy.tar.gz
+
+            echo "🔐 Logging in to GitHub Container Registry..."
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            echo "⬇️ Pulling latest images..."
+            docker-compose -f docker-compose.prod.yml pull
+
+            echo "🔄 Restarting services with zero downtime..."
+            docker-compose -f docker-compose.prod.yml up -d --no-deps --build
+
+            echo "⏳ Waiting for services to be healthy..."
+            sleep 30
+
+            echo "🏥 Running health check..."
+            bash scripts/health-check.sh || echo "⚠️ Health check warnings detected"
+
+            echo "🧹 Cleaning up old Docker resources..."
+            docker system prune -af --volumes || true
+
+            echo "✅ Deployment completed!"
+          ENDSSH
+
+      - name: Verify deployment
+        run: |
+          echo "🔍 Verifying deployment..."
+
+          # Wait for services to stabilize
+          sleep 10
+
+          # Check health endpoint
+          curl -f http://${{ env.DEPLOY_HOST }}/health || exit 1
+
+          # Check API endpoint
+          curl -f http://${{ env.DEPLOY_HOST }}/api/v1/stocks/ || exit 1
+
+          echo "✅ Deployment verification passed!"
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ Deployment to OCI succeeded!"
+          else
+            echo "❌ Deployment to OCI failed!"
+          fi
+
+  # ============================================================================
+  # 部署後健康檢查
+  # ============================================================================
+  post-deployment-check:
+    name: Post-Deployment Health Check
+    runs-on: ubuntu-latest
+    needs: deploy-to-oci
+    if: success()
+
+    steps:
+      - name: Wait for services to stabilize
+        run: sleep 30
+
+      - name: Check frontend
+        run: |
+          curl -f -I http://${{ env.DEPLOY_HOST }}/ || exit 1
+          echo "✅ Frontend is accessible"
+
+      - name: Check backend API
+        run: |
+          curl -f http://${{ env.DEPLOY_HOST }}/api/v1/stocks/ || exit 1
+          echo "✅ Backend API is responding"
+
+      - name: Check health endpoint
+        run: |
+          response=$(curl -s http://${{ env.DEPLOY_HOST }}/health)
+          echo "Health check response: $response"
+          echo "$response" | grep -q "healthy" || exit 1
+          echo "✅ Health check passed"
+
+      - name: Test critical endpoints
+        run: |
+          # Test stock list
+          curl -f http://${{ env.DEPLOY_HOST }}/api/v1/stocks/ > /dev/null
+
+          echo "✅ All critical endpoints are working"
+
+  # ============================================================================
+  # 部署失敗時自動回滾（可選）
+  # ============================================================================
+  rollback-on-failure:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: [deploy-to-oci, post-deployment-check]
+    if: failure()
+
+    steps:
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+
+      - name: Add OCI host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Rollback deployment
+        run: |
+          ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} << 'ENDSSH'
+            cd ${{ env.DEPLOY_PATH }}
+
+            echo "🔙 Rolling back to previous version..."
+
+            # Find latest backup
+            latest_backup=$(ls -t backups/db_backup_*.sql.gz 2>/dev/null | head -1)
+
+            if [ -n "$latest_backup" ]; then
+              echo "📥 Restoring database from: $latest_backup"
+              bash scripts/restore.sh "$latest_backup"
+            fi
+
+            echo "🔄 Restarting services..."
+            docker-compose -f docker-compose.prod.yml restart
+
+            echo "⚠️ Rollback completed, but please investigate the deployment failure!"
+          ENDSSH
+
+      - name: Notify rollback
+        run: |
+          echo "⚠️ Deployment failed and rollback was initiated!"
+          echo "Please check the logs and investigate the issue."

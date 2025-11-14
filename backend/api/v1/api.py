@@ -7,6 +7,7 @@ from api.v1 import analysis, signals
 from api.routers.v1.auth import router as auth_router
 from api.routers.v1.portfolio import router as portfolio_router
 from api.routers.v1.stock_lists import router as stock_lists_router
+from api.routers.v1.strategies import router as strategies_router
 
 # 建立主要 API 路由器
 api_router = APIRouter()
@@ -25,3 +26,4 @@ api_router.include_router(signals.router, tags=["signals"])
 api_router.include_router(auth_router)  # 認證路由
 api_router.include_router(portfolio_router, prefix="/portfolio", tags=["portfolio"])  # 持倉管理路由
 api_router.include_router(stock_lists_router, prefix="/stock-lists", tags=["stock-lists"])  # 股票清單路由
+api_router.include_router(strategies_router)  # 策略管理路由（已包含 prefix /api/v1/strategies）
