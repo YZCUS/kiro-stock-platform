@@ -53,15 +53,19 @@ const mockIndicators = {
   }
 };
 
+const mockUsePriceUpdates = jest.fn((stockId) => ({
+  priceData: mockPriceData,
+  lastUpdate: new Date('2024-01-01T10:00:00Z'),
+  isSubscribed: true,
+}));
+
+const mockUseIndicatorUpdates = jest.fn((stockId) => ({
+  indicators: mockIndicators,
+}));
+
 jest.mock('../../../hooks/useWebSocket', () => ({
-  usePriceUpdates: jest.fn((stockId) => ({
-    priceData: mockPriceData,
-    lastUpdate: new Date('2024-01-01T10:00:00Z'),
-    isSubscribed: true,
-  })),
-  useIndicatorUpdates: jest.fn((stockId) => ({
-    indicators: mockIndicators,
-  })),
+  usePriceUpdates: mockUsePriceUpdates,
+  useIndicatorUpdates: mockUseIndicatorUpdates,
 }));
 
 // Mock error reporting
@@ -303,8 +307,7 @@ describe('RealtimePriceChart - 錯誤處理測試', () => {
 
   it('應該處理無效的價格數據', async () => {
     // Mock 返回無效數據的 hook
-    const useWebSocketModule = await import('../../../hooks/useWebSocket');
-    useWebSocketModule.usePriceUpdates.mockReturnValue({
+    mockUsePriceUpdates.mockReturnValue({
       priceData: null,
       lastUpdate: null,
       isSubscribed: false,
@@ -397,8 +400,8 @@ describe('RealtimePriceChart - WebSocket 集成測試', () => {
     );
 
     // 驗證 hooks 被正確的 stockId 調用
-    expect(usePriceUpdates).toHaveBeenCalledWith(1);
-    expect(useIndicatorUpdates).toHaveBeenCalledWith(1);
+    expect(mockUsePriceUpdates).toHaveBeenCalledWith(1);
+    expect(mockUseIndicatorUpdates).toHaveBeenCalledWith(1);
   });
 
   it('應該在 stockId 變化時重新調用 WebSocket hooks', () => {
@@ -412,8 +415,8 @@ describe('RealtimePriceChart - WebSocket 集成測試', () => {
     );
 
     // 清除初始調用
-    usePriceUpdates.mockClear();
-    useIndicatorUpdates.mockClear();
+    mockUsePriceUpdates.mockClear();
+    mockUseIndicatorUpdates.mockClear();
 
     // 重新渲染使用不同的股票
     const newStock = { id: 2, symbol: '2317.TW', name: '鴻海' };
@@ -424,7 +427,7 @@ describe('RealtimePriceChart - WebSocket 集成測試', () => {
     );
 
     // 驗證使用新的 stockId
-    expect(usePriceUpdates).toHaveBeenCalledWith(2);
-    expect(useIndicatorUpdates).toHaveBeenCalledWith(2);
+    expect(mockUsePriceUpdates).toHaveBeenCalledWith(2);
+    expect(mockUseIndicatorUpdates).toHaveBeenCalledWith(2);
   });
 });

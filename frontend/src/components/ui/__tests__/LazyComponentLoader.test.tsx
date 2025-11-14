@@ -58,7 +58,7 @@ describe('LazyComponentLoader', () => {
   describe('createLazyComponent', () => {
     it('應該顯示載入狀態', async () => {
       const mockImportFn = jest.fn(() =>
-        new Promise(resolve =>
+        new Promise<{ default: React.ComponentType<any> }>(resolve =>
           setTimeout(() => resolve({ default: TestComponent }), 100)
         )
       );
@@ -75,7 +75,7 @@ describe('LazyComponentLoader', () => {
 
     it('應該在載入完成後顯示組件', async () => {
       const mockImportFn = jest.fn(() =>
-        Promise.resolve({ default: TestComponent })
+        Promise.resolve<{ default: React.ComponentType<any> }>({ default: TestComponent })
       );
 
       const LazyTestComponent = createLazyComponent({
@@ -112,7 +112,7 @@ describe('LazyComponentLoader', () => {
 
     it('應該支援重試功能', async () => {
       let shouldFail = true;
-      const mockImportFn = jest.fn(() => {
+      const mockImportFn = jest.fn((): Promise<{ default: React.ComponentType<any> }> => {
         if (shouldFail) {
           return Promise.reject(new Error('Load failed'));
         }
@@ -147,7 +147,7 @@ describe('LazyComponentLoader', () => {
       const CustomLoading = () => <div data-testid="custom-loading">Custom Loading...</div>;
 
       const mockImportFn = jest.fn(() =>
-        new Promise(resolve =>
+        new Promise<{ default: React.ComponentType<any> }>(resolve =>
           setTimeout(() => resolve({ default: TestComponent }), 100)
         )
       );
@@ -164,7 +164,7 @@ describe('LazyComponentLoader', () => {
 
     it('應該遵守最小載入時間', async () => {
       const mockImportFn = jest.fn(() =>
-        Promise.resolve({ default: TestComponent })
+        Promise.resolve<{ default: React.ComponentType<any> }>({ default: TestComponent })
       );
 
       const LazyTestComponent = createLazyComponent({
@@ -190,7 +190,7 @@ describe('LazyComponentLoader', () => {
   describe('createStandardLazyComponent', () => {
     it('應該創建標準的懶載入組件', async () => {
       const mockImportFn = jest.fn(() =>
-        Promise.resolve({ default: TestComponent })
+        Promise.resolve<{ default: React.ComponentType<any> }>({ default: TestComponent })
       );
 
       const LazyTestComponent = createStandardLazyComponent(mockImportFn);
@@ -206,7 +206,7 @@ describe('LazyComponentLoader', () => {
 
     it('應該顯示標準載入樣式', async () => {
       const mockImportFn = jest.fn(() =>
-        new Promise(resolve =>
+        new Promise<{ default: React.ComponentType<any> }>(resolve =>
           setTimeout(() => resolve({ default: TestComponent }), 100)
         )
       );
@@ -241,7 +241,7 @@ describe('LazyComponentLoader', () => {
 
     it('應該顯示圖表載入樣式', async () => {
       const mockImportFn = jest.fn(() =>
-        new Promise(resolve =>
+        new Promise<{ default: React.ComponentType<any> }>(resolve =>
           setTimeout(() => resolve({ default: TestComponent }), 100)
         )
       );

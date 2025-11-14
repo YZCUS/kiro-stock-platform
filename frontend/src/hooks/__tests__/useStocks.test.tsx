@@ -2,9 +2,9 @@
  * useStocks Hook Tests
  */
 import React from 'react';
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useStocks, useCreateStock, useDeleteStock } from '../useStocks';
+import { useStocks, useCreateStock, useDeleteStock, useBackfillStockData } from '../useStocks';
 import StocksApiService from '../../services/stocksApi';
 import { Stock, PaginatedResponse } from '../../types';
 

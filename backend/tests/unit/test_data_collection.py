@@ -30,11 +30,13 @@ class TestDataCollectionService:
         self.mock_stock_repo = Mock(spec=StockRepository)
         self.mock_price_repo = Mock(spec=PriceHistoryRepository)
         self.mock_cache = MockCacheService()
+        self.mock_price_source = AsyncMock()  # Mock price data source
 
         self.data_service = DataCollectionService(
             stock_repository=self.mock_stock_repo,
             price_repository=self.mock_price_repo,
-            cache_service=self.mock_cache
+            cache_service=self.mock_cache,
+            price_data_source=self.mock_price_source
         )
 
     @pytest.mark.asyncio
@@ -163,7 +165,8 @@ class TestDataValidationService:
         self.data_service = DataCollectionService(
             stock_repository=Mock(),
             price_repository=Mock(),
-            cache_service=self.mock_cache
+            cache_service=self.mock_cache,
+            price_data_source=AsyncMock()
         )
 
     def test_validate_price_data_format(self):

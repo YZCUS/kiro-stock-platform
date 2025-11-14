@@ -170,7 +170,7 @@ describe('useWebSocketEvent', () => {
 
   it('應該正確註冊和清理自定義事件監聽器', () => {
     const mockCallback = jest.fn();
-    const eventType = 'custom_event';
+    const eventType = 'custom_event' as any;
 
     const { unmount } = renderHook(
       () => useWebSocketEvent(eventType, mockCallback, []),
@@ -189,7 +189,7 @@ describe('useWebSocketEvent', () => {
 
   it('應該在依賴變化時重新註冊監聽器', () => {
     const mockCallback = jest.fn();
-    let eventType = 'event1';
+    let eventType = 'event1' as any;
 
     const { rerender } = renderHook(
       ({ type }) => useWebSocketEvent(type, mockCallback, [type]),
@@ -419,9 +419,9 @@ describe('WebSocket Hooks - 依賴管理測試', () => {
     const store2 = createTestStore();
 
     const { rerender } = renderHook(
-      ({ store }) => useWebSocket(),
+      ({ store }: { store: any }) => useWebSocket(),
       {
-        wrapper: ({ children }) => (
+        wrapper: ({ children, store }: { children: React.ReactNode; store: any }) => (
           <Provider store={store}>{children}</Provider>
         ),
         initialProps: { store: store1 }

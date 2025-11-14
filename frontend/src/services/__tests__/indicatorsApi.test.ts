@@ -1,4 +1,4 @@
-import { IndicatorsApiService, IndicatorResponse } from '../indicatorsApi';
+import { IndicatorsApiService, IndicatorResponse, IndicatorBatchResponse } from '../indicatorsApi';
 import { ApiService } from '../../lib/api';
 
 // Mock ApiService
@@ -28,7 +28,7 @@ describe('IndicatorsApiService', () => {
 
       const params = {
         stock_id: 1,
-        indicator_type: 'RSI',
+        indicator_type: 'RSI' as const,
         period: 14
       };
 
@@ -66,7 +66,7 @@ describe('IndicatorsApiService', () => {
 
       const params = {
         stock_id: 2,
-        indicator_type: 'RSI,SMA_5',
+        indicator_type: 'RSI' as any, // Multiple types in comma-separated string
         period: 50,
         timeframe: '1h' as const,
         parameters: { custom_param: 'value' },
@@ -97,7 +97,7 @@ describe('IndicatorsApiService', () => {
 
       const params = {
         stock_id: 999,
-        indicator_type: 'RSI',
+        indicator_type: 'RSI' as const,
         period: 14
       };
 
@@ -125,7 +125,7 @@ describe('IndicatorsApiService', () => {
 
       const params = {
         stock_id: 1,
-        indicator_type: 'RSI,SMA_20,MACD',
+        indicator_type: 'RSI' as any, // Multiple types in comma-separated string
         period: 30
       };
 
@@ -168,7 +168,7 @@ describe('IndicatorsApiService', () => {
 
       const params = {
         stock_id: 1,
-        indicator_type: 'RSI,SMA_20,MACD,BBANDS,STOCH',
+        indicator_type: 'RSI' as any, // Multiple types in comma-separated string
         period: 30
       };
 
@@ -313,7 +313,7 @@ describe('IndicatorsApiService', () => {
       // 驗證前端請求格式與後端期望的 IndicatorCalculateRequest 格式一致
       const params = {
         stock_id: 1,
-        indicator_type: 'RSI,SMA_20,MACD',
+        indicator_type: 'RSI' as any, // Multiple types in comma-separated string
         period: 20,
         timeframe: '1d' as const,
         parameters: { custom_param: 'value' },
@@ -372,7 +372,7 @@ describe('IndicatorsApiService', () => {
       // 測試預設參數處理
       const params = {
         stock_id: 1,
-        indicator_type: 'RSI'
+        indicator_type: 'RSI' as const
         // 不提供 period, timeframe, parameters
       };
 
