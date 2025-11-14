@@ -171,16 +171,17 @@ CHANGELOG_*.md
 MIGRATION_*.md
 
 # Documentation files (keep locally but exclude from repository)
+# Exclude all markdown files except core ones
 *.md
 !README.md
 !CLAUDE.md
-!.kiro/**/*.md
+!CHANGELOG.md
+
+# Exclude documentation directories
 docs/
 backend/docs/
 airflow/docs/
 frontend/docs/
-**/README.md
-!README.md
 
 # backup
 backup_*/
