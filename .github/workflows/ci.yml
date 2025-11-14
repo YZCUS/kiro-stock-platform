@@ -71,10 +71,8 @@ jobs:
         run: |
           cd backend
           pip install flake8
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics \
-            --exclude=tests/unit/test_api_performance.py,tests/unit/test_api_stocks.py,tests/unit/test_api_websocket.py,tests/unit/test_backfill.py,tests/unit/test_crud_stock_optimized.py,tests/unit/test_indicator_storage.py,domain/models/stock.py,domain/models/user_watchlist.py
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics \
-            --exclude=tests/unit/test_api_performance.py,tests/unit/test_api_stocks.py,tests/unit/test_api_websocket.py,tests/unit/test_backfill.py,tests/unit/test_crud_stock_optimized.py,tests/unit/test_indicator_storage.py
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
       - name: Run code formatting check (black)
         run: |

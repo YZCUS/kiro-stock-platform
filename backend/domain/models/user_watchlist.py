@@ -1,13 +1,18 @@
 """
 用戶自選股模型
 """
+from __future__ import annotations
+
 from sqlalchemy import Column, Integer, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy import func
 from domain.models.base import BaseModel, TimestampMixin
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 import uuid
+
+if TYPE_CHECKING:
+    from domain.models.stock import Stock
 
 
 class UserWatchlist(BaseModel, TimestampMixin):
@@ -30,18 +35,18 @@ class UserWatchlist(BaseModel, TimestampMixin):
     user = relationship("User", back_populates="watchlists")
     
     @classmethod
-    def get_user_watchlist(cls, session, user_id: uuid.UUID) -> List['UserWatchlist']:
+    def get_user_watchlist(cls, session, user_id: uuid.UUID) -> List[UserWatchlist]:
         """取得用戶的自選股清單"""
         return session.query(cls).filter(cls.user_id == user_id).all()
-    
+
     @classmethod
-    def get_user_stocks(cls, session, user_id: uuid.UUID) -> List['Stock']:
+    def get_user_stocks(cls, session, user_id: uuid.UUID) -> List[Stock]:
         """取得用戶的自選股票"""
         from domain.models.stock import Stock
         return session.query(Stock).join(cls).filter(cls.user_id == user_id).all()
-    
+
     @classmethod
-    def add_to_watchlist(cls, session, user_id: uuid.UUID, stock_id: int) -> Optional['UserWatchlist']:
+    def add_to_watchlist(cls, session, user_id: uuid.UUID, stock_id: int) -> Optional[UserWatchlist]:
         """新增股票到自選股"""
         # 檢查是否已存在
         existing = session.query(cls).filter(

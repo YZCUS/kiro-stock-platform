@@ -1,11 +1,18 @@
 """
 股票模型
 """
+from __future__ import annotations
+
 from sqlalchemy import Column, String, DateTime, Boolean, func, CheckConstraint
 from sqlalchemy.orm import relationship
 from domain.models.base import BaseModel, TimestampMixin
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 import re
+
+if TYPE_CHECKING:
+    from domain.models.price_history import PriceHistory
+    from domain.models.technical_indicator import TechnicalIndicator
+    from domain.models.trading_signal import TradingSignal
 
 
 class Stock(BaseModel, TimestampMixin):
@@ -101,13 +108,13 @@ class Stock(BaseModel, TimestampMixin):
             symbol = symbol.upper()
         return symbol
     
-    def get_latest_price(self) -> Optional['PriceHistory']:
+    def get_latest_price(self) -> Optional[PriceHistory]:
         """取得最新價格"""
         return self.price_history.order_by(
             self.price_history.property.mapper.class_.date.desc()
         ).first()
-    
-    def get_price_range(self, days: int = 30) -> List['PriceHistory']:
+
+    def get_price_range(self, days: int = 30) -> List[PriceHistory]:
         """取得指定天數的價格數據"""
         from datetime import date, timedelta
         start_date = date.today() - timedelta(days=days)
@@ -118,15 +125,15 @@ class Stock(BaseModel, TimestampMixin):
             self.price_history.property.mapper.class_.date.desc()
         ).all()
     
-    def get_indicators_by_type(self, indicator_type: str, limit: int = 30) -> List['TechnicalIndicator']:
+    def get_indicators_by_type(self, indicator_type: str, limit: int = 30) -> List[TechnicalIndicator]:
         """取得指定類型的技術指標"""
         return self.technical_indicators.filter(
             self.technical_indicators.property.mapper.class_.indicator_type == indicator_type
         ).order_by(
             self.technical_indicators.property.mapper.class_.date.desc()
         ).limit(limit).all()
-    
-    def get_recent_signals(self, limit: int = 10) -> List['TradingSignal']:
+
+    def get_recent_signals(self, limit: int = 10) -> List[TradingSignal]:
         """取得最近的交易信號"""
         return self.trading_signals.order_by(
             self.trading_signals.property.mapper.class_.date.desc()

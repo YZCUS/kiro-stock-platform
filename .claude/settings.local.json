@@ -82,7 +82,8 @@
       "Bash(git mv:*)",
       "Bash(mv:*)",
       "Bash(git add:*)",
-      "Bash(git check-ignore:*)"
+      "Bash(git check-ignore:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix: 修復 CI flake8 和 ESLint 配置錯誤\n\n- 新增 frontend/.eslintrc.json 配置檔案\n- 從嚴格的 flake8 檢查中排除 legacy 測試檔案和模型檔案\n- 保持程式碼品質檢查但避免對舊代碼的誤報\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []
