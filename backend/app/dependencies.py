@@ -2,10 +2,25 @@
 依賴注入容器 - 統一服務註冊與管理
 實現控制反轉 (IoC) 和依賴注入 (DI) 模式
 """
+from __future__ import annotations
+
 from functools import lru_cache
-from typing import Generator, Optional
+from typing import Generator, Optional, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends
+
+if TYPE_CHECKING:
+    from domain.repositories.price_data_source_interface import IPriceDataSource
+    from domain.repositories.stock_repository_interface import IStockRepository
+    from domain.repositories.price_history_repository_interface import IPriceHistoryRepository
+    from domain.repositories.technical_indicator_repository_interface import ITechnicalIndicatorRepository
+    from domain.repositories.trading_signal_repository_interface import ITradingSignalRepository
+    from domain.services.stock_service import StockService
+    from domain.services.technical_analysis_service import TechnicalAnalysisService
+    from domain.services.data_collection_service import DataCollectionService
+    from domain.services.trading_signal_service import TradingSignalService
+    from domain.services.data_validation_service import DataValidationService
+    from infrastructure.realtime.websocket_service import WebSocketService
 
 from app.settings import Settings, get_settings
 from infrastructure.cache.redis_cache_service import RedisCacheService, ICacheService

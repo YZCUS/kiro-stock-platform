@@ -2,6 +2,8 @@
 """
 技術指標存儲和快取功能測試 - Legacy indicator storage tests marked as xfail for Clean Architecture
 """
+import asyncio
+import sys
 import pytest
 
 # TODO: rewrite indicator storage tests for Clean Architecture with domain services

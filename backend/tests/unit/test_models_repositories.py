@@ -14,9 +14,12 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from infrastructure.persistence.stock_repository import StockRepository
 from infrastructure.persistence.price_history_repository import PriceHistoryRepository
-# 避免直接導入 domain models，使用 Mock 替代
-# from domain.models.stock import Stock
-# from domain.models.price_history import PriceHistory
+from infrastructure.persistence.technical_indicator_repository import TechnicalIndicatorRepository
+
+# Import domain models for type hints in tests
+from models.domain.stock import Stock
+from models.domain.price_history import PriceHistory
+from models.domain.technical_indicator import TechnicalIndicator
 
 
 class TestStockRepository:
@@ -40,7 +43,7 @@ class TestStockRepository:
         self.mock_session.execute.return_value = mock_result
 
         # 執行測試
-        result = await self.crud_stock.get_by_symbol(
+        result = await self.stock_repo.get_by_symbol(
             self.mock_session, symbol='2330.TW', market='TW'
         )
 
@@ -58,7 +61,7 @@ class TestStockRepository:
         self.mock_session.execute.return_value = mock_result
 
         # 執行測試
-        result = await self.crud_stock.get_by_symbol(
+        result = await self.stock_repo.get_by_symbol(
             self.mock_session, symbol='9999.TW', market='TW'
         )
 
@@ -79,7 +82,7 @@ class TestStockRepository:
         self.mock_session.execute.return_value = mock_result
 
         # 執行測試
-        result = await self.crud_stock.get_by_market(
+        result = await self.stock_repo.get_by_market(
             self.mock_session, market='TW', skip=0, limit=100
         )
 
@@ -101,7 +104,7 @@ class TestStockRepository:
         self.mock_session.execute.return_value = mock_result
 
         # 執行測試
-        result = await self.crud_stock.search_stocks(
+        result = await self.stock_repo.search_stocks(
             self.mock_session, query='233', limit=20
         )
 
@@ -122,7 +125,7 @@ class TestStockRepository:
         self.mock_session.execute.return_value = mock_result
 
         # 執行測試
-        result = await self.crud_stock.search_stocks(
+        result = await self.stock_repo.search_stocks(
             self.mock_session, query='台積', limit=20
         )
 
@@ -139,16 +142,16 @@ class TestStockRepository:
         mock_normalize.return_value = '2330.TW'
 
         # Mock 檢查不存在
-        self.crud_stock.get_by_symbol = AsyncMock(return_value=None)
+        self.stock_repo.get_by_symbol = AsyncMock(return_value=None)
 
         # Mock 創建成功
         mock_created_stock = Mock()
         mock_created_stock.symbol = '2330.TW'
         mock_created_stock.market = 'TW'
-        self.crud_stock.create = AsyncMock(return_value=mock_created_stock)
+        self.stock_repo.create = AsyncMock(return_value=mock_created_stock)
 
         # 執行測試
-        result = await self.crud_stock.create_stock(
+        result = await self.stock_repo.create_stock(
             self.mock_session, symbol='2330.tw', market='TW', name='台積電'
         )
 
@@ -166,7 +169,7 @@ class TestStockRepository:
 
         # 執行測試並期待異常
         with pytest.raises(ValueError, match="無效的股票代號格式"):
-            await self.crud_stock.create_stock(
+            await self.stock_repo.create_stock(
                 self.mock_session, symbol='invalid', market='TW'
             )
 
@@ -180,11 +183,11 @@ class TestStockRepository:
 
         # Mock 股票已存在
         existing_stock = Mock()
-        self.crud_stock.get_by_symbol = AsyncMock(return_value=existing_stock)
+        self.stock_repo.get_by_symbol = AsyncMock(return_value=existing_stock)
 
         # 執行測試並期待異常
         with pytest.raises(ValueError, match="股票已存在"):
-            await self.crud_stock.create_stock(
+            await self.stock_repo.create_stock(
                 self.mock_session, symbol='2330.TW', market='TW'
             )
 
@@ -204,7 +207,7 @@ class TestStockRepository:
         self.mock_session.execute.return_value = mock_result
 
         # 執行測試
-        result = await self.crud_stock.get_with_latest_price(
+        result = await self.stock_repo.get_with_latest_price(
             self.mock_session, stock_id=1
         )
 
@@ -248,7 +251,7 @@ class TestPriceHistoryRepository:
         # 執行測試
         start_date = date(2024, 1, 1)
         end_date = date(2024, 1, 2)
-        result = await self.crud_price.get_by_stock_and_date_range(
+        result = await self.price_repo.get_by_stock_and_date_range(
             self.mock_session, stock_id=1, start_date=start_date, end_date=end_date
         )
 
@@ -272,7 +275,7 @@ class TestPriceHistoryRepository:
         self.mock_session.execute.return_value = mock_result
 
         # 執行測試
-        result = await self.crud_price.get_latest_price(self.mock_session, stock_id=1)
+        result = await self.price_repo.get_latest_price(self.mock_session, stock_id=1)
 
         # 驗證結果
         assert result == mock_latest_price
@@ -281,11 +284,11 @@ class TestPriceHistoryRepository:
     async def test_create_or_update_price_new_record(self):
         """測試創建新的價格記錄"""
         # Mock 價格不存在
-        self.crud_price.get_by_stock_and_date = AsyncMock(return_value=None)
+        self.price_repo.get_by_stock_and_date = AsyncMock(return_value=None)
 
         # Mock 創建成功
         mock_created_price = Mock()
-        self.crud_price.create = AsyncMock(return_value=mock_created_price)
+        self.price_repo.create = AsyncMock(return_value=mock_created_price)
 
         # 執行測試
         price_data = {
@@ -298,23 +301,23 @@ class TestPriceHistoryRepository:
             'volume': 1000000
         }
 
-        result = await self.crud_price.create_or_update_price(
+        result = await self.price_repo.create_or_update_price(
             self.mock_session, price_data
         )
 
         # 驗證結果
         assert result == mock_created_price
-        self.crud_price.create.assert_called_once()
+        self.price_repo.create.assert_called_once()
 
     async def test_create_or_update_price_existing_record(self):
         """測試更新既有的價格記錄"""
         # Mock 價格已存在
         existing_price = Mock()
-        self.crud_price.get_by_stock_and_date = AsyncMock(return_value=existing_price)
+        self.price_repo.get_by_stock_and_date = AsyncMock(return_value=existing_price)
 
         # Mock 更新成功
         mock_updated_price = Mock()
-        self.crud_price.update = AsyncMock(return_value=mock_updated_price)
+        self.price_repo.update = AsyncMock(return_value=mock_updated_price)
 
         # 執行測試
         price_data = {
@@ -323,13 +326,13 @@ class TestPriceHistoryRepository:
             'close_price': 103.0
         }
 
-        result = await self.crud_price.create_or_update_price(
+        result = await self.price_repo.create_or_update_price(
             self.mock_session, price_data
         )
 
         # 驗證結果
         assert result == mock_updated_price
-        self.crud_price.update.assert_called_once()
+        self.price_repo.update.assert_called_once()
 
     async def test_bulk_create_prices_success(self):
         """測試批次創建價格記錄"""
@@ -348,10 +351,10 @@ class TestPriceHistoryRepository:
         ]
 
         # Mock 創建成功
-        self.crud_price.create_or_update_price = AsyncMock(return_value=Mock())
+        self.price_repo.create_or_update_price = AsyncMock(return_value=Mock())
 
         # 執行測試
-        result = await self.crud_price.bulk_create_prices(
+        result = await self.price_repo.bulk_create_prices(
             self.mock_session, prices_data
         )
 
@@ -376,7 +379,7 @@ class TestPriceHistoryRepository:
         # 執行測試
         start_date = date(2024, 1, 1)
         end_date = date(2024, 1, 3)
-        result = await self.crud_price.get_missing_dates(
+        result = await self.price_repo.get_missing_dates(
             self.mock_session, stock_id=1, start_date=start_date, end_date=end_date
         )
 
@@ -384,14 +387,13 @@ class TestPriceHistoryRepository:
         assert date(2024, 1, 2) in result
 
 
-class TestRepositoryIntegration:
-    """Repository 整合測試類"""
+class TestTechnicalIndicatorRepository:
+    """技術指標 Repository 測試類"""
 
     def setup_method(self):
         """測試前設置"""
         self.mock_session = AsyncMock()
-        self.stock_repo = StockRepository(self.mock_session)
-        self.price_repo = PriceHistoryRepository(self.mock_session)
+        self.indicator_repo = TechnicalIndicatorRepository(self.mock_session)
 
     async def test_get_by_stock_and_indicator_type_success(self):
         """測試成功取得股票特定指標"""
@@ -419,7 +421,77 @@ class TestRepositoryIntegration:
         self.mock_session.execute.return_value = mock_result
 
         # 執行測試
-        result = await self.crud_indicator.get_by_stock_and_indicator_type(
+        result = await self.indicator_repo.get_by_stock_and_indicator_type(
+            self.mock_session, stock_id=1, indicator_type='RSI'
+        )
+
+        # 驗證結果
+        assert len(result) == 2
+        assert all(indicator.indicator_type == 'RSI' for indicator in result)
+
+    async def test_get_latest_indicator_success(self):
+        """測試成功取得最新指標值"""
+        # Mock 最新指標
+        mock_latest_indicator = Mock(
+            spec=TechnicalIndicator,
+            stock_id=1,
+            indicator_type='RSI',
+            value=72.0,
+            date=date.today()
+        )
+
+        # Mock 資料庫查詢結果
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = mock_latest_indicator
+        self.mock_session.execute.return_value = mock_result
+
+        # 執行測試
+        result = await self.indicator_repo.get_latest_indicator(
+            self.mock_session, stock_id=1, indicator_type='RSI'
+        )
+
+        # 驗證結果
+        assert result == mock_latest_indicator
+        assert result.value == 72.0
+
+
+class TestRepositoryIntegration:
+    """Repository 整合測試類"""
+
+    def setup_method(self):
+        """測試前設置"""
+        self.mock_session = AsyncMock()
+        self.stock_repo = StockRepository(self.mock_session)
+        self.price_repo = PriceHistoryRepository(self.mock_session)
+        self.indicator_repo = TechnicalIndicatorRepository(self.mock_session)
+
+    async def test_get_by_stock_and_indicator_type_success(self):
+        """測試成功取得股票特定指標"""
+        # Mock 指標數據
+        mock_indicators = [
+            Mock(
+                spec=TechnicalIndicator,
+                stock_id=1,
+                indicator_type='RSI',
+                value=65.5,
+                date=date.today()
+            ),
+            Mock(
+                spec=TechnicalIndicator,
+                stock_id=1,
+                indicator_type='RSI',
+                value=70.2,
+                date=date.today() - timedelta(days=1)
+            )
+        ]
+
+        # Mock 資料庫查詢結果
+        mock_result = Mock()
+        mock_result.scalars.return_value.all.return_value = mock_indicators
+        self.mock_session.execute.return_value = mock_result
+
+        # 執行測試
+        result = await self.indicator_repo.get_by_stock_and_indicator_type(
             self.mock_session, stock_id=1, indicator_type='RSI'
         )
 
@@ -444,7 +516,7 @@ class TestRepositoryIntegration:
         self.mock_session.execute.return_value = mock_result
 
         # 執行測試
-        result = await self.crud_indicator.get_latest_indicator(
+        result = await self.indicator_repo.get_latest_indicator(
             self.mock_session, stock_id=1, indicator_type='RSI'
         )
 
@@ -472,12 +544,12 @@ class TestRepositoryIntegration:
         ]
 
         # Mock 創建成功
-        self.crud_indicator.create_or_update_indicator = AsyncMock(
+        self.indicator_repo.create_or_update_indicator = AsyncMock(
             return_value=Mock(spec=TechnicalIndicator)
         )
 
         # 執行測試
-        result = await self.crud_indicator.bulk_create_indicators(
+        result = await self.indicator_repo.bulk_create_indicators(
             self.mock_session, indicators_data
         )
 
@@ -489,11 +561,11 @@ class TestRepositoryIntegration:
     async def test_create_or_update_indicator_new_record(self):
         """測試創建新的指標記錄"""
         # Mock 指標不存在
-        self.crud_indicator.get_by_stock_date_and_type = AsyncMock(return_value=None)
+        self.indicator_repo.get_by_stock_date_and_type = AsyncMock(return_value=None)
 
         # Mock 創建成功
         mock_created_indicator = Mock(spec=TechnicalIndicator)
-        self.crud_indicator.create = AsyncMock(return_value=mock_created_indicator)
+        self.indicator_repo.create = AsyncMock(return_value=mock_created_indicator)
 
         # 執行測試
         indicator_data = {
@@ -503,13 +575,13 @@ class TestRepositoryIntegration:
             'date': date.today()
         }
 
-        result = await self.crud_indicator.create_or_update_indicator(
+        result = await self.indicator_repo.create_or_update_indicator(
             self.mock_session, indicator_data
         )
 
         # 驗證結果
         assert result == mock_created_indicator
-        self.crud_indicator.create.assert_called_once()
+        self.indicator_repo.create.assert_called_once()
 
     async def test_get_stock_indicators_by_date_range_success(self):
         """測試取得指定期間的股票指標"""
@@ -539,7 +611,7 @@ class TestRepositoryIntegration:
         # 執行測試
         start_date = date(2024, 1, 1)
         end_date = date(2024, 1, 31)
-        result = await self.crud_indicator.get_stock_indicators_by_date_range(
+        result = await self.indicator_repo.get_stock_indicators_by_date_range(
             self.mock_session,
             stock_id=1,
             start_date=start_date,
@@ -558,7 +630,7 @@ async def run_all_tests():
 
     # 測試股票 CRUD
     print("\n=== 測試股票 CRUD ===")
-    test_stock_crud = TestCRUDStock()
+    test_stock_crud = TestStockRepository()
 
     try:
         test_stock_crud.setup_method()
@@ -596,7 +668,7 @@ async def run_all_tests():
 
     # 測試價格歷史 CRUD
     print("\n=== 測試價格歷史 CRUD ===")
-    test_price_crud = TestCRUDPriceHistory()
+    test_price_crud = TestPriceHistoryRepository()
 
     try:
         test_price_crud.setup_method()
@@ -625,7 +697,7 @@ async def run_all_tests():
 
     # 測試技術指標 CRUD
     print("\n=== 測試技術指標 CRUD ===")
-    test_indicator_crud = TestCRUDTechnicalIndicator()
+    test_indicator_crud = TestTechnicalIndicatorRepository()
 
     try:
         test_indicator_crud.setup_method()

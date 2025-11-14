@@ -127,9 +127,15 @@ standalone_admin_password.txt
 # Data files
 data/
 *.csv
-*.json
 *.parquet
 backups/
+
+# JSON data files (exclude data files but keep package.json and config files)
+data/**/*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!jsconfig.json
 
 # Security
 *.pem
