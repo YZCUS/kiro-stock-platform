@@ -31,9 +31,6 @@ RUN mkdir -p ./public
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
-# Install all dependencies (including devDependencies for build)
-RUN npm ci
-
 # Build the application
 RUN npm run build
 
