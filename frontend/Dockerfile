@@ -22,13 +22,15 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY package.json package-lock.json* ./
 COPY tsconfig.json ./
 COPY next.config.js ./
-COPY tailwind.config.ts ./
-COPY postcss.config.mjs ./
+COPY tailwind.config.js ./
+COPY postcss.config.js ./
 COPY jest-dom.d.ts* ./
 COPY next-env.d.ts* ./
 COPY .env* ./
-COPY public ./public
 COPY src ./src
+
+# Create empty public directory if it doesn't exist
+RUN mkdir -p ./public
 
 # Set build-time environment variables
 ENV NEXT_TELEMETRY_DISABLED 1
@@ -51,7 +53,7 @@ ENV NEXT_TELEMETRY_DISABLED 1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy necessary files
+# Copy public directory (create if doesn't exist)
 COPY --from=builder /app/public ./public
 
 # Set the correct permission for prerender cache
