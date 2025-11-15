@@ -10,7 +10,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -20,6 +19,13 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Python lib directories (exclude Python lib but not frontend src/lib)
+backend/lib/
+airflow/lib/
+venv/lib/
+.venv/lib/
+env/lib/
 
 # Virtual environments
 venv/
