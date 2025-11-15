@@ -83,6 +83,10 @@ const nextConfig = {
 
   // Webpack configuration
   webpack: (config, { buildId, dev, isServer, defaultLoaders, nextRuntime, webpack }) => {
+    // Add path alias resolution for @/ imports
+    const path = require('path');
+    config.resolve.alias['@'] = path.resolve(__dirname, 'src');
+
     // Production optimizations
     if (!dev) {
       // Enable webpack bundle analyzer in production (when env var is set)

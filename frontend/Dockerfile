@@ -21,12 +21,15 @@ COPY --from=dependencies /app/node_modules ./node_modules
 # Copy all project files
 COPY . .
 
+# Debug: List files to verify tsconfig.json exists
+RUN ls -la && echo "--- Checking tsconfig.json ---" && cat tsconfig.json
+
 # Ensure public directory exists
 RUN mkdir -p ./public
 
 # Set build-time environment variables
-ENV NEXT_TELEMETRY_DISABLED 1
-ENV NODE_ENV production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
 
 # Install all dependencies (including devDependencies for build)
 RUN npm ci
@@ -38,8 +41,8 @@ RUN npm run build
 FROM node:18-alpine AS runner
 WORKDIR /app
 
-ENV NODE_ENV production
-ENV NEXT_TELEMETRY_DISABLED 1
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 
 # Create non-root user for security
 RUN addgroup --system --gid 1001 nodejs
@@ -63,8 +66,8 @@ USER nextjs
 # Expose port
 EXPOSE 3000
 
-ENV PORT 3000
-ENV HOSTNAME "0.0.0.0"
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
