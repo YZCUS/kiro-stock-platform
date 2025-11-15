@@ -186,7 +186,8 @@ class RedisClient:
         """設定快取值"""
         # 如果沒有指定過期時間，使用預設值
         if expire is None:
-            expire = getattr(settings, "CACHE_EXPIRE_SECONDS", 3600)  # 預設 1 小時
+            settings = get_settings()
+            expire = getattr(settings, "CACHE_EXPIRE_SECONDS", 3600) if settings else 3600  # 預設 1 小時
 
         json_value = json.dumps(value, ensure_ascii=False, default=str)
         await self.redis_client.set(key, json_value, ex=expire)
