@@ -188,15 +188,17 @@ jobs:
           npm install -g lighthouse
           mkdir -p lighthouse-reports
 
-          # 測試主要頁面（Mobile）
+          # Test main pages with mobile emulation
           lighthouse http://localhost:3000 \
-            --preset=mobile \
+            --form-factor=mobile \
+            --screenEmulation.mobile=true \
             --output=html,json \
             --output-path=./lighthouse-reports/mobile-home \
             --chrome-flags="--no-sandbox --disable-dev-shm-usage --headless"
 
           lighthouse http://localhost:3000/login \
-            --preset=mobile \
+            --form-factor=mobile \
+            --screenEmulation.mobile=true \
             --output=html,json \
             --output-path=./lighthouse-reports/mobile-login \
             --chrome-flags="--no-sandbox --disable-dev-shm-usage --headless"
