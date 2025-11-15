@@ -17,7 +17,18 @@ WORKDIR /app
 
 # Copy dependencies from previous stage
 COPY --from=dependencies /app/node_modules ./node_modules
-COPY . .
+
+# Copy all necessary files for build (explicit to ensure all files are included)
+COPY package.json package-lock.json* ./
+COPY tsconfig.json ./
+COPY next.config.js ./
+COPY tailwind.config.ts ./
+COPY postcss.config.mjs ./
+COPY jest-dom.d.ts* ./
+COPY next-env.d.ts* ./
+COPY .env* ./
+COPY public ./public
+COPY src ./src
 
 # Set build-time environment variables
 ENV NEXT_TELEMETRY_DISABLED 1
