@@ -35,13 +35,17 @@ class TestRedisClient(unittest.TestCase):
         self.assertFalse(client._is_connected)
         self.assertFalse(client.is_connected)
 
-    @patch('core.redis.redis.ConnectionPool.from_url')
-    @patch('core.redis.redis.Redis')
-    @patch('core.redis.settings')
-    async def test_connect_success(self, mock_settings, mock_redis_cls, mock_pool_from_url):
+    @patch("core.redis.redis.ConnectionPool.from_url")
+    @patch("core.redis.redis.Redis")
+    @patch("core.redis.get_settings")
+    async def test_connect_success(
+        self, mock_get_settings, mock_redis_cls, mock_pool_from_url
+    ):
         """測試Redis連接 - 成功"""
         # 設置模擬
-        mock_settings.REDIS_URL = "redis://localhost:6379"
+        mock_settings = Mock()
+        mock_settings.redis.url = "redis://localhost:6379"
+        mock_get_settings.return_value = mock_settings
 
         mock_pool = AsyncMock()
         mock_pool_from_url.return_value = mock_pool
@@ -62,7 +66,7 @@ class TestRedisClient(unittest.TestCase):
             retry_on_timeout=True,
             socket_keepalive=True,
             socket_keepalive_options={},
-            health_check_interval=30
+            health_check_interval=30,
         )
 
         # 驗證Redis客戶端創建
@@ -75,11 +79,13 @@ class TestRedisClient(unittest.TestCase):
         self.assertTrue(self.redis_client._is_connected)
         self.assertTrue(self.redis_client.is_connected)
 
-    @patch('core.redis.redis.from_url')
-    @patch('core.redis.settings')
-    async def test_connect_failure(self, mock_settings, mock_from_url):
+    @patch("core.redis.redis.from_url")
+    @patch("core.redis.get_settings")
+    async def test_connect_failure(self, mock_get_settings, mock_from_url):
         """測試Redis連接 - 失敗"""
-        mock_settings.REDIS_URL = "redis://invalid:6379"
+        mock_settings = Mock()
+        mock_settings.redis.url = "redis://invalid:6379"
+        mock_get_settings.return_value = mock_settings
         mock_redis = AsyncMock()
         mock_from_url.return_value = mock_redis
         mock_redis.ping.side_effect = Exception("Connection failed")
@@ -157,10 +163,12 @@ class TestRedisClient(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    @patch('core.redis.settings')
-    async def test_set_success(self, mock_settings):
+    @patch("core.redis.get_settings")
+    async def test_set_success(self, mock_get_settings):
         """測試設定快取值 - 成功"""
+        mock_settings = Mock()
         mock_settings.CACHE_EXPIRE_SECONDS = 1800
+        mock_get_settings.return_value = mock_settings
         mock_redis = AsyncMock()
         self.redis_client.redis_client = mock_redis
         mock_redis.set.return_value = True
@@ -173,10 +181,12 @@ class TestRedisClient(unittest.TestCase):
         mock_redis.set.assert_called_once_with("test_key", expected_json, ex=1800)
         self.assertTrue(result)
 
-    @patch('core.redis.settings')
-    async def test_set_with_custom_expire(self, mock_settings):
+    @patch("core.redis.get_settings")
+    async def test_set_with_custom_expire(self, mock_get_settings):
         """測試設定快取值 - 自定義過期時間"""
+        mock_settings = Mock()
         mock_settings.CACHE_EXPIRE_SECONDS = 1800
+        mock_get_settings.return_value = mock_settings
         mock_redis = AsyncMock()
         self.redis_client.redis_client = mock_redis
         mock_redis.set.return_value = True
@@ -314,8 +324,8 @@ class TestRedisConnectionManagement(unittest.TestCase):
 
         self.assertFalse(result)
 
-    @patch.object(RedisClient, 'disconnect')
-    @patch.object(RedisClient, 'connect')
+    @patch.object(RedisClient, "disconnect")
+    @patch.object(RedisClient, "connect")
     async def test_reconnect(self, mock_connect, mock_disconnect):
         """測試重新連接"""
         await self.redis_client._reconnect()
@@ -346,7 +356,7 @@ class TestRedisConnectionManagement(unittest.TestCase):
         self.mock_redis.ping.return_value = True
 
         # Mock _ensure_connection method
-        with patch.object(self.redis_client, '_ensure_connection', return_value=True):
+        with patch.object(self.redis_client, "_ensure_connection", return_value=True):
             result = await self.redis_client.ping()
 
         self.assertTrue(result)
@@ -390,20 +400,23 @@ class TestRedisRetryMechanism(unittest.TestCase):
         self.redis_client.redis_client = self.mock_redis
         self.redis_client._is_connected = True
 
-    @patch('core.redis.asyncio.sleep')
-    @patch.object(RedisClient, '_ensure_connection')
-    @patch.object(RedisClient, '_reconnect')
-    async def test_retry_on_connection_error(self, mock_reconnect, mock_ensure, mock_sleep):
+    @patch("core.redis.asyncio.sleep")
+    @patch.object(RedisClient, "_ensure_connection")
+    @patch.object(RedisClient, "_reconnect")
+    async def test_retry_on_connection_error(
+        self, mock_reconnect, mock_ensure, mock_sleep
+    ):
         """測試連接錯誤時的重試機制"""
         # 設置 _ensure_connection 在第一次調用時返回 True
         mock_ensure.return_value = True
 
         # 設置第一次和第二次調用失敗，第三次成功
         import redis.asyncio as redis
+
         self.mock_redis.get.side_effect = [
             redis.ConnectionError("Connection lost"),
             redis.ConnectionError("Connection lost"),
-            "success"
+            "success",
         ]
 
         result = await self.redis_client.get("test_key")
@@ -413,7 +426,7 @@ class TestRedisRetryMechanism(unittest.TestCase):
         self.assertEqual(mock_reconnect.call_count, 2)
         self.assertEqual(mock_sleep.call_count, 2)
 
-    @patch.object(RedisClient, '_ensure_connection')
+    @patch.object(RedisClient, "_ensure_connection")
     async def test_no_retry_on_non_redis_error(self, mock_ensure):
         """測試非Redis錯誤時不重試"""
         mock_ensure.return_value = True
@@ -425,11 +438,12 @@ class TestRedisRetryMechanism(unittest.TestCase):
         self.assertEqual(self.mock_redis.get.call_count, 1)
         self.assertIsNone(result)
 
-    @patch.object(RedisClient, '_ensure_connection')
+    @patch.object(RedisClient, "_ensure_connection")
     async def test_max_retries_exceeded(self, mock_ensure):
         """測試超過最大重試次數"""
         mock_ensure.return_value = True
         import redis.asyncio as redis
+
         self.mock_redis.get.side_effect = redis.ConnectionError("Persistent error")
 
         result = await self.redis_client.get("test_key")
@@ -454,21 +468,26 @@ class TestRedisClientIntegration(unittest.TestCase):
         """測試Redis客戶端導入"""
         try:
             from core.redis import RedisClient, redis_client
+
             self.assertIsNotNone(RedisClient)
             self.assertIsNotNone(redis_client)
         except ImportError as e:
             self.fail(f"導入Redis模組失敗: {e}")
 
-    @patch('core.redis.settings')
-    def test_configuration_access(self, mock_settings):
+    @patch("core.redis.get_settings")
+    def test_configuration_access(self, mock_get_settings):
         """測試配置訪問"""
-        mock_settings.REDIS_URL = "redis://localhost:6379"
+        mock_settings = Mock()
+        mock_settings.redis = Mock()
+        mock_settings.redis.url = "redis://localhost:6379"
         mock_settings.CACHE_EXPIRE_SECONDS = 1800
+        mock_get_settings.return_value = mock_settings
 
-        from core.redis import settings
+        from core.redis import get_settings
 
         # 驗證設定可以正確訪問
-        self.assertEqual(settings.REDIS_URL, "redis://localhost:6379")
+        settings = get_settings()
+        self.assertEqual(settings.redis.url, "redis://localhost:6379")
         self.assertEqual(settings.CACHE_EXPIRE_SECONDS, 1800)
 
 
@@ -538,9 +557,7 @@ async def run_all_tests():
     print("=" * 60)
 
     # 同步測試
-    sync_test_classes = [
-        TestRedisClientIntegration
-    ]
+    sync_test_classes = [TestRedisClientIntegration]
 
     for test_class in sync_test_classes:
         print(f"\n執行 {test_class.__name__}...")
@@ -557,7 +574,7 @@ async def run_all_tests():
         TestRedisClient,
         TestRedisConnectionManagement,
         TestRedisRetryMechanism,
-        TestRedisClientDataTypes
+        TestRedisClientDataTypes,
     ]
 
     for test_class in async_test_classes:
@@ -566,8 +583,9 @@ async def run_all_tests():
 
         # 獲取所有測試方法
         test_methods = [
-            method for method in dir(test_instance)
-            if method.startswith('test_') and callable(getattr(test_instance, method))
+            method
+            for method in dir(test_instance)
+            if method.startswith("test_") and callable(getattr(test_instance, method))
         ]
 
         for method_name in test_methods:

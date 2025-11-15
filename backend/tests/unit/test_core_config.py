@@ -16,6 +16,8 @@ import importlib.util
 settings_path = BACKEND_ROOT / "app" / "settings.py"
 spec = importlib.util.spec_from_file_location("app.settings", settings_path)
 settings_module = importlib.util.module_from_spec(spec)
+# 加入 sys.modules 以支援 reload()
+sys.modules['app.settings'] = settings_module
 spec.loader.exec_module(settings_module)
 Settings = settings_module.Settings
 
