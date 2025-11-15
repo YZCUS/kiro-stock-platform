@@ -71,7 +71,7 @@ jobs:
           pkill -f "next start" || true
 
       - name: Upload Lighthouse Reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always()
         with:
           name: lighthouse-reports
@@ -204,7 +204,7 @@ jobs:
             --chrome-flags="--no-sandbox --disable-dev-shm-usage --headless"
 
       - name: Upload Mobile Reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always()
         with:
           name: lighthouse-mobile-reports
