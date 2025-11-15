@@ -11,13 +11,21 @@ import pytest
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BACKEND_ROOT))
 
-# 直接從檔案路徑導入，避免模組解析問題
+# 確保 app 模組存在於 sys.modules 中
 import importlib.util
+import types
+
+# 創建 app 模組
+app_module = types.ModuleType("app")
+app_module.__path__ = [str(BACKEND_ROOT / "app")]
+sys.modules["app"] = app_module
+
+# 直接從檔案路徑導入，避免模組解析問題
 settings_path = BACKEND_ROOT / "app" / "settings.py"
 spec = importlib.util.spec_from_file_location("app.settings", settings_path)
 settings_module = importlib.util.module_from_spec(spec)
 # 加入 sys.modules 以支援 reload()
-sys.modules['app.settings'] = settings_module
+sys.modules["app.settings"] = settings_module
 spec.loader.exec_module(settings_module)
 Settings = settings_module.Settings
 
