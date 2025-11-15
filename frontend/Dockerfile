@@ -18,18 +18,10 @@ WORKDIR /app
 # Copy dependencies from previous stage
 COPY --from=dependencies /app/node_modules ./node_modules
 
-# Copy all necessary files for build (explicit to ensure all files are included)
-COPY package.json package-lock.json* ./
-COPY tsconfig.json ./
-COPY next.config.js ./
-COPY tailwind.config.js ./
-COPY postcss.config.js ./
-COPY jest-dom.d.ts* ./
-COPY next-env.d.ts* ./
-COPY .env* ./
-COPY src ./src
+# Copy all project files
+COPY . .
 
-# Create empty public directory if it doesn't exist
+# Ensure public directory exists
 RUN mkdir -p ./public
 
 # Set build-time environment variables
