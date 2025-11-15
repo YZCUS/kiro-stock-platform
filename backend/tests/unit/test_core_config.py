@@ -11,7 +11,8 @@ import pytest
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BACKEND_ROOT))
 
-from app import settings as settings_module
+from app.settings import Settings
+import app.settings as settings_module
 
 
 def make_settings():

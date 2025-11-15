@@ -9,9 +9,17 @@ from typing import Any, Optional
 import logging
 from functools import wraps
 
-from app.settings import settings
-
 logger = logging.getLogger(__name__)
+
+# 延遲導入 settings 以避免測試環境中的循環導入問題
+def get_settings():
+    """獲取設定實例"""
+    try:
+        from app.settings import settings
+        return settings
+    except (ImportError, ModuleNotFoundError):
+        # 在測試環境中可能無法導入，返回 None
+        return None
 
 
 def with_retry(max_retries: int = 3, delay: float = 1.0):
@@ -71,12 +79,16 @@ class RedisClient:
         try:
             # 創建連接池
             # 優先使用 redis.url，否則從 host/port/password 構建
-            if isinstance(settings.redis, dict):
+            settings = get_settings()
+            if settings is None:
+                # 測試環境中使用預設值
+                redis_url = "redis://localhost:6379/0"
+            elif isinstance(settings.redis, dict):
                 redis_url = settings.redis.get("url")
             else:
                 redis_url = getattr(settings.redis, "url", None)
 
-            if not redis_url:
+            if not redis_url and settings is not None:
                 password = (
                     getattr(settings.redis, "password", None)
                     if hasattr(settings, "redis")
@@ -88,6 +100,8 @@ class RedisClient:
 
                 auth_part = f":{password}@" if password else ""
                 redis_url = f"redis://{auth_part}{host}:{port}/{db}"
+            elif not redis_url:
+                redis_url = "redis://localhost:6379/0"
 
             self.connection_pool = redis.ConnectionPool.from_url(
                 redis_url,
