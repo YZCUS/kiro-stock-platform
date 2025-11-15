@@ -11,11 +11,13 @@ from functools import wraps
 
 logger = logging.getLogger(__name__)
 
+
 # 延遲導入 settings 以避免測試環境中的循環導入問題
 def get_settings():
     """獲取設定實例"""
     try:
         from app.settings import settings
+
         return settings
     except (ImportError, ModuleNotFoundError):
         # 在測試環境中可能無法導入，返回 None
@@ -187,7 +189,9 @@ class RedisClient:
         # 如果沒有指定過期時間，使用預設值
         if expire is None:
             settings = get_settings()
-            expire = getattr(settings, "CACHE_EXPIRE_SECONDS", 3600) if settings else 3600  # 預設 1 小時
+            expire = (
+                getattr(settings, "CACHE_EXPIRE_SECONDS", 3600) if settings else 3600
+            )  # 預設 1 小時
 
         json_value = json.dumps(value, ensure_ascii=False, default=str)
         await self.redis_client.set(key, json_value, ex=expire)
