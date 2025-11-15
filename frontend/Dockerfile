@@ -1,7 +1,7 @@
 # Multi-stage Docker build for production optimization
 
 # Stage 1: Dependencies
-FROM node:18-alpine AS dependencies
+FROM node:25-alpine AS dependencies
 WORKDIR /app
 
 # Install dependencies based on the preferred package manager
@@ -12,7 +12,7 @@ RUN \
   fi
 
 # Stage 2: Build
-FROM node:18-alpine AS builder
+FROM node:25-alpine AS builder
 WORKDIR /app
 
 # Copy dependencies from previous stage
@@ -35,7 +35,7 @@ ENV NODE_ENV=production
 RUN npm run build
 
 # Stage 3: Runtime
-FROM node:18-alpine AS runner
+FROM node:25-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
