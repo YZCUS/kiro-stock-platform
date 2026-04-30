@@ -3,13 +3,17 @@
 Core Database Tests - Clean Architecture
 Testing database connection, session management, and configuration
 """
-import pytest
+import inspect
 import sys
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from pathlib import Path
+from unittest.mock import Mock, AsyncMock, patch
+
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 
-sys.path.append('/home/opc/projects/kiro-stock-platform/backend')
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(BACKEND_ROOT))
 
 
 class TestDatabaseConfiguration:
@@ -17,43 +21,34 @@ class TestDatabaseConfiguration:
 
     def test_database_url_conversion(self):
         """Test database URL conversion from PostgreSQL to AsyncPG"""
+        from core.database_url import make_async_database_url
+
         original_url = "postgresql://user:pass@localhost:5432/test"
         expected_url = "postgresql+asyncpg://user:pass@localhost:5432/test"
 
-        converted_url = original_url.replace("postgresql://", "postgresql+asyncpg://")
+        converted_url = make_async_database_url(original_url)
         assert converted_url == expected_url
 
     def test_metadata_naming_convention(self):
         """Test SQLAlchemy metadata naming convention"""
-        try:
-            from core.database import Base
+        from core.database import Base
 
-            expected_convention = {
-                "ix": "ix_%(column_0_label)s",
-                "uq": "uq_%(table_name)s_%(column_0_name)s",
-                "ck": "ck_%(table_name)s_%(constraint_name)s",
-                "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-                "pk": "pk_%(table_name)s"
-            }
+        expected_convention = {
+            "ix": "ix_%(column_0_label)s",
+            "uq": "uq_%(table_name)s_%(column_0_name)s",
+            "ck": "ck_%(table_name)s_%(constraint_name)s",
+            "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+            "pk": "pk_%(table_name)s",
+        }
 
-            # Verify naming convention if Base exists
-            if hasattr(Base, 'metadata') and hasattr(Base.metadata, 'naming_convention'):
-                for key, value in expected_convention.items():
-                    if key in Base.metadata.naming_convention:
-                        assert Base.metadata.naming_convention[key] == value
-
-        except ImportError:
-            # If core.database doesn't exist or has issues, that's expected in new architecture
-            pytest.skip("core.database module not available in new architecture")
+        assert Base.metadata.naming_convention == expected_convention
 
     def test_database_imports(self):
         """Test that core database components can be imported"""
-        try:
-            from core.database import get_db_session
-            assert callable(get_db_session)
-        except ImportError:
-            # In Clean Architecture, database might be restructured
-            pytest.skip("Database module structure changed in Clean Architecture")
+        from core.database import get_db, get_db_session
+
+        assert get_db_session is get_db
+        assert callable(get_db_session)
 
 
 class TestDatabaseSessionManagement:
@@ -66,14 +61,15 @@ class TestDatabaseSessionManagement:
     @pytest.mark.asyncio
     async def test_get_db_session_context_manager(self):
         """Test database session context manager functionality"""
-        try:
-            from core.database import get_db_session
+        from core.database import AsyncSessionLocal, get_db_session
 
-            # Test that get_db_session is a context manager
-            assert hasattr(get_db_session, '__aenter__') or callable(get_db_session)
+        assert inspect.isasyncgenfunction(get_db_session)
 
-        except ImportError:
-            pytest.skip("Database session management restructured in Clean Architecture")
+        # In pytest mode core.database intentionally does not create a global engine.
+        assert AsyncSessionLocal is None
+        session_generator = get_db_session()
+        with pytest.raises(RuntimeError, match="Database not initialized"):
+            await session_generator.__anext__()
 
     @pytest.mark.asyncio
     async def test_session_error_handling(self):
@@ -124,42 +120,31 @@ class TestDatabaseIntegration:
 
     def test_infrastructure_repositories_exist(self):
         """Test that infrastructure repository implementations exist"""
-        try:
-            from infrastructure.persistence.stock_repository import StockRepository
-            from infrastructure.persistence.price_history_repository import PriceHistoryRepository
+        from domain.repositories.price_history_repository_interface import (
+            IPriceHistoryRepository,
+        )
+        from domain.repositories.stock_repository_interface import IStockRepository
+        from infrastructure.persistence.price_history_repository import (
+            PriceHistoryRepository,
+        )
+        from infrastructure.persistence.stock_repository import StockRepository
 
-            # Verify these are concrete implementations
-            assert StockRepository is not None
-            assert PriceHistoryRepository is not None
-
-        except ImportError:
-            pytest.skip("Infrastructure repositories may have import issues during migration")
+        assert issubclass(StockRepository, IStockRepository)
+        assert issubclass(PriceHistoryRepository, IPriceHistoryRepository)
 
     def test_dependency_injection_setup(self):
         """Test dependency injection configuration"""
-        try:
-            from app.dependencies import get_database_session
+        from app.dependencies import get_database_session
 
-            assert callable(get_database_session)
-
-        except ImportError:
-            pytest.skip("Dependency injection may have import issues during migration")
+        assert callable(get_database_session)
 
     def test_domain_models_exist(self):
         """Test that domain models are properly structured"""
-        try:
-            from domain.models import Stock, PriceHistory, TechnicalIndicator
+        from domain.models import PriceHistory, Stock, TechnicalIndicator
 
-            # Verify models exist and are classes
-            assert Stock is not None
-            assert PriceHistory is not None
-            assert TechnicalIndicator is not None
-
-        except ImportError as e:
-            if "async_sessionmaker" in str(e):
-                pytest.skip("SQLAlchemy async_sessionmaker compatibility issue - this is expected in current environment")
-            else:
-                pytest.skip(f"Domain models may have import issues during migration: {e}")
+        assert Stock.__tablename__ == "stocks"
+        assert PriceHistory.__tablename__ == "price_history"
+        assert TechnicalIndicator.__tablename__ == "technical_indicators"
 
 
 class TestDatabaseConnectionPooling:
@@ -204,21 +189,14 @@ class TestDatabaseConnectionPooling:
 
     def test_session_factory_configuration(self):
         """Test session factory configuration"""
-        try:
-            from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-            # Test that we can create a session factory
-            mock_engine = Mock()
-            session_factory = async_sessionmaker(
-                mock_engine,
-                class_=AsyncSession,
-                expire_on_commit=False
-            )
+        mock_engine = Mock()
+        session_factory = async_sessionmaker(
+            mock_engine, class_=AsyncSession, expire_on_commit=False
+        )
 
-            assert session_factory is not None
-
-        except ImportError:
-            pytest.skip("SQLAlchemy async components not available")
+        assert session_factory is not None
 
 
 class TestDatabaseMigrations:
@@ -229,33 +207,21 @@ class TestDatabaseMigrations:
         from pathlib import Path
 
         # Check for common migration files
-        backend_path = Path(__file__).parent.parent.parent
+        backend_path = BACKEND_ROOT
         alembic_ini = backend_path / "alembic.ini"
-        migrations_dir = backend_path / "database" / "migrations"
+        alembic_dir = backend_path / "alembic"
 
-        # At least one should exist in a proper setup
-        has_migration_config = alembic_ini.exists() or migrations_dir.exists()
-
-        # This is more of a recommendation than a hard requirement
-        if not has_migration_config:
-            pytest.skip("Migration configuration not found - may be configured differently")
+        assert alembic_ini.exists()
+        assert alembic_dir.exists()
+        assert (alembic_dir / "env.py").exists()
 
     def test_database_initialization_scripts(self):
         """Test database initialization scripts"""
-        from pathlib import Path
-
-        backend_path = Path(__file__).parent.parent.parent
+        backend_path = BACKEND_ROOT
         database_dir = backend_path / "database"
 
-        # Check for database-related scripts
-        init_script = database_dir / "migrate.py"
-        test_script = database_dir / "test_connection.py"
-
-        # At least some database tooling should exist
-        has_db_tools = init_script.exists() or test_script.exists()
-
-        if not has_db_tools:
-            pytest.skip("Database tooling scripts not found")
+        assert (database_dir / "migrate.py").exists()
+        assert (database_dir / "test_connection.py").exists()
 
 
 class TestDatabaseSecurity:

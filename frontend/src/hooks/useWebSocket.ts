@@ -72,11 +72,15 @@ export function useWebSocket() {
     dispatch(setWebSocketReconnecting(true));
     dispatch(setWebSocketError(null));
 
-    wsManager.current.connect().catch(error => {
-      const errorMsg = error.message || 'Failed to reconnect to WebSocket';
-      dispatch(setWebSocketReconnecting(false));
-      dispatch(setWebSocketError(errorMsg));
-    });
+    return wsManager.current.connect()
+      .then(() => {
+        dispatch(setWebSocketReconnecting(false));
+      })
+      .catch(error => {
+        const errorMsg = error.message || 'Failed to reconnect to WebSocket';
+        dispatch(setWebSocketReconnecting(false));
+        dispatch(setWebSocketError(errorMsg));
+      });
   }, [dispatch]);
 
   // 斷開連接

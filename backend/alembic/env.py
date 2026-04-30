@@ -29,6 +29,16 @@ from domain.models.user_stock_list import UserStockList, UserStockListItem
 from domain.models.user_strategy_subscription import UserStrategySubscription
 from domain.models.user_strategy_stock_list import UserStrategyStockList
 from domain.models.strategy_signal import StrategySignal
+from domain.models.broker import (
+    BrokerAccount,
+    BrokerCashBalance,
+    BrokerConnection,
+    BrokerContract,
+    BrokerPositionSnapshot,
+    BrokerSyncRun,
+)
+from domain.models.order_intent import BrokerOrder, OrderEvent, OrderExecution, OrderIntent
+from domain.models.risk import RiskCheckResult, RiskProfile
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

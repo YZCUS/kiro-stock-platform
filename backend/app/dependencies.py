@@ -142,29 +142,9 @@ def get_price_data_source(
     settings: Settings = Depends(get_settings),
 ) -> "IPriceDataSource":
     """取得價格數據源 (根據環境變數配置)"""
-    from domain.repositories.price_data_source_interface import IPriceDataSource
-    from infrastructure.external.price_data_sources import YahooFinanceSource
+    from infrastructure.external.price_data_sources import create_price_data_source
 
-    # 根據配置選擇數據源
-    source_type = settings.external_api.price_data_source.lower()
-
-    if source_type == "yahoo_finance":
-        return YahooFinanceSource()
-    # elif source_type == "alpha_vantage":
-    #     from infrastructure.external.price_data_sources import AlphaVantageSource
-    #     return AlphaVantageSource()
-    # elif source_type == "fmp":
-    #     from infrastructure.external.price_data_sources import FMPSource
-    #     return FMPSource()
-    else:
-        # 預設使用 Yahoo Finance
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.warning(
-            f"Unknown price data source: {source_type}, using Yahoo Finance as default"
-        )
-        return YahooFinanceSource()
+    return create_price_data_source(settings.external_api.price_data_source)
 
 
 # =============================================================================
@@ -289,6 +269,27 @@ def get_data_validation_service_clean(
     from domain.services.data_validation_service import DataValidationService
 
     return DataValidationService(stock_repo, price_repo, cache_service)
+
+
+def get_risk_engine(settings: Settings = Depends(get_settings)):
+    """取得風控引擎。正式 live trading 前需替換為完整風控實作。"""
+    from domain.risk import NoopRiskEngine
+
+    return NoopRiskEngine(allow_live=False)
+
+
+def get_broker_adapter(settings: Settings = Depends(get_settings)):
+    """取得 broker adapter。"""
+    from infrastructure.brokers import create_broker_adapter
+
+    return create_broker_adapter(settings)
+
+
+def get_order_intent_service():
+    """取得下單意圖服務。"""
+    from domain.services.order_intent_service import OrderIntentService
+
+    return OrderIntentService()
 
 
 # =============================================================================

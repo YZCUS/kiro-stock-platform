@@ -100,6 +100,19 @@ class Stock(BaseModel, TimestampMixin):
         lazy="dynamic",
     )
 
+    broker_contracts = relationship(
+        "BrokerContract",
+        back_populates="stock",
+        passive_deletes=True,
+    )
+
+    order_intents = relationship(
+        "OrderIntent",
+        back_populates="stock",
+        cascade="all, delete-orphan",
+        lazy="dynamic",
+    )
+
     @classmethod
     def validate_symbol(cls, symbol: str, market: str) -> bool:
         """驗證股票代號格式"""

@@ -4,7 +4,7 @@
  * 這些測試驗證了 WebSocket hooks 在依賴修復後的正確行為
  */
 import React from 'react';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { configureStore } from '@reduxjs/toolkit';
 import {
@@ -34,8 +34,12 @@ jest.mock('../../lib/websocket', () => ({
   WebSocketEventType: {
     WELCOME: 'welcome',
     ERROR: 'error',
+    DISCONNECTED: 'disconnected',
     PRICE_UPDATE: 'price_update',
     SIGNAL_UPDATE: 'signal_update',
+    INDICATOR_UPDATE: 'indicator_update',
+    MARKET_STATUS: 'market_status',
+    SYSTEM_NOTIFICATION: 'system_notification',
   },
 }));
 
@@ -269,14 +273,14 @@ describe('useStockSubscription', () => {
       wrapper: createWrapper(),
     });
 
-    // 清除初始調用
-    jest.clearAllMocks();
-
-    // 模擬 welcome 事件（重新連接）
     const welcomeHandler = mockWebSocketManager.on.mock.calls.find(
       call => call[0] === 'welcome'
     )?.[1];
 
+    // 清除初始調用
+    jest.clearAllMocks();
+
+    // 模擬 welcome 事件（重新連接）
     if (welcomeHandler) {
       act(() => {
         welcomeHandler();
@@ -417,21 +421,23 @@ describe('WebSocket Hooks - 依賴管理測試', () => {
   it('useWebSocket - 事件處理器應該在dispatch變化時重新創建', () => {
     const store1 = createTestStore();
     const store2 = createTestStore();
+    let currentStore = store1;
+    const Wrapper = ({ children }: { children: React.ReactNode }) => (
+      <Provider store={currentStore}>{children}</Provider>
+    );
 
     const { rerender } = renderHook(
-      ({ store }: { store: any }) => useWebSocket(),
+      () => useWebSocket(),
       {
-        wrapper: ({ children, store }: { children: React.ReactNode; store: any }) => (
-          <Provider store={store}>{children}</Provider>
-        ),
-        initialProps: { store: store1 }
+        wrapper: Wrapper
       }
     );
 
     const initialOnCalls = mockWebSocketManager.on.mock.calls.length;
 
     // 重新渲染使用不同的 store (不同的 dispatch)
-    rerender({ store: store2 });
+    currentStore = store2;
+    rerender();
 
     // 應該有新的事件監聽器註冊（因為依賴變化）
     expect(mockWebSocketManager.on.mock.calls.length).toBeGreaterThan(initialOnCalls);

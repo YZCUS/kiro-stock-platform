@@ -52,6 +52,15 @@ class User(BaseModel, TimestampMixin):
     strategy_signals = relationship(
         "StrategySignal", back_populates="user", cascade="all, delete-orphan"
     )
+    broker_connections = relationship(
+        "BrokerConnection", back_populates="user", cascade="all, delete-orphan"
+    )
+    risk_profiles = relationship(
+        "RiskProfile", back_populates="user", cascade="all, delete-orphan"
+    )
+    order_intents = relationship(
+        "OrderIntent", back_populates="user", cascade="all, delete-orphan"
+    )
 
     __table_args__ = {"comment": "用戶表"}
 

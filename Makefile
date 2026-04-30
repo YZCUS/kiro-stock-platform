@@ -1,6 +1,6 @@
 # 股票分析平台 Makefile
 
-.PHONY: help build up down logs clean test db-init db-migrate db-reset db-seed db-test
+.PHONY: help build up down logs clean test test-coverage backend-coverage frontend-coverage e2e db-init db-migrate db-reset db-seed db-test
 
 # 預設目標
 help:
@@ -22,6 +22,8 @@ help:
 	@echo ""
 	@echo "開發操作:"
 	@echo "  test      - 執行測試"
+	@echo "  test-coverage - 執行前後端 coverage"
+	@echo "  e2e       - 執行 Chromium E2E smoke"
 	@echo "  lint      - 程式碼檢查"
 	@echo "  format    - 程式碼格式化"
 
@@ -62,6 +64,20 @@ db-test:
 test:
 	cd backend && python -m pytest tests/ -v
 	cd frontend && npm test
+
+backend-coverage:
+	PYTHONPATH=backend backend/.venv/bin/python -m pytest backend/tests \
+		--cov=backend/api --cov=backend/app --cov=backend/core \
+		--cov=backend/domain --cov=backend/infrastructure \
+		--cov-report=term-missing:skip-covered
+
+frontend-coverage:
+	cd frontend && npm test -- --runInBand --coverage
+
+test-coverage: backend-coverage frontend-coverage
+
+e2e:
+	cd frontend && npm run test:e2e -- --project=chromium
 
 lint:
 	cd backend && python -m flake8 .

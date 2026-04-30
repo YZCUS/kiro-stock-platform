@@ -6,7 +6,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart, IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts';
 import { usePriceUpdates, useIndicatorUpdates } from '../../hooks/useWebSocket';
-import { RealtimePriceData, Stock } from '../../types';
+import { Stock } from '../../types';
 
 export interface RealtimePriceChartProps {
   stock: Pick<Stock, 'id' | 'symbol'> & { name?: string };
@@ -309,7 +309,9 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
           value: latestSMA.value,
         });
 
-        console.log('更新 SMA 指標:', { time, value: latestSMA.value });
+        if (process.env.NODE_ENV === 'development') {
+          console.log('更新 SMA 指標:', { time, value: latestSMA.value });
+        }
       }
     } catch (error) {
       console.error('更新指標數據時發生錯誤:', error);
@@ -318,6 +320,28 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
 
   return (
     <div className="w-full">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">
+            {symbol}{stockName ? ` (${stockName})` : ''} 即時價格圖表
+          </h3>
+          <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+            <span>ID: {stockId}</span>
+            {lastUpdate && (
+              <span>最後更新: {lastUpdate.toLocaleString()}</span>
+            )}
+          </div>
+        </div>
+        <div className="inline-flex items-center gap-2 text-sm text-gray-700">
+          <span
+            className={`h-2.5 w-2.5 rounded-full ${
+              isSubscribed ? 'bg-green-500 animate-pulse' : 'bg-gray-400'
+            }`}
+          />
+          <span>{isSubscribed ? '已訂閱' : '未訂閱'}</span>
+        </div>
+      </div>
+
       {/* 當前價格和圖表區域 */}
         {/* 當前價格信息 */}
         {priceData && (

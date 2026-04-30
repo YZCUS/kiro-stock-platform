@@ -6,10 +6,12 @@ Testing technical analysis service and indicator calculations
 import pytest
 import sys
 import random
+from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock
 from datetime import datetime, date, timedelta
 
-sys.path.append('/home/opc/projects/kiro-stock-platform/backend')
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(BACKEND_ROOT))
 
 from domain.services.technical_analysis_service import TechnicalAnalysisService
 from infrastructure.cache.unified_cache_service import MockCacheService
@@ -153,30 +155,40 @@ class TestTechnicalAnalysisService:
     @pytest.mark.asyncio
     async def test_different_trend_analysis(self):
         """Test trend analysis for different market conditions"""
+        def make_trend_prices(stock_id, closes):
+            prices = []
+            for index, close_price in enumerate(closes):
+                price = MagicMock()
+                price.stock_id = stock_id
+                price.date = date.today() - timedelta(days=index)
+                price.close_price = close_price
+                price.open_price = close_price
+                price.high_price = close_price
+                price.low_price = close_price
+                price.volume = 1000000
+                prices.append(price)
+            return prices
+
         scenarios = [
-            ("upward", "上升"),
-            ("downward", "下降"),
-            ("sideways", "盤整"),
-            ("volatile", "震盪")
+            ("upward", [105, 104, 103, 102, 101] + [100] * 25, "上升趨勢"),
+            ("downward", [95, 96, 97, 98, 99] + [100] * 25, "下降趨勢"),
+            ("sideways", [100, 101, 99, 101, 100] + [100] * 25, "震盪趨勢"),
         ]
 
-        for trend_type, expected_trend_keyword in scenarios:
-            test_stock = self.create_mock_stock(4, f"TREND_{trend_type.upper()}", f"{trend_type} Trend Test")
+        for index, (trend_type, closes, expected_trend) in enumerate(scenarios, start=1):
+            stock_id = 40 + index
+            test_stock = self.create_mock_stock(stock_id, f"TREND_{trend_type.upper()}", f"{trend_type} Trend Test")
             self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
 
-            # Create price data with specific trend
-            mock_prices = self.create_mock_price_data(4, 30, 100.0, trend_type)
-            self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+            self.mock_price_repo.get_by_stock = AsyncMock(return_value=make_trend_prices(stock_id, closes))
 
             # Get technical summary
             summary = await self.analysis_service.get_stock_technical_summary(
                 db=MagicMock(),
-                stock_id=4
+                stock_id=stock_id
             )
 
-            # Verify trend analysis contains relevant information
-            assert summary["trend_analysis"] is not None
-            assert len(summary["trend_analysis"]) > 0
+            assert summary["trend_analysis"] == expected_trend
 
     @pytest.mark.asyncio
     async def test_cache_integration(self):
@@ -361,24 +373,19 @@ class TestTechnicalAnalysisService:
         mock_prices = self.create_mock_price_data(10, 40, 100.0, "upward")
         self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
 
-        # Test getting indicator series
-        try:
-            result = await self.analysis_service.get_indicator_series(
-                db=MagicMock(),
-                stock_id=10,
-                indicator_type="RSI",
-                period=14,
-                page=1,
-                per_page=20
-            )
+        result = await self.analysis_service.get_indicator_series(
+            db=MagicMock(),
+            stock_id=10,
+            indicator_type="RSI",
+            period=14,
+            page=1,
+            per_page=20,
+        )
 
-            # Should return paginated data
-            assert "items" in result
-            assert "total" in result
-            assert "page" in result
-            assert "per_page" in result
-            assert isinstance(result["items"], list)
-
-        except AttributeError:
-            # Method might not exist yet, which is fine
-            pytest.skip("get_indicator_series method not implemented yet")
+        assert result["page"] == 1
+        assert result["per_page"] == 20
+        assert result["total"] == 40
+        assert result["total_pages"] == 2
+        assert len(result["items"]) == 20
+        assert all(item["stock_id"] == 10 for item in result["items"])
+        assert {item["indicator_type"] for item in result["items"]} == {"RSI"}

@@ -19,7 +19,11 @@ interface LazyComponentConfig extends LazyLoaderProps {
 // 預設載入組件
 const DefaultLoadingFallback: React.FC = () => (
   <div className="flex items-center justify-center p-8">
-    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+    <div
+      aria-label="載入中"
+      role="progressbar"
+      className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"
+    ></div>
   </div>
 );
 
@@ -61,6 +65,43 @@ const useComponentLoader = (minLoadingTime: number = 0) => {
   return isLoading;
 };
 
+interface LazyErrorBoundaryProps {
+  children: React.ReactNode;
+  errorFallback: React.ComponentType<{ error: Error; retry: () => void }>;
+  retry: () => void;
+  resetKey: number;
+}
+
+interface LazyErrorBoundaryState {
+  error: Error | null;
+}
+
+class LazyErrorBoundary extends React.Component<
+  LazyErrorBoundaryProps,
+  LazyErrorBoundaryState
+> {
+  state: LazyErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): LazyErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidUpdate(prevProps: LazyErrorBoundaryProps) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (this.state.error) {
+      const ErrorFallback = this.props.errorFallback;
+      return <ErrorFallback error={this.state.error} retry={this.props.retry} />;
+    }
+
+    return this.props.children;
+  }
+}
+
 // 創建懶載入組件的工廠函數
 export const createLazyComponent = <T extends ComponentType<any>>({
   importFn,
@@ -76,27 +117,27 @@ export const createLazyComponent = <T extends ComponentType<any>>({
   });
 
   const WrappedComponent: ComponentType<React.ComponentProps<T>> = (props) => {
-    const [error, setError] = React.useState<Error | null>(null);
     const [retryKey, setRetryKey] = React.useState(0);
     const shouldShowLoading = useComponentLoader(minLoadingTime);
 
     const handleRetry = React.useCallback(() => {
-      setError(null);
       setRetryKey(prev => prev + 1);
     }, []);
-
-    if (error) {
-      return <ErrorFallback error={error} retry={handleRetry} />;
-    }
 
     if (shouldShowLoading) {
       return <FallbackComponent />;
     }
 
     return (
-      <Suspense fallback={<FallbackComponent />}>
-        <LazyComponent key={retryKey} {...props} />
-      </Suspense>
+      <LazyErrorBoundary
+        errorFallback={ErrorFallback}
+        retry={handleRetry}
+        resetKey={retryKey}
+      >
+        <Suspense fallback={<FallbackComponent />}>
+          <LazyComponent key={retryKey} {...props} />
+        </Suspense>
+      </LazyErrorBoundary>
     );
   };
 
@@ -140,7 +181,6 @@ export const createLazyChartComponent = <T extends ComponentType<any>>(
   );
 
   const ChartErrorFallback: React.FC<{ error: Error; retry: () => void }> = ({
-    error,
     retry
   }) => (
     <div

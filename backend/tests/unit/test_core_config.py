@@ -86,6 +86,26 @@ class TestSettingsEnvironmentVariables:
         settings = make_settings()
         assert settings.external_api.yahoo_finance_timeout == 50
 
+    def test_price_data_source_legacy_alias(self, monkeypatch):
+        monkeypatch.setenv("PRICE_DATA_SOURCE", "yahoo_finance")
+        reload(settings_module)
+        settings = make_settings()
+        assert settings.external_api.price_data_source == "yahoo_finance"
+
+    def test_broker_settings_from_env(self, monkeypatch):
+        monkeypatch.setenv("BROKER_PROVIDER", "ibkr")
+        monkeypatch.setenv("BROKER_MODE", "paper")
+        monkeypatch.setenv("BROKER_TRADING_ENABLED", "false")
+        monkeypatch.setenv("IBKR_HOST", "127.0.0.1")
+        monkeypatch.setenv("IBKR_PORT", "4002")
+        reload(settings_module)
+        settings = make_settings()
+        assert settings.broker.provider == "ibkr"
+        assert settings.broker.mode == "paper"
+        assert settings.broker.trading_enabled is False
+        assert settings.ibkr.host == "127.0.0.1"
+        assert settings.ibkr.port == 4002
+
 
 class TestSettingsValidation:
     def test_boolean_field_validation(self, monkeypatch):

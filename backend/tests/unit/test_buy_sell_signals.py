@@ -5,11 +5,13 @@ Testing trading signal generation and buy/sell point detection using domain serv
 """
 import pytest
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-sys.path.append('/home/opc/projects/kiro-stock-platform/backend')
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(BACKEND_ROOT))
 
 from domain.services.trading_signal_service import (
     TradingSignalService,

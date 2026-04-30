@@ -19,7 +19,7 @@ setup_test_path()
 from core.redis import RedisClient, redis_client
 
 
-class TestRedisClient(unittest.TestCase):
+class TestRedisClient(unittest.IsolatedAsyncioTestCase):
     """Redis客戶端測試"""
 
     def setUp(self):
@@ -79,15 +79,19 @@ class TestRedisClient(unittest.TestCase):
         self.assertTrue(self.redis_client._is_connected)
         self.assertTrue(self.redis_client.is_connected)
 
-    @patch("core.redis.redis.from_url")
+    @patch("core.redis.redis.ConnectionPool.from_url")
+    @patch("core.redis.redis.Redis")
     @patch("core.redis.get_settings")
-    async def test_connect_failure(self, mock_get_settings, mock_from_url):
+    async def test_connect_failure(
+        self, mock_get_settings, mock_redis_cls, mock_pool_from_url
+    ):
         """測試Redis連接 - 失敗"""
         mock_settings = Mock()
         mock_settings.redis.url = "redis://invalid:6379"
         mock_get_settings.return_value = mock_settings
+        mock_pool_from_url.return_value = Mock()
         mock_redis = AsyncMock()
-        mock_from_url.return_value = mock_redis
+        mock_redis_cls.return_value = mock_redis
         mock_redis.ping.side_effect = Exception("Connection failed")
 
         # 測試連接失敗
@@ -287,7 +291,7 @@ class TestRedisClient(unittest.TestCase):
         self.assertFalse(result)
 
 
-class TestRedisConnectionManagement(unittest.TestCase):
+class TestRedisConnectionManagement(unittest.IsolatedAsyncioTestCase):
     """Redis連接管理增強功能測試"""
 
     def setUp(self):
@@ -390,7 +394,7 @@ class TestRedisConnectionManagement(unittest.TestCase):
         self.assertFalse(info["connection_pool_exists"])
 
 
-class TestRedisRetryMechanism(unittest.TestCase):
+class TestRedisRetryMechanism(unittest.IsolatedAsyncioTestCase):
     """Redis重試機制測試"""
 
     def setUp(self):
@@ -438,8 +442,12 @@ class TestRedisRetryMechanism(unittest.TestCase):
         self.assertEqual(self.mock_redis.get.call_count, 1)
         self.assertIsNone(result)
 
+    @patch("core.redis.asyncio.sleep")
     @patch.object(RedisClient, "_ensure_connection")
-    async def test_max_retries_exceeded(self, mock_ensure):
+    @patch.object(RedisClient, "_reconnect")
+    async def test_max_retries_exceeded(
+        self, mock_reconnect, mock_ensure, mock_sleep
+    ):
         """測試超過最大重試次數"""
         mock_ensure.return_value = True
         import redis.asyncio as redis
@@ -450,6 +458,8 @@ class TestRedisRetryMechanism(unittest.TestCase):
 
         # 驗證達到最大重試次數
         self.assertEqual(self.mock_redis.get.call_count, 3)  # max_retries=3
+        self.assertEqual(mock_reconnect.call_count, 2)
+        self.assertEqual(mock_sleep.call_count, 2)
         self.assertIsNone(result)
 
 
@@ -491,7 +501,7 @@ class TestRedisClientIntegration(unittest.TestCase):
         self.assertEqual(settings.CACHE_EXPIRE_SECONDS, 1800)
 
 
-class TestRedisClientDataTypes(unittest.TestCase):
+class TestRedisClientDataTypes(unittest.IsolatedAsyncioTestCase):
     """Redis客戶端數據類型測試"""
 
     def setUp(self):

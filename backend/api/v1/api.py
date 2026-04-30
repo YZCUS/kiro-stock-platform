@@ -9,6 +9,7 @@ from api.routers.v1.auth import router as auth_router
 from api.routers.v1.portfolio import router as portfolio_router
 from api.routers.v1.stock_lists import router as stock_lists_router
 from api.routers.v1.strategies import router as strategies_router
+from api.routers.v1.trading import router as trading_router
 from api.routers.v1.watchlist import router as watchlist_router
 
 # 建立主要 API 路由器
@@ -39,3 +40,4 @@ api_router.include_router(watchlist_router)  # 自選股相容路由，底層使
 api_router.include_router(
     strategies_router
 )  # 策略管理路由（已包含 prefix /api/v1/strategies）
+api_router.include_router(trading_router)  # 交易整合路由

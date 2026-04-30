@@ -4,28 +4,36 @@
  * 測試 RealtimePriceChart 組件的 props 重構和核心功能
  */
 import React from 'react';
-import { render, screen, act, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { configureStore } from '@reduxjs/toolkit';
+import { createChart } from 'lightweight-charts';
 import RealtimePriceChart from '../RealtimePriceChart';
+import { usePriceUpdates, useIndicatorUpdates } from '../../../hooks/useWebSocket';
 import uiReducer from '../../../store/slices/uiSlice';
 import signalsReducer from '../../../store/slices/signalsSlice';
 
 // Mock the lightweight-charts library
+const mockCandlestickSeries = {
+  setData: jest.fn(),
+  update: jest.fn(),
+  data: jest.fn(() => []),
+};
+
+const mockSmaSeries = {
+  setData: jest.fn(),
+  update: jest.fn(),
+};
+
+const mockChartApi = {
+  addCandlestickSeries: jest.fn(() => mockCandlestickSeries),
+  addLineSeries: jest.fn(() => mockSmaSeries),
+  applyOptions: jest.fn(),
+  remove: jest.fn(),
+};
+
 jest.mock('lightweight-charts', () => ({
-  createChart: jest.fn(() => ({
-    addCandlestickSeries: jest.fn(() => ({
-      setData: jest.fn(),
-      update: jest.fn(),
-      data: jest.fn(() => []),
-    })),
-    addLineSeries: jest.fn(() => ({
-      setData: jest.fn(),
-      update: jest.fn(),
-    })),
-    applyOptions: jest.fn(),
-    remove: jest.fn(),
-  })),
+  createChart: jest.fn(() => mockChartApi),
 }));
 
 // Mock WebSocket hooks
@@ -53,20 +61,36 @@ const mockIndicators = {
   }
 };
 
-const mockUsePriceUpdates = jest.fn((stockId) => ({
-  priceData: mockPriceData,
-  lastUpdate: new Date('2024-01-01T10:00:00Z'),
-  isSubscribed: true,
-}));
-
-const mockUseIndicatorUpdates = jest.fn((stockId) => ({
-  indicators: mockIndicators,
-}));
-
 jest.mock('../../../hooks/useWebSocket', () => ({
-  usePriceUpdates: mockUsePriceUpdates,
-  useIndicatorUpdates: mockUseIndicatorUpdates,
+  usePriceUpdates: jest.fn(),
+  useIndicatorUpdates: jest.fn(),
 }));
+
+const mockUsePriceUpdates = usePriceUpdates as jest.MockedFunction<typeof usePriceUpdates>;
+const mockUseIndicatorUpdates = useIndicatorUpdates as jest.MockedFunction<typeof useIndicatorUpdates>;
+const mockCreateChart = createChart as jest.MockedFunction<typeof createChart>;
+
+const setupWebSocketHookMocks = () => {
+  mockUsePriceUpdates.mockReturnValue({
+    priceData: mockPriceData,
+    lastUpdate: new Date('2024-01-01T10:00:00Z'),
+    isSubscribed: true,
+  });
+  mockUseIndicatorUpdates.mockReturnValue({
+    indicators: mockIndicators,
+    lastUpdate: new Date('2024-01-01T10:00:00Z'),
+    isSubscribed: true,
+  });
+};
+
+const setupResizeObserverMock = () => {
+  global.ResizeObserver = jest.fn().mockImplementation(() => ({
+    observe: jest.fn(),
+    unobserve: jest.fn(),
+    disconnect: jest.fn(),
+  }));
+  global.fetch = jest.fn(() => new Promise(() => {})) as jest.Mock;
+};
 
 // Mock error reporting
 jest.mock('../../../lib/errorReporting', () => ({
@@ -107,27 +131,22 @@ const mockStockWithoutName = {
 describe('RealtimePriceChart - Props 重構測試', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    // Mock DOM API
-    global.ResizeObserver = jest.fn().mockImplementation(() => ({
-      observe: jest.fn(),
-      unobserve: jest.fn(),
-      disconnect: jest.fn(),
-    }));
+    setupWebSocketHookMocks();
+    setupResizeObserverMock();
   });
 
   it('應該接受新的 stock props 結構', () => {
-    expect(() => {
-      render(
-        <RealtimePriceChart
-          stock={mockStock}
-          height={400}
-        />,
-        { wrapper: createWrapper() }
-      );
-    }).not.toThrow();
+    render(
+      <RealtimePriceChart
+        stock={mockStock}
+        height={400}
+      />,
+      { wrapper: createWrapper() }
+    );
 
-    // 驗證組件正常渲染
-    expect(screen.getByText(/即時價格圖表/)).toBeInTheDocument();
+    expect(screen.getByText('2330.TW (台積電) 即時價格圖表')).toBeInTheDocument();
+    expect(mockUsePriceUpdates).toHaveBeenCalledWith(1);
+    expect(mockUseIndicatorUpdates).toHaveBeenCalledWith(1);
   });
 
   it('應該顯示股票符號和名稱', () => {
@@ -206,11 +225,8 @@ describe('RealtimePriceChart - Props 重構測試', () => {
 describe('RealtimePriceChart - 功能測試', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    global.ResizeObserver = jest.fn().mockImplementation(() => ({
-      observe: jest.fn(),
-      unobserve: jest.fn(),
-      disconnect: jest.fn(),
-    }));
+    setupWebSocketHookMocks();
+    setupResizeObserverMock();
   });
 
   it('應該顯示訂閱狀態', () => {
@@ -291,11 +307,8 @@ describe('RealtimePriceChart - 功能測試', () => {
 describe('RealtimePriceChart - 錯誤處理測試', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    global.ResizeObserver = jest.fn().mockImplementation(() => ({
-      observe: jest.fn(),
-      unobserve: jest.fn(),
-      disconnect: jest.fn(),
-    }));
+    setupWebSocketHookMocks();
+    setupResizeObserverMock();
 
     // Mock console.error
     jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -331,62 +344,68 @@ describe('RealtimePriceChart - 錯誤處理測試', () => {
     const incompleteStock = {
       id: 1,
       symbol: '2330.TW',
-      // 缺少 name 屬性
-    } as any;
+    };
 
-    expect(() => {
-      render(
-        <RealtimePriceChart
-          stock={incompleteStock}
-        />,
-        { wrapper: createWrapper() }
-      );
-    }).not.toThrow();
+    render(
+      <RealtimePriceChart
+        stock={incompleteStock}
+      />,
+      { wrapper: createWrapper() }
+    );
 
-    expect(screen.getByText(/2330\.TW.*即時價格圖表/)).toBeInTheDocument();
+    expect(screen.getByText('2330.TW 即時價格圖表')).toBeInTheDocument();
+    expect(mockUsePriceUpdates).toHaveBeenCalledWith(1);
   });
 });
 
-describe('RealtimePriceChart - Props 類型安全測試', () => {
-  it('應該接受符合 Pick<Stock, "id" | "symbol" | "name"> 類型的 stock prop', () => {
-    // 這個測試確保類型定義正確
-    const validStockProp = {
-      id: 1,
-      symbol: '2330.TW',
-      name: '台積電',
-    };
-
-    expect(() => {
-      render(
-        <RealtimePriceChart
-          stock={validStockProp}
-        />,
-        { wrapper: createWrapper() }
-      );
-    }).not.toThrow();
+describe('RealtimePriceChart - Chart integration tests', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    setupWebSocketHookMocks();
+    setupResizeObserverMock();
   });
 
-  it('應該接受可選的 height prop', () => {
-    expect(() => {
-      render(
-        <RealtimePriceChart
-          stock={mockStock}
-          height={500}
-        />,
-        { wrapper: createWrapper() }
+  it('應該使用 height prop 初始化圖表', () => {
+    render(
+      <RealtimePriceChart
+        stock={mockStock}
+        height={500}
+      />,
+      { wrapper: createWrapper() }
+    );
+
+    expect(mockCreateChart).toHaveBeenCalledWith(
+      expect.any(HTMLDivElement),
+      expect.objectContaining({ height: 500 })
+    );
+  });
+
+  it('應該把即時 OHLC 價格更新寫入 K 線序列', async () => {
+    render(
+      <RealtimePriceChart
+        stock={mockStock}
+      />,
+      { wrapper: createWrapper() }
+    );
+
+    await waitFor(() => {
+      expect(mockCandlestickSeries.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          open: 490,
+          high: 505,
+          low: 485,
+          close: 500,
+        })
       );
-    }).not.toThrow();
+    });
   });
 });
 
 describe('RealtimePriceChart - WebSocket 集成測試', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    global.ResizeObserver = jest.fn().mockImplementation(() => ({
-      observe: jest.fn(),
-      unobserve: jest.fn(),
-      disconnect: jest.fn(),
-    }));
+    setupWebSocketHookMocks();
+    setupResizeObserverMock();
   });
 
   it('應該使用正確的 stockId 調用 WebSocket hooks', () => {

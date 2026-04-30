@@ -2,165 +2,140 @@
  * Dashboard E2E Tests
  */
 import { test, expect } from '@playwright/test';
+import type { Page } from '@playwright/test';
+
+const stockFixture = {
+  exists: true,
+  created: false,
+  stock: {
+    id: 42,
+    symbol: 'AAPL',
+    name: 'Apple Inc.',
+    market: 'US',
+    latest_price: {
+      close: 188.45,
+      change: 2.33,
+      change_percent: 1.25,
+      date: '2026-04-29',
+      volume: 58920000,
+    },
+  },
+};
+
+const priceHistoryFixture = [
+  {
+    date: '2026-04-28T14:30:00Z',
+    open: 185,
+    high: 190,
+    low: 184,
+    close: 188.45,
+  },
+];
+
+async function mockSuccessfulStockSearch(page: Page) {
+  await page.route('**/api/v1/stocks/ensure**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(stockFixture),
+    });
+  });
+
+  await page.route('**/api/v1/stocks/42/prices**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(priceHistoryFixture),
+    });
+  });
+}
 
 test.describe('Dashboard Page', () => {
-  test.beforeEach(async ({ page }) => {
-    // Navigate to dashboard
-    await page.goto('/dashboard');
-  });
-
-  test('should display dashboard title and description', async ({ page }) => {
-    // Check main heading
-    await expect(page.locator('h1')).toContainText('即時交易儀表板');
-
-    // Check description
-    await expect(page.locator('text=股票價格、技術指標和交易信號的即時監控')).toBeVisible();
-  });
-
-  test('should display connection status', async ({ page }) => {
-    // Check for connection status indicator
-    await expect(page.locator('[data-testid="connection-status"]')).toBeVisible();
-  });
-
-  test('should display statistics cards', async ({ page }) => {
-    // Wait for statistics cards to load
-    await page.waitForSelector('[data-testid="stats-cards"]');
-
-    // Check that all 4 stats cards are present
-    const statsCards = page.locator('[data-testid="stats-card"]');
-    await expect(statsCards).toHaveCount(4);
-
-    // Check specific stats
-    await expect(page.locator('text=連線狀態')).toBeVisible();
-    await expect(page.locator('text=訂閱股票')).toBeVisible();
-    await expect(page.locator('text=最新信號')).toBeVisible();
-    await expect(page.locator('text=市場狀態')).toBeVisible();
-  });
-
-  test('should display stock subscription management', async ({ page }) => {
-    // Check stock subscription section
-    await expect(page.locator('text=股票訂閱管理')).toBeVisible();
-
-    // Should show stock cards
-    await page.waitForSelector('[data-testid="stock-card"]');
-    const stockCards = page.locator('[data-testid="stock-card"]');
-
-    // Should have at least one stock card
-    await expect(stockCards.first()).toBeVisible();
-  });
-
-  test('should allow stock subscription toggle', async ({ page }) => {
-    // Wait for stock cards to load
-    await page.waitForSelector('[data-testid="stock-card"]');
-
-    // Find first subscription button
-    const subscriptionButton = page.locator('[data-testid="subscription-button"]').first();
-    await expect(subscriptionButton).toBeVisible();
-
-    // Click to toggle subscription
-    await subscriptionButton.click();
-
-    // Verify the button state changed (this might need adjustment based on implementation)
-    // The exact assertion will depend on how the UI indicates subscription state
-  });
-
-  test('should display real-time chart', async ({ page }) => {
-    // Wait for chart container
-    await page.waitForSelector('[data-testid="realtime-chart"]', { timeout: 10000 });
-
-    // Check that chart is rendered
-    await expect(page.locator('[data-testid="realtime-chart"]')).toBeVisible();
-  });
-
-  test('should display real-time signals panel', async ({ page }) => {
-    // Check signals panel
-    await expect(page.locator('[data-testid="realtime-signals"]')).toBeVisible();
-  });
-
-  test('should be responsive on mobile', async ({ page }) => {
-    // Set mobile viewport
-    await page.setViewportSize({ width: 375, height: 667 });
-
-    // Check that main elements are still visible
-    await expect(page.locator('h1')).toContainText('即時交易儀表板');
-    await expect(page.locator('[data-testid="stats-cards"]')).toBeVisible();
-
-    // Check mobile-specific layout adjustments
-    // This will depend on your responsive design implementation
-  });
-
-  test('should handle loading states', async ({ page }) => {
-    // Intercept API calls to test loading states
-    await page.route('**/api/v1/stocks*', route => {
-      // Delay the response to test loading state
-      setTimeout(() => route.continue(), 2000);
-    });
-
+  test('should display the current dashboard shell for anonymous users', async ({ page }) => {
     await page.goto('/dashboard');
 
-    // Should show loading indicators
-    await expect(page.locator('[data-testid="loading-skeleton"]')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '即時圖表分析' })).toBeVisible();
+    await expect(page.getByText('選擇清單和股票，查看即時價格走勢和技術指標')).toBeVisible();
+    await expect(page.getByPlaceholder('輸入股號 (如: AAPL, 2330)')).toBeVisible();
+
+    const listSelector = page.getByRole('button', { name: /請先登入/ });
+    await expect(listSelector).toBeDisabled();
+    await expect(page.getByText('請選擇清單和股票')).toBeVisible();
   });
 
-  test('should handle error states', async ({ page }) => {
-    // Intercept API calls to simulate errors
-    await page.route('**/api/v1/stocks*', route => {
-      route.fulfill({
-        status: 500,
-        body: JSON.stringify({ message: 'Internal Server Error' }),
+  test('should keep search disabled until a symbol is entered and normalize input to uppercase', async ({ page }) => {
+    await page.goto('/dashboard');
+
+    const input = page.getByPlaceholder('輸入股號 (如: AAPL, 2330)');
+    const searchButton = input.locator('..').getByRole('button').first();
+
+    await expect(searchButton).toBeDisabled();
+
+    await input.fill('aapl');
+
+    await expect(input).toHaveValue('AAPL');
+    await expect(searchButton).toBeEnabled();
+  });
+
+  test('should query a stock by symbol and render the selected stock summary', async ({ page }) => {
+    await mockSuccessfulStockSearch(page);
+    await page.goto('/dashboard');
+
+    const input = page.getByPlaceholder('輸入股號 (如: AAPL, 2330)');
+    const searchButton = input.locator('..').getByRole('button').first();
+    const ensureRequestPromise = page.waitForRequest('**/api/v1/stocks/ensure**');
+
+    await input.fill('aapl');
+    await searchButton.click();
+
+    const ensureRequest = await ensureRequestPromise;
+    const ensureUrl = new URL(ensureRequest.url());
+    expect(ensureUrl.searchParams.get('symbol')).toBe('AAPL');
+    expect(ensureUrl.searchParams.get('market')).toBe('US');
+
+    await expect(page.getByRole('heading', { name: 'AAPL - Apple Inc.' })).toBeVisible();
+    await expect(page.getByText('$188.45').first()).toBeVisible();
+    await expect(page.getByText('+2.33').first()).toBeVisible();
+    await expect(page.getByText('+1.25%').first()).toBeVisible();
+    await expect(page.getByText('AAPL (Apple Inc.) 即時價格圖表')).toBeVisible();
+  });
+
+  test('should show the backend error message when direct search fails', async ({ page }) => {
+    await page.route('**/api/v1/stocks/ensure**', async route => {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: '找不到股票 AAPL' }),
       });
     });
-
     await page.goto('/dashboard');
 
-    // Should show error message or retry option
-    await expect(page.locator('text=載入失敗')).toBeVisible();
-    await expect(page.locator('button:has-text("重試")')).toBeVisible();
+    const input = page.getByPlaceholder('輸入股號 (如: AAPL, 2330)');
+    const searchButton = input.locator('..').getByRole('button').first();
+
+    await input.fill('aapl');
+    await searchButton.click();
+
+    await expect(page.getByText('找不到股票 AAPL')).toBeVisible();
   });
 
-  test('should allow switching between different stocks', async ({ page }) => {
-    // Wait for stock cards
-    await page.waitForSelector('[data-testid="stock-card"]');
+  test('should keep the main workflow usable on mobile width', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto('/dashboard');
 
-    // Click on different stock cards to switch active stock
-    const stockCards = page.locator('[data-testid="stock-card"]');
-    const count = await stockCards.count();
-
-    if (count > 1) {
-      // Click on second stock card
-      await stockCards.nth(1).click();
-
-      // Verify that the chart updates (this might need adjustment based on implementation)
-      // You might check for chart re-rendering or active state changes
-    }
+    await expect(page.getByRole('heading', { name: '即時圖表分析' })).toBeVisible();
+    await expect(page.getByPlaceholder('輸入股號 (如: AAPL, 2330)')).toBeVisible();
+    await expect(page.getByText('請選擇清單和股票')).toBeVisible();
   });
 });
 
 test.describe('Dashboard Navigation', () => {
   test('should navigate to dashboard from other pages', async ({ page }) => {
-    // Start from home page
     await page.goto('/');
 
-    // Click dashboard link in navigation
-    await page.click('a[href="/dashboard"]');
+    await page.getByRole('link', { name: '即時分析' }).click();
 
-    // Should be on dashboard page
     await expect(page).toHaveURL('/dashboard');
-    await expect(page.locator('h1')).toContainText('即時交易儀表板');
-  });
-
-  test('should maintain WebSocket connection across navigation', async ({ page }) => {
-    // Go to dashboard
-    await page.goto('/dashboard');
-
-    // Wait for WebSocket connection
-    await page.waitForSelector('[data-testid="connection-status"]');
-
-    // Navigate away and back
-    await page.goto('/stocks');
-    await page.goto('/dashboard');
-
-    // Connection should still be maintained
-    await expect(page.locator('[data-testid="connection-status"]')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '即時圖表分析' })).toBeVisible();
   });
 });

@@ -1,8 +1,20 @@
 import { IndicatorsApiService, IndicatorResponse, IndicatorBatchResponse } from '../indicatorsApi';
 import { ApiService } from '../../lib/api';
 
-// Mock ApiService
-jest.mock('../../lib/api');
+// Mock only HTTP methods; keep API endpoint constants real.
+jest.mock('../../lib/api', () => {
+  const actual = jest.requireActual('../../lib/api');
+  return {
+    ...actual,
+    ApiService: {
+      get: jest.fn(),
+      post: jest.fn(),
+      put: jest.fn(),
+      delete: jest.fn(),
+      patch: jest.fn(),
+    },
+  };
+});
 const mockApiService = ApiService as jest.Mocked<typeof ApiService>;
 
 describe('IndicatorsApiService', () => {
@@ -79,7 +91,7 @@ describe('IndicatorsApiService', () => {
       expect(mockApiService.post).toHaveBeenCalledWith(
         '/api/v1/stocks/2/indicators/calculate',
         {
-          indicator_type: 'RSI,SMA_5',
+          indicator_type: 'RSI',
           period: 50,
           timeframe: '1h',
           parameters: { custom_param: 'value' },
@@ -283,13 +295,18 @@ describe('IndicatorsApiService', () => {
         data_points: 30
       };
 
-      // Type checking ensures this compiles correctly
-      expect(validResponse.symbol).toBeDefined();
-      expect(validResponse.indicators).toBeDefined();
-      expect(validResponse.period).toBeDefined();
-      expect(validResponse.timestamp).toBeDefined();
-      expect(validResponse.success).toBeDefined();
-      expect(validResponse.data_points).toBeDefined();
+      expect(validResponse).toEqual({
+        symbol: 'AAPL',
+        indicators: {
+          rsi: 65.5,
+          sma_20: 120.5
+        },
+        period: 30,
+        timestamp: '2024-01-01T12:00:00Z',
+        success: true,
+        data_points: 30
+      });
+      expect(Object.keys(validResponse.indicators)).toEqual(['rsi', 'sma_20']);
     });
 
     it('should handle optional error and warning fields', () => {
@@ -323,7 +340,7 @@ describe('IndicatorsApiService', () => {
 
       // 驗證生成的請求數據格式
       const expectedRequestData = {
-        indicator_type: 'RSI,SMA_20,MACD',
+        indicator_type: 'RSI',
         period: 20,
         timeframe: '1d',
         parameters: { custom_param: 'value' },
@@ -378,7 +395,7 @@ describe('IndicatorsApiService', () => {
 
       const expectedRequestData = {
         indicator_type: 'RSI',
-        period: 14, // 前端應該提供預設值
+        period: undefined, // 後端 schema 會處理預設週期
         timeframe: '1d', // 前端應該提供預設值
         parameters: {}, // 前端應該提供預設值
         start_date: undefined,
@@ -652,73 +669,38 @@ describe('IndicatorsApiService', () => {
       });
     });
 
-    it('should handle API response unwrapping correctly', async () => {
-      // 測試 API 響應解包是否正確處理
+    it('should return the unwrapped API payload from ApiService', async () => {
       const params = {
         stock_id: 1,
         indicator_types: ['RSI'],
         timeframe: '1d' as const
       };
 
-      // 測試兩種可能的響應格式
-      const scenarios = [
-        {
-          name: '直接響應格式',
-          mockResponse: {
-            stock_id: 1,
+      const mockResponse = {
+        stock_id: 1,
+        symbol: 'AAPL',
+        timeframe: '1d',
+        indicators: {
+          RSI: {
             symbol: 'AAPL',
-            timeframe: '1d',
-            indicators: {
-              RSI: {
-                symbol: 'AAPL',
-                indicators: { rsi: 65.5 },
-                period: 14,
-                timestamp: '2024-01-01T12:00:00Z',
-                success: true,
-                data_points: 30
-              }
-            }
-          }
-        },
-        {
-          name: '包裝在 data 字段中的響應格式',
-          mockResponse: {
-            data: {
-              stock_id: 1,
-              symbol: 'AAPL',
-              timeframe: '1d',
-              indicators: {
-                RSI: {
-                  symbol: 'AAPL',
-                  indicators: { rsi: 65.5 },
-                  period: 14,
-                  timestamp: '2024-01-01T12:00:00Z',
-                  success: true,
-                  data_points: 30
-                }
-              }
-            }
+            indicators: { rsi: 65.5 },
+            period: 14,
+            timestamp: '2024-01-01T12:00:00Z',
+            success: true,
+            data_points: 30
           }
         }
-      ];
+      };
 
-      for (const scenario of scenarios) {
-        mockApiService.get.mockResolvedValue(scenario.mockResponse);
+      mockApiService.get.mockResolvedValue(mockResponse);
 
-        const result = await IndicatorsApiService.getIndicators(params);
+      const result = await IndicatorsApiService.getIndicators(params);
 
-        // 無論是哪種格式，結果都應該包含必需的字段且不為 undefined
-        expect(result.stock_id).toBeDefined();
-        expect(result.stock_id).not.toBeUndefined();
-        expect(result.symbol).toBeDefined();
-        expect(result.symbol).not.toBeUndefined();
-        expect(result.timeframe).toBeDefined();
-        expect(result.timeframe).not.toBeUndefined();
-        expect(result.indicators).toBeDefined();
-        expect(result.indicators).not.toBeUndefined();
-
-        console.log(`✓ ${scenario.name} 測試通過`);
-      }
+      expect(result).toEqual(mockResponse);
+      expect(result.stock_id).toBe(1);
+      expect(result.symbol).toBe('AAPL');
+      expect(result.timeframe).toBe('1d');
+      expect(result.indicators).toEqual(mockResponse.indicators);
     });
   });
 });

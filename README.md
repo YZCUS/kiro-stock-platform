@@ -118,6 +118,20 @@
    python backend/database/seed_data.py
    ```
 
+## 測試與覆蓋率
+
+目前測試基準記錄在 `docs/testing-coverage-plan.md`。Coverage 只計入產品程式碼，不計入測試、migration 與一次性腳本。
+
+```bash
+make test              # backend pytest + frontend Jest
+make backend-coverage  # backend product coverage
+make frontend-coverage # frontend Jest coverage
+make test-coverage     # backend + frontend coverage
+make e2e               # Playwright Chromium E2E
+```
+
+最近一次本地驗證：backend `192 passed`，product coverage `29%`；frontend `126 passed`，statements `24.87%`；E2E `6 passed`。Frontend coverage gate 先固定在目前可通過的 baseline，後續依測試補強逐步拉高。
+
 ## 專案結構（Clean Architecture）
 
 ```

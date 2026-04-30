@@ -4,17 +4,49 @@
  * 測試狀態管理優化後的 StockManagementPage 組件
  */
 import React from 'react';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { Provider } from 'react-redux';
-import { configureStore } from '@reduxjs/toolkit';
+import { combineReducers, configureStore } from '@reduxjs/toolkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import StockManagementPage from '../StockManagementPage';
 import uiReducer from '../../../store/slices/uiSlice';
 import signalsReducer from '../../../store/slices/signalsSlice';
+import authReducer from '../../../store/slices/authSlice';
+import stockListReducer from '../../../store/slices/stockListSlice';
+import * as stockListApi from '../../../services/stockListApi';
+
+const mockRouterPush = jest.fn();
+
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: mockRouterPush,
+    refresh: jest.fn(),
+  }),
+}));
+
+jest.mock('../../Portfolio/TransactionModal', () => {
+  return function MockTransactionModal() {
+    return null;
+  };
+});
+
+jest.mock('../../../services/stockListApi', () => ({
+  getStockLists: jest.fn(),
+  getStockList: jest.fn(),
+  createStockList: jest.fn(),
+  updateStockList: jest.fn(),
+  deleteStockList: jest.fn(),
+  getListStocks: jest.fn(),
+  addStockToList: jest.fn(),
+  batchAddStocksToList: jest.fn(),
+  removeStockFromList: jest.fn(),
+  reorderStockLists: jest.fn(),
+  reorderListStocks: jest.fn(),
+}));
 
 // Mock the useStocks and useDeleteStock hooks
 const mockStocksData = {
-  data: [
+  items: [
     {
       id: 1,
       symbol: '2330.TW',
@@ -43,29 +75,86 @@ const mockStocksData = {
       updated_at: '2024-01-01T00:00:00Z',
     },
   ],
-  pagination: {
-    page: 1,
-    pageSize: 20,
-    total: 3,
-    totalPages: 1,
-  },
+  page: 1,
+  per_page: 20,
+  total: 3,
+  total_pages: 1,
 };
 
 const mockUseStocks = jest.fn();
 const mockUseDeleteStock = jest.fn();
+const mockUseCreateStock = jest.fn();
 
 jest.mock('../../../hooks/useStocks', () => ({
   useStocks: (...args: any[]) => mockUseStocks(...args),
   useDeleteStock: (...args: any[]) => mockUseDeleteStock(...args),
+  useCreateStock: (...args: any[]) => mockUseCreateStock(...args),
 }));
 
+jest.mock('../../../hooks/useStockValidation', () => ({
+  useStockValidation: () => ({
+    isValidating: false,
+    validationError: null,
+    validatedStock: null,
+    validate: jest.fn(),
+    reset: jest.fn(),
+  }),
+}));
+
+const mockDefaultList = {
+  id: 1,
+  name: 'Default Watchlist',
+  description: '',
+  list_type: 'WATCHLIST',
+  is_default: true,
+  item_count: mockStocksData.items.length,
+  stocks_count: mockStocksData.items.length,
+  created_at: '2024-01-01T00:00:00Z',
+  updated_at: '2024-01-01T00:00:00Z',
+};
+
+const rootReducer = combineReducers({
+  ui: uiReducer,
+  signals: signalsReducer,
+  auth: authReducer,
+  stockList: stockListReducer,
+});
+
 // Test setup
-const createTestStore = () => {
+const createTestStore = ({
+  lists = [mockDefaultList],
+  currentList = mockDefaultList,
+  currentListStocks = mockStocksData.items,
+  stockListLoading = false,
+  stockListError = null,
+  isAuthenticated = true,
+} = {}) => {
   return configureStore({
-    reducer: {
-      ui: uiReducer,
-      signals: signalsReducer,
-    },
+    reducer: rootReducer,
+    preloadedState: {
+      auth: {
+        isAuthenticated,
+        user: isAuthenticated
+          ? {
+              id: 'user-1',
+              email: 'test@example.com',
+              username: 'tester',
+              created_at: '2024-01-01T00:00:00Z',
+              updated_at: '2024-01-01T00:00:00Z',
+            }
+          : null,
+        token: isAuthenticated ? 'test-token' : null,
+        loading: false,
+        error: null,
+      },
+      stockList: {
+        lists,
+        currentList,
+        currentListStocks,
+        loading: stockListLoading,
+        error: stockListError,
+      },
+    } as any,
   });
 };
 
@@ -100,6 +189,7 @@ global.confirm = jest.fn();
 describe('StockManagementPage - 狀態管理優化測試', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockRouterPush.mockClear();
 
     // Default mock implementations
     mockUseStocks.mockReturnValue({
@@ -116,7 +206,24 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
       error: null,
     });
 
+    mockUseCreateStock.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+
     (global.confirm as jest.Mock).mockReturnValue(true);
+    (stockListApi.getStockLists as jest.Mock).mockResolvedValue({ items: [mockDefaultList] });
+    (stockListApi.getListStocks as jest.Mock).mockImplementation(() => new Promise(() => {}));
+    (stockListApi.removeStockFromList as jest.Mock).mockResolvedValue({
+      message: 'removed',
+      list_id: mockDefaultList.id,
+      stock_id: mockStocksData.items[0].id,
+    });
+    (stockListApi.addStockToList as jest.Mock).mockResolvedValue({});
+    (stockListApi.reorderListStocks as jest.Mock).mockResolvedValue({ message: 'ok', updated_count: 0 });
+    (stockListApi.reorderStockLists as jest.Mock).mockResolvedValue({ message: 'ok', updated_count: 0 });
   });
 
   it('應該使用 React Query 獲取股票數據而不是 Redux', () => {
@@ -134,15 +241,13 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
     expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
   });
 
-  it('應該正確顯示分頁信息', () => {
+  it('清單模式應該顯示所有清單股票並隱藏 API 分頁控制', () => {
     const mockDataWithPagination = {
       ...mockStocksData,
-      pagination: {
-        page: 1,
-        pageSize: 2,
-        total: 10,
-        totalPages: 5,
-      },
+      page: 1,
+      per_page: 2,
+      total: 10,
+      total_pages: 5,
     };
 
     mockUseStocks.mockReturnValue({
@@ -154,8 +259,10 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
 
     render(<StockManagementPage />, { wrapper: createWrapper() });
 
-    // 驗證分頁控制顯示
-    expect(screen.getByText(/顯示第 1 到 2 頁，共 10 頁/)).toBeInTheDocument();
+    expect(screen.getByText('台積電')).toBeInTheDocument();
+    expect(screen.getByText('鴻海')).toBeInTheDocument();
+    expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
+    expect(screen.queryByText(/顯示第/)).not.toBeInTheDocument();
   });
 
   it('應該處理搜尋功能並重新查詢', () => {
@@ -174,55 +281,19 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
     });
   });
 
-  it('應該處理分頁變更', () => {
-    // Mock 有多頁的數據
-    const mockDataWithMultiplePages = {
-      ...mockStocksData,
-      pagination: {
-        page: 1,
-        pageSize: 1,
-        total: 3,
-        totalPages: 3,
-      },
-    };
-
-    mockUseStocks.mockReturnValue({
-      data: mockDataWithMultiplePages,
-      isLoading: false,
-      error: null,
-      refetch: jest.fn(),
-    });
-
+  it('應該透過確認對話框從目前清單移除股票', async () => {
     render(<StockManagementPage />, { wrapper: createWrapper() });
 
-    // 點擊頁碼2
-    const page2Button = screen.getByText('2');
-    fireEvent.click(page2Button);
-
-    // 驗證分頁參數被更新
-    expect(mockUseStocks).toHaveBeenLastCalledWith({
-      page: 2,
-      pageSize: 20,
-    });
-  });
-
-  it('應該使用 React Query mutation 處理股票刪除', async () => {
-    const mockMutate = jest.fn();
-    mockUseDeleteStock.mockReturnValue({
-      mutate: mockMutate,
-      isPending: false,
-      isError: false,
-      error: null,
-    });
-
-    render(<StockManagementPage />, { wrapper: createWrapper() });
-
-    // 點擊刪除按鈕
     const deleteButtons = screen.getAllByText('移除');
     fireEvent.click(deleteButtons[0]);
 
-    // 驗證 mutation 被調用
-    expect(mockMutate).toHaveBeenCalledWith(1);
+    expect(screen.getByText('確認從清單移除')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '確定' }));
+
+    await waitFor(() => {
+      expect(stockListApi.removeStockFromList).toHaveBeenCalledWith(1, 1);
+    });
   });
 
   it('應該顯示載入狀態', () => {
@@ -235,7 +306,7 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
 
     render(<StockManagementPage />, { wrapper: createWrapper() });
 
-    expect(screen.getByText('載入中...')).toBeInTheDocument();
+    expect(screen.getAllByText('載入中...').length).toBeGreaterThan(0);
   });
 
   it('應該顯示錯誤狀態和重試功能', () => {
@@ -260,25 +331,19 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
 
   it('應該顯示空狀態', () => {
     mockUseStocks.mockReturnValue({
-      data: { data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } },
+      data: { items: [], page: 1, per_page: 20, total: 0, total_pages: 0 },
       isLoading: false,
       error: null,
       refetch: jest.fn(),
     });
 
-    render(<StockManagementPage />, { wrapper: createWrapper() });
+    const store = createTestStore({ currentListStocks: [] });
+    render(<StockManagementPage />, { wrapper: createWrapper(store) });
 
-    expect(screen.getByText('尚未新增任何股票')).toBeInTheDocument();
+    expect(screen.getByText('此清單還沒有股票')).toBeInTheDocument();
   });
 
   it('應該顯示搜尋無結果狀態', () => {
-    mockUseStocks.mockReturnValue({
-      data: { data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } },
-      isLoading: false,
-      error: null,
-      refetch: jest.fn(),
-    });
-
     render(<StockManagementPage />, { wrapper: createWrapper() });
 
     const searchInput = screen.getByPlaceholderText('搜尋股票名稱或代號...');
@@ -290,14 +355,16 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
   it('應該正確顯示統計信息', () => {
     render(<StockManagementPage />, { wrapper: createWrapper() });
 
-    // 驗證總數
-    expect(screen.getByText('3')).toBeInTheDocument(); // 總數
+    const totalCard = screen.getByText('當前清單股票數').parentElement;
+    const twCard = screen.getByText('台股數量').parentElement;
+    const usCard = screen.getByText('美股數量').parentElement;
 
-    // 驗證台股數量
-    expect(screen.getByText('2')).toBeInTheDocument(); // 台股有2支
-
-    // 驗證美股數量
-    expect(screen.getByText('1')).toBeInTheDocument(); // 美股有1支
+    expect(totalCard).not.toBeNull();
+    expect(twCard).not.toBeNull();
+    expect(usCard).not.toBeNull();
+    expect(within(totalCard as HTMLElement).getByText('3')).toBeInTheDocument();
+    expect(within(twCard as HTMLElement).getByText('2')).toBeInTheDocument();
+    expect(within(usCard as HTMLElement).getByText('1')).toBeInTheDocument();
   });
 
   it('應該處理刪除操作的載入狀態', () => {
@@ -311,93 +378,114 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
     render(<StockManagementPage />, { wrapper: createWrapper() });
 
     // 驗證載入狀態顯示
-    expect(screen.getByText('載入中...')).toBeInTheDocument();
+    expect(screen.getAllByText('載入中...').length).toBeGreaterThan(0);
   });
 });
 
 describe('StockManagementPage - 客戶端狀態管理', () => {
-  it('應該只使用 Redux 管理 UI 狀態（Toast 通知）', async () => {
-    const store = createTestStore();
-    const mockMutate = jest.fn();
-
-    // Mock 成功的刪除操作
-    mockUseDeleteStock.mockImplementation((options) => {
-      return {
-        mutate: (id: number) => {
-          mockMutate(id);
-          // 模擬成功回調
-          if (options?.onSuccess) {
-            options.onSuccess();
-          }
-        },
-        isPending: false,
-        isError: false,
-        error: null,
-      };
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockUseStocks.mockReturnValue({
+      data: mockStocksData,
+      isLoading: false,
+      error: null,
+      refetch: jest.fn(),
     });
-
-    render(<StockManagementPage />, {
-      wrapper: createWrapper(store)
+    mockUseDeleteStock.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
     });
-
-    // 點擊刪除按鈕
-    const deleteButtons = screen.getAllByText('移除');
-    fireEvent.click(deleteButtons[0]);
-
-    // 驗證 Toast 狀態被添加到 Redux store
-    const state = store.getState();
-    expect(state.ui.toasts).toHaveLength(1);
-    expect(state.ui.toasts[0].type).toBe('success');
-    expect(state.ui.toasts[0].title).toBe('成功');
+    mockUseCreateStock.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+    (stockListApi.getListStocks as jest.Mock).mockImplementation(() => new Promise(() => {}));
+    (stockListApi.removeStockFromList as jest.Mock).mockResolvedValue({
+      message: 'removed',
+      list_id: mockDefaultList.id,
+      stock_id: mockStocksData.items[0].id,
+    });
   });
 
-  it('應該處理刪除失敗的錯誤 Toast', () => {
+  it('應該使用 Redux 管理清單移除成功的 Toast 通知', async () => {
     const store = createTestStore();
-    const mockMutate = jest.fn();
 
-    // Mock 失敗的刪除操作
-    mockUseDeleteStock.mockImplementation((options) => {
-      return {
-        mutate: (id: number) => {
-          mockMutate(id);
-          // 模擬失敗回調
-          if (options?.onError) {
-            options.onError(new Error('刪除失敗'));
-          }
-        },
-        isPending: false,
-        isError: false,
-        error: null,
-      };
+    render(<StockManagementPage />, {
+      wrapper: createWrapper(store)
+    });
+
+    const deleteButtons = screen.getAllByText('移除');
+    fireEvent.click(deleteButtons[0]);
+    fireEvent.click(screen.getByRole('button', { name: '確定' }));
+
+    await waitFor(() => {
+      const state = store.getState();
+      expect(state.ui.toasts).toHaveLength(1);
+      expect(state.ui.toasts[0].type).toBe('success');
+      expect(state.ui.toasts[0].title).toBe('成功');
+    });
+  });
+
+  it('應該處理清單移除失敗的錯誤 Toast', async () => {
+    const store = createTestStore();
+    (stockListApi.removeStockFromList as jest.Mock).mockRejectedValueOnce({
+      response: { data: { detail: '移除失敗' } },
     });
 
     render(<StockManagementPage />, {
       wrapper: createWrapper(store)
     });
 
-    // 點擊刪除按鈕
     const deleteButtons = screen.getAllByText('移除');
     fireEvent.click(deleteButtons[0]);
+    fireEvent.click(screen.getByRole('button', { name: '確定' }));
 
-    // 驗證錯誤 Toast 被添加
-    const state = store.getState();
-    expect(state.ui.toasts).toHaveLength(1);
-    expect(state.ui.toasts[0].type).toBe('error');
-    expect(state.ui.toasts[0].title).toBe('錯誤');
+    await waitFor(() => {
+      const state = store.getState();
+      expect(state.ui.toasts).toHaveLength(1);
+      expect(state.ui.toasts[0].type).toBe('error');
+      expect(state.ui.toasts[0].title).toBe('錯誤');
+      expect(state.ui.toasts[0].message).toBe('移除失敗');
+    });
   });
 });
 
 describe('StockManagementPage - 性能優化', () => {
-  it('應該使用 useMemo 優化查詢參數', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockUseStocks.mockReturnValue({
+      data: mockStocksData,
+      isLoading: false,
+      error: null,
+      refetch: jest.fn(),
+    });
+    mockUseDeleteStock.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+    mockUseCreateStock.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+  });
+
+  it('重新渲染時應該維持相同查詢參數', () => {
     const { rerender } = render(<StockManagementPage />, { wrapper: createWrapper() });
 
-    const initialCallCount = mockUseStocks.mock.calls.length;
+    const initialParams = mockUseStocks.mock.calls[mockUseStocks.mock.calls.length - 1][0];
 
     // 重新渲染但不改變 props
     rerender(<StockManagementPage />);
 
-    // useStocks 不應該因為重新渲染而被額外調用
-    expect(mockUseStocks.mock.calls.length).toBe(initialCallCount);
+    expect(mockUseStocks.mock.calls[mockUseStocks.mock.calls.length - 1][0]).toEqual(initialParams);
   });
 
   it('應該正確處理防抖搜尋（概念驗證）', () => {

@@ -5,11 +5,13 @@ Testing technical analysis domain services and business logic
 """
 import pytest
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock
 from datetime import datetime, date, timedelta
 import random
 
-sys.path.append('/home/opc/projects/kiro-stock-platform/backend')
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(BACKEND_ROOT))
 
 from domain.services.technical_analysis_service import (
     TechnicalAnalysisService,
@@ -385,29 +387,40 @@ class TestTechnicalAnalysisService:
     @pytest.mark.asyncio
     async def test_different_trend_analysis(self):
         """Test trend analysis for different market conditions"""
+        def make_trend_prices(stock_id, closes):
+            prices = []
+            for index, close_price in enumerate(closes):
+                price = MagicMock()
+                price.stock_id = stock_id
+                price.date = date.today() - timedelta(days=index)
+                price.close_price = close_price
+                price.open_price = close_price
+                price.high_price = close_price
+                price.low_price = close_price
+                price.volume = 1000000
+                prices.append(price)
+            return prices
+
         scenarios = [
-            ("upward", "上升趨勢"),
-            ("downward", "下降趨勢"),
-            ("sideways", "震盪趨勢")
+            ("upward", [105, 104, 103, 102, 101] + [100] * 25, "上升趨勢"),
+            ("downward", [95, 96, 97, 98, 99] + [100] * 25, "下降趨勢"),
+            ("sideways", [100, 101, 99, 101, 100] + [100] * 25, "震盪趨勢"),
         ]
 
-        for trend_type, expected_trend_keyword in scenarios:
-            test_stock = self.create_mock_stock(9, f"TREND_{trend_type.upper()}", f"{trend_type} Trend Test")
+        for index, (trend_type, closes, expected_trend) in enumerate(scenarios, start=1):
+            stock_id = 90 + index
+            test_stock = self.create_mock_stock(stock_id, f"TREND_{trend_type.upper()}", f"{trend_type} Trend Test")
             self.mock_stock_repo.get = AsyncMock(return_value=test_stock)
 
-            # Create price data with specific trend
-            mock_prices = self.create_mock_price_data(9, 30, 100.0, trend_type)
-            self.mock_price_repo.get_by_stock = AsyncMock(return_value=mock_prices)
+            self.mock_price_repo.get_by_stock = AsyncMock(return_value=make_trend_prices(stock_id, closes))
 
             # Get technical summary
             summary = await self.analysis_service.get_stock_technical_summary(
                 db=MagicMock(),
-                stock_id=9
+                stock_id=stock_id
             )
 
-            # Verify trend analysis contains relevant information
-            assert summary["trend_analysis"] is not None
-            assert len(summary["trend_analysis"]) > 0
+            assert summary["trend_analysis"] == expected_trend
 
     @pytest.mark.asyncio
     async def test_technical_signals_generation(self):

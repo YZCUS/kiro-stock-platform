@@ -11,7 +11,6 @@ import { addToast } from '../../store/slices/uiSlice';
 import { fetchStockLists, fetchListStocks, addStockToList, removeStockFromList } from '../../store/slices/stockListSlice';
 import { useStocks, useDeleteStock, useCreateStock } from '../../hooks/useStocks';
 import { useStockValidation } from '../../hooks/useStockValidation';
-import { StockFilter } from '../../types';
 import StocksApiService from '../../services/stocksApi';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import TransactionModal from '../Portfolio/TransactionModal';
@@ -58,7 +57,7 @@ const StockManagementPage: React.FC = () => {
   const { isAuthenticated } = useAppSelector((state) => state.auth);
 
   // 股號驗證 Hook
-  const { isValidating, validationError, validatedStock, validate, reset: resetValidation } = useStockValidation();
+  const { validationError, validate, reset: resetValidation } = useStockValidation();
 
   // 檢查登入狀態，未登入則重定向到登入頁面
   useEffect(() => {
@@ -161,25 +160,33 @@ const StockManagementPage: React.FC = () => {
   });
 
   // 從響應中提取數據並根據 viewMode 和清單過濾
-  const allStocks = stocksResponse?.items || [];
+  const allStocks = useMemo(() => stocksResponse?.items || [], [stocksResponse?.items]);
   const stocks = useMemo(() => {
     if (viewMode === 'portfolio') {
       // 持倉視圖：從所有股票中過濾
       return allStocks.filter(stock => stock.is_portfolio);
     } else if (viewMode === 'all' && currentListId) {
       // 清單視圖：直接使用 Redux 中的 currentListStocks（已包含完整 Stock 對象和 latest_price）
-      return currentListStocks;
+      const trimmedSearchTerm = searchTerm.trim().toLowerCase();
+      if (!trimmedSearchTerm) {
+        return currentListStocks;
+      }
+
+      return currentListStocks.filter((stock) => {
+        const symbol = stock.symbol?.toLowerCase() || '';
+        const name = stock.name?.toLowerCase() || '';
+        return symbol.includes(trimmedSearchTerm) || name.includes(trimmedSearchTerm);
+      });
     }
     // 如果沒有選擇清單，不顯示任何股票
     return [];
-  }, [allStocks, viewMode, currentListId, currentListStocks]);
+  }, [allStocks, viewMode, currentListId, currentListStocks, searchTerm]);
 
   // 根據當前視圖模式計算分頁資訊
   const pagination = useMemo(() => {
     if (viewMode === 'all' && currentListId) {
       // 列表視圖：使用列表中的股票數量
       const total = stocks.length;
-      const totalPages = Math.ceil(total / pageSize);
       return {
         page: 1, // 列表視圖不分頁，顯示所有股票
         pageSize: total,
@@ -194,7 +201,7 @@ const StockManagementPage: React.FC = () => {
       total: stocksResponse?.total || 0,
       totalPages: stocksResponse?.total_pages || 0,
     };
-  }, [viewMode, currentListId, stocks.length, pageSize, stocksResponse]);
+  }, [viewMode, currentListId, stocks.length, stocksResponse]);
   const loading = isLoading || deleteStockMutation.isPending;
   const error = queryError?.message || null;
 
@@ -364,16 +371,6 @@ const StockManagementPage: React.FC = () => {
     }
     // 如果包含英文字母，判定為美股
     return 'US';
-  };
-
-  // 格式化股票代號
-  const formatSymbol = (symbol: string, market: 'TW' | 'US'): string => {
-    const trimmedSymbol = symbol.trim().toUpperCase();
-    // 台股需要加上 .TW 後綴（如果沒有的話）
-    if (market === 'TW' && !trimmedSymbol.endsWith('.TW')) {
-      return `${trimmedSymbol}.TW`;
-    }
-    return trimmedSymbol;
   };
 
   // 處理新增股票

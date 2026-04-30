@@ -9,6 +9,8 @@ This stock analysis platform is split into backend, frontend, and workflow layer
 - `make dev-setup`: build images, start services, initialize and seed the database.
 - `make up` / `make down` / `make logs`: manage the local Docker stack.
 - `make test`: run backend pytest tests and frontend Jest tests.
+- `make test-coverage`: run backend and frontend coverage reports against product code.
+- `make e2e`: run Chromium Playwright workflows from `frontend/tests/e2e/`.
 - `make lint` / `make format`: run backend and frontend linting or formatting.
 - `cd backend && uvicorn app.main:app --reload`: run the API locally.
 - `cd frontend && npm run dev`: run Next.js on `localhost:3000`.
@@ -20,7 +22,7 @@ Use 4-space indentation for Python, formatted with Black and checked with Flake8
 
 ## Testing Guidelines
 
-Backend tests use pytest. Place unit tests in `backend/tests/unit/`, API or database integration tests in `backend/tests/integration/`, and full workflows in `backend/tests/e2e/`. Name Python files `test_*.py` and functions `test_*`. Frontend tests use Jest/React Testing Library; Playwright E2E tests run with `npm run test:e2e`. Update tests when changing domain services, API contracts, authentication, portfolio logic, or chart workflows.
+Backend tests use pytest. Place unit tests in `backend/tests/unit/`, API or database integration tests in `backend/tests/integration/`, and full workflows in `backend/tests/e2e/`. Name Python files `test_*.py` and functions `test_*`. Frontend tests use Jest/React Testing Library; Playwright E2E tests run with `npm run test:e2e`. Update tests when changing domain services, API contracts, authentication, portfolio logic, trading adapters, risk guardrails, or chart workflows. Keep coverage gates tied to the current baseline documented in `docs/testing-coverage-plan.md`.
 
 ## Commit & Pull Request Guidelines
 

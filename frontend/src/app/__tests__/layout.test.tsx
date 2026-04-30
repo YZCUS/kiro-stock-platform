@@ -10,6 +10,7 @@ import { configureStore } from '@reduxjs/toolkit';
 import RootLayout from '../layout';
 import uiReducer from '../../store/slices/uiSlice';
 import signalsReducer from '../../store/slices/signalsSlice';
+import authReducer from '../../store/slices/authSlice';
 
 // Mock next/navigation
 jest.mock('next/navigation', () => ({
@@ -46,6 +47,7 @@ jest.mock('../../store/providers', () => ({
       reducer: {
         ui: uiReducer,
         signals: signalsReducer,
+        auth: authReducer,
       },
     });
 
@@ -60,6 +62,23 @@ jest.mock('../../store/providers', () => ({
 // Mock CSS import
 jest.mock('../globals.css', () => ({}));
 
+let consoleErrorSpy: jest.SpyInstance;
+const originalConsoleError = console.error;
+
+beforeEach(() => {
+  consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation((...args) => {
+    const message = args.map(String).join(' ');
+    if (message.includes('validateDOMNesting') && message.includes('<html>')) {
+      return;
+    }
+    originalConsoleError(...args);
+  });
+});
+
+afterEach(() => {
+  consoleErrorSpy.mockRestore();
+});
+
 describe('RootLayout', () => {
   const TestContent = () => <div data-testid="test-content">Test Content</div>;
 
@@ -71,7 +90,7 @@ describe('RootLayout', () => {
     );
 
     // 檢查基本結構
-    expect(screen.getByRole('banner')).toBeInTheDocument(); // nav 標籤
+    expect(screen.getByRole('navigation')).toBeInTheDocument(); // nav 標籤
     expect(screen.getByRole('main')).toBeInTheDocument(); // main 標籤
     expect(screen.getByRole('contentinfo')).toBeInTheDocument(); // footer 標籤
   });
@@ -107,8 +126,7 @@ describe('RootLayout', () => {
     expect(screen.getByText('股票分析平台')).toBeInTheDocument();
     expect(screen.getByText('首頁')).toBeInTheDocument();
     expect(screen.getByText('股票管理')).toBeInTheDocument();
-    expect(screen.getByText('圖表分析')).toBeInTheDocument();
-    expect(screen.getByText('即時儀表板')).toBeInTheDocument();
+    expect(screen.getByText('即時分析')).toBeInTheDocument();
     expect(screen.getByText('交易信號')).toBeInTheDocument();
     expect(screen.getByText('系統狀態')).toBeInTheDocument(); // 這個在 layout 2.tsx 中是缺失的
   });
@@ -155,7 +173,7 @@ describe('RootLayout', () => {
     expect(html).toHaveAttribute('lang', 'zh-TW');
 
     const body = container.querySelector('body');
-    expect(body).toHaveClass('min-h-screen', 'bg-gray-50');
+    expect(body).toHaveClass('min-h-screen', 'bg-gradient-to-br', 'from-gray-50', 'to-gray-100');
   });
 
   it('應該包含版權信息', () => {
@@ -165,7 +183,7 @@ describe('RootLayout', () => {
       </RootLayout>
     );
 
-    expect(screen.getByText(/© 2024 股票分析平台. 版權所有./)).toBeInTheDocument();
+    expect(screen.getByText(/© 2025 股票分析平台. 版權所有./)).toBeInTheDocument();
   });
 
   it('導航連結應該有正確的 href 屬性', () => {
@@ -178,8 +196,7 @@ describe('RootLayout', () => {
     // 檢查連結的 href 屬性
     expect(screen.getByText('首頁').closest('a')).toHaveAttribute('href', '/');
     expect(screen.getByText('股票管理').closest('a')).toHaveAttribute('href', '/stocks');
-    expect(screen.getByText('圖表分析').closest('a')).toHaveAttribute('href', '/charts');
-    expect(screen.getByText('即時儀表板').closest('a')).toHaveAttribute('href', '/dashboard');
+    expect(screen.getByText('即時分析').closest('a')).toHaveAttribute('href', '/dashboard');
     expect(screen.getByText('交易信號').closest('a')).toHaveAttribute('href', '/signals');
     expect(screen.getByText('系統狀態').closest('a')).toHaveAttribute('href', '/system');
   });
@@ -196,8 +213,8 @@ describe('RootLayout', () => {
     expect(container).toHaveClass('mx-auto', 'px-4', 'sm:px-6', 'lg:px-8');
 
     // 檢查導航樣式
-    const nav = screen.getByRole('banner');
-    expect(nav).toHaveClass('bg-white', 'shadow-sm', 'border-b', 'border-gray-200');
+    const nav = screen.getByRole('navigation');
+    expect(nav).toHaveClass('bg-white/80', 'backdrop-blur-md', 'shadow-sm', 'border-b', 'border-gray-200');
   });
 });
 
@@ -290,8 +307,7 @@ describe('RootLayout - 對比 layout 2.tsx 缺失功能測試', () => {
     const navItems = [
       '首頁',
       '股票管理',
-      '圖表分析',
-      '即時儀表板',
+      '即時分析',
       '交易信號',
       '系統狀態'
     ];

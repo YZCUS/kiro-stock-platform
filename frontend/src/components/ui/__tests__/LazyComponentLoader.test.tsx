@@ -17,10 +17,13 @@ jest.mock('next/dynamic', () => {
     const MockComponent = React.forwardRef<any, any>((props, ref) => {
       const [loading, setLoading] = React.useState(true);
       const [error, setError] = React.useState<Error | null>(null);
+      const [LoadedComponent, setLoadedComponent] = React.useState<React.ComponentType<any> | null>(null);
 
       React.useEffect(() => {
         importFn()
-          .then(() => {
+          .then((module) => {
+            const Component = module.default || module;
+            setLoadedComponent(() => Component);
             setLoading(false);
           })
           .catch((err) => {
@@ -37,7 +40,11 @@ jest.mock('next/dynamic', () => {
         throw error;
       }
 
-      return React.createElement('div', { ...props, ref }, 'Mocked Component');
+      if (!LoadedComponent) {
+        return null;
+      }
+
+      return React.createElement(LoadedComponent, { ...props, ref });
     });
 
     MockComponent.displayName = 'MockDynamicComponent';
@@ -51,8 +58,30 @@ const TestComponent: React.FC<{ message: string }> = ({ message }) => (
 );
 
 describe('LazyComponentLoader', () => {
+  let consoleErrorSpy: jest.SpyInstance;
+  const originalConsoleError = console.error;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation((...args) => {
+      const message = args.map(String).join(' ');
+      if (
+        message.includes('Failed to load component') ||
+        message.includes('Load failed') ||
+        message.includes('Chart load failed') ||
+        (
+          message.includes('MockDynamicComponent') &&
+          message.includes('LazyErrorBoundary')
+        )
+      ) {
+        return;
+      }
+      originalConsoleError(...args);
+    });
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
   });
 
   describe('createLazyComponent', () => {

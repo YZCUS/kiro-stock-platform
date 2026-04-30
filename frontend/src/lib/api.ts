@@ -29,10 +29,10 @@ export const API_ENDPOINTS = {
 
   // Indicator endpoints
   INDICATORS: {
-    LIST: (stockId: number) => `/api/v1/stocks/${stockId}/indicators/`,
-    SUMMARY: (stockId: number) => `/api/v1/stocks/${stockId}/indicators/summary/`,
-    CALCULATE: (stockId: number) => `/api/v1/stocks/${stockId}/indicators/calculate/`,
-    SPECIFIC: (stockId: number, indicatorType: string) => `/api/v1/stocks/${stockId}/indicators/${indicatorType}/`,
+    LIST: (stockId: number) => `/api/v1/stocks/${stockId}/indicators`,
+    SUMMARY: (stockId: number) => `/api/v1/stocks/${stockId}/indicators/summary`,
+    CALCULATE: (stockId: number) => `/api/v1/stocks/${stockId}/indicators/calculate`,
+    SPECIFIC: (stockId: number, indicatorType: string) => `/api/v1/stocks/${stockId}/indicators/${indicatorType}`,
   },
 
   // Signal endpoints

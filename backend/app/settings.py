@@ -47,7 +47,7 @@ class RedisSettings(BaseSettings):
 class ExternalAPISettings(BaseSettings):
     """外部 API 設定"""
 
-    # 價格數據源配置（不使用 env_prefix，直接讀取 PRICE_DATA_SOURCE）
+    # 價格數據源配置
     price_data_source: str = Field("yahoo_finance")
 
     # Yahoo Finance 配置
@@ -60,6 +60,33 @@ class ExternalAPISettings(BaseSettings):
 
     class Config:
         env_prefix = "EXTERNAL_API_"
+
+
+class BrokerSettings(BaseSettings):
+    """交易平台設定"""
+
+    provider: str = Field("paper", env="PROVIDER")
+    mode: str = Field("paper", env="MODE")
+    trading_enabled: bool = Field(False, env="TRADING_ENABLED")
+    read_only: bool = Field(True, env="READ_ONLY")
+    default_account_ref: Optional[str] = Field(None, env="DEFAULT_ACCOUNT_REF")
+
+    class Config:
+        env_prefix = "BROKER_"
+
+
+class IBKRSettings(BaseSettings):
+    """Interactive Brokers 設定"""
+
+    host: str = Field("127.0.0.1", env="HOST")
+    port: int = Field(4002, env="PORT")
+    client_id: int = Field(1, env="CLIENT_ID")
+    account_id: Optional[str] = Field(None, env="ACCOUNT_ID")
+    read_only: bool = Field(True, env="READ_ONLY")
+    timeout_seconds: int = Field(10, env="TIMEOUT_SECONDS")
+
+    class Config:
+        env_prefix = "IBKR_"
 
 
 class SecuritySettings(BaseSettings):
@@ -121,6 +148,8 @@ class Settings(BaseSettings):
     database: DatabaseSettings = DatabaseSettings()
     redis: RedisSettings = RedisSettings()
     external_api: ExternalAPISettings = ExternalAPISettings()
+    broker: BrokerSettings = BrokerSettings()
+    ibkr: IBKRSettings = IBKRSettings()
     security: SecuritySettings = SecuritySettings()
     logging: LoggingSettings = LoggingSettings()
     app: ApplicationSettings = ApplicationSettings()
@@ -160,6 +189,33 @@ class Settings(BaseSettings):
     LOG_MAX_FILE_SIZE: Optional[int] = Field(None, alias="LOG_MAX_FILE_SIZE")
     LOG_BACKUP_COUNT: Optional[int] = Field(None, alias="LOG_BACKUP_COUNT")
     ALLOWED_HOSTS: Optional[str] = Field(None, alias="ALLOWED_HOSTS")
+
+    PRICE_DATA_SOURCE: Optional[str] = Field(None, alias="PRICE_DATA_SOURCE")
+    EXTERNAL_API_PRICE_DATA_SOURCE: Optional[str] = Field(
+        None, alias="EXTERNAL_API_PRICE_DATA_SOURCE"
+    )
+    YAHOO_FINANCE_TIMEOUT: Optional[int] = Field(None, alias="YAHOO_FINANCE_TIMEOUT")
+    YAHOO_FINANCE_RETRIES: Optional[int] = Field(None, alias="YAHOO_FINANCE_RETRIES")
+    YAHOO_FINANCE_RETRY_COUNT: Optional[int] = Field(
+        None, alias="YAHOO_FINANCE_RETRY_COUNT"
+    )
+
+    BROKER_PROVIDER: Optional[str] = Field(None, alias="BROKER_PROVIDER")
+    BROKER_MODE: Optional[str] = Field(None, alias="BROKER_MODE")
+    BROKER_TRADING_ENABLED: Optional[bool] = Field(
+        None, alias="BROKER_TRADING_ENABLED"
+    )
+    BROKER_READ_ONLY: Optional[bool] = Field(None, alias="BROKER_READ_ONLY")
+    BROKER_DEFAULT_ACCOUNT_REF: Optional[str] = Field(
+        None, alias="BROKER_DEFAULT_ACCOUNT_REF"
+    )
+
+    IBKR_HOST: Optional[str] = Field(None, alias="IBKR_HOST")
+    IBKR_PORT: Optional[int] = Field(None, alias="IBKR_PORT")
+    IBKR_CLIENT_ID: Optional[int] = Field(None, alias="IBKR_CLIENT_ID")
+    IBKR_ACCOUNT_ID: Optional[str] = Field(None, alias="IBKR_ACCOUNT_ID")
+    IBKR_READ_ONLY: Optional[bool] = Field(None, alias="IBKR_READ_ONLY")
+    IBKR_TIMEOUT_SECONDS: Optional[int] = Field(None, alias="IBKR_TIMEOUT_SECONDS")
 
     @model_validator(mode="after")
     def apply_legacy_overrides(cls, settings: "Settings") -> "Settings":
@@ -233,6 +289,45 @@ class Settings(BaseSettings):
             settings.logging.max_file_size = settings.LOG_MAX_FILE_SIZE
         if settings.LOG_BACKUP_COUNT is not None:
             settings.logging.backup_count = settings.LOG_BACKUP_COUNT
+
+        if settings.PRICE_DATA_SOURCE:
+            settings.external_api.price_data_source = settings.PRICE_DATA_SOURCE
+        if settings.EXTERNAL_API_PRICE_DATA_SOURCE:
+            settings.external_api.price_data_source = (
+                settings.EXTERNAL_API_PRICE_DATA_SOURCE
+            )
+        if settings.YAHOO_FINANCE_TIMEOUT is not None:
+            settings.external_api.yahoo_finance_timeout = settings.YAHOO_FINANCE_TIMEOUT
+        if settings.YAHOO_FINANCE_RETRIES is not None:
+            settings.external_api.yahoo_finance_retries = settings.YAHOO_FINANCE_RETRIES
+        if settings.YAHOO_FINANCE_RETRY_COUNT is not None:
+            settings.external_api.yahoo_finance_retries = (
+                settings.YAHOO_FINANCE_RETRY_COUNT
+            )
+
+        if settings.BROKER_PROVIDER:
+            settings.broker.provider = settings.BROKER_PROVIDER
+        if settings.BROKER_MODE:
+            settings.broker.mode = settings.BROKER_MODE
+        if settings.BROKER_TRADING_ENABLED is not None:
+            settings.broker.trading_enabled = settings.BROKER_TRADING_ENABLED
+        if settings.BROKER_READ_ONLY is not None:
+            settings.broker.read_only = settings.BROKER_READ_ONLY
+        if settings.BROKER_DEFAULT_ACCOUNT_REF:
+            settings.broker.default_account_ref = settings.BROKER_DEFAULT_ACCOUNT_REF
+
+        if settings.IBKR_HOST:
+            settings.ibkr.host = settings.IBKR_HOST
+        if settings.IBKR_PORT is not None:
+            settings.ibkr.port = settings.IBKR_PORT
+        if settings.IBKR_CLIENT_ID is not None:
+            settings.ibkr.client_id = settings.IBKR_CLIENT_ID
+        if settings.IBKR_ACCOUNT_ID:
+            settings.ibkr.account_id = settings.IBKR_ACCOUNT_ID
+        if settings.IBKR_READ_ONLY is not None:
+            settings.ibkr.read_only = settings.IBKR_READ_ONLY
+        if settings.IBKR_TIMEOUT_SECONDS is not None:
+            settings.ibkr.timeout_seconds = settings.IBKR_TIMEOUT_SECONDS
 
         if settings.ALLOWED_HOSTS:
             if "," in settings.ALLOWED_HOSTS:
