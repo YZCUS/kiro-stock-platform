@@ -69,6 +69,7 @@ async def create_stock(
         raise HTTPException(status_code=500, detail=f"創建股票失敗: {str(e)}")
 
 
+@router.patch("/{stock_id}", response_model=StockResponse)
 @router.put("/{stock_id}", response_model=StockResponse)
 async def update_stock(
     stock_id: int,

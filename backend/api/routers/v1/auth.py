@@ -15,6 +15,7 @@ from api.schemas.auth import (
     PasswordChange,
 )
 from domain.models.user import User
+from domain.models.user_stock_list import UserStockList
 from datetime import timedelta
 from app.settings import settings
 import uuid
@@ -64,6 +65,15 @@ async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
             email=user_data.email,
             username=user_data.username,
             password=user_data.password,
+        )
+    )
+    await db.flush()
+    db.add(
+        UserStockList(
+            user_id=user.id,
+            name="我的觀察清單",
+            description="預設觀察清單",
+            is_default=True,
         )
     )
     await db.commit()

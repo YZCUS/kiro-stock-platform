@@ -202,6 +202,7 @@ async def update_subscription(
     try:
         subscription = await subscription_service.update_subscription(
             db=db,
+            user_id=current_user.id,
             subscription_id=subscription_id,
             params=request.params,
             monitor_all_lists=request.monitor_all_lists,
@@ -263,7 +264,10 @@ async def delete_subscription(
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     success = await subscription_service.delete_subscription(
-        db=db, subscription_id=subscription_id, hard_delete=hard_delete
+        db=db,
+        user_id=current_user.id,
+        subscription_id=subscription_id,
+        hard_delete=hard_delete,
     )
 
     if not success:
@@ -298,7 +302,10 @@ async def toggle_subscription(
     """
     try:
         subscription = await subscription_service.toggle_subscription(
-            db=db, subscription_id=subscription_id, is_active=is_active
+            db=db,
+            user_id=current_user.id,
+            subscription_id=subscription_id,
+            is_active=is_active,
         )
 
         # 驗證訂閱屬於當前用戶

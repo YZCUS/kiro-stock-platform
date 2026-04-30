@@ -39,10 +39,10 @@ export const API_ENDPOINTS = {
   SIGNALS: {
     LIST: '/api/v1/signals/',
     CREATE: '/api/v1/signals/',
-    DETAIL: (id: number) => `/api/v1/signals/${id}/`,
+    DETAIL: (id: number) => `/api/v1/signals/detail/${id}`,
     UPDATE: (id: number) => `/api/v1/signals/${id}/`,
     DELETE: (id: number) => `/api/v1/signals/${id}/`,
-    BY_STOCK: (stockId: number) => `/api/v1/stocks/${stockId}/signals/`,
+    BY_STOCK: (stockId: number) => `/api/v1/signals/stock/${stockId}`,
   },
 
   // Analysis endpoints
@@ -138,7 +138,8 @@ const createApiClient = (): AxiosInstance => {
   client.interceptors.request.use(
     (config) => {
       // Add auth token if available
-      const token = localStorage.getItem('token');
+      const token =
+        typeof window !== 'undefined' ? localStorage.getItem('token') : null;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -151,7 +152,7 @@ const createApiClient = (): AxiosInstance => {
   client.interceptors.response.use(
     (response: AxiosResponse) => response,
     (error) => {
-      if (error.response?.status === 401) {
+      if (error.response?.status === 401 && typeof window !== 'undefined') {
         // Handle unauthorized access
         localStorage.removeItem('token');
         window.location.href = '/login';
@@ -232,7 +233,7 @@ export class ApiService {
   }
 
   static async updateStock(id: number, data: any): Promise<any> {
-    return put(API_ENDPOINTS.STOCKS.UPDATE(id), data);
+    return patch(API_ENDPOINTS.STOCKS.UPDATE(id), data);
   }
 
   static async deleteStock(id: number): Promise<void> {

@@ -2,7 +2,7 @@
 用戶持倉模型
 """
 
-from sqlalchemy import Column, Integer, Numeric, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, Numeric, ForeignKey, UniqueConstraint, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy import func
@@ -45,6 +45,9 @@ class UserPortfolio(BaseModel, TimestampMixin):
         UniqueConstraint(
             "user_id", "stock_id", name="uq_user_portfolios_user_id_stock_id"
         ),
+        CheckConstraint("quantity > 0", name="ck_user_portfolios_quantity_positive"),
+        CheckConstraint("avg_cost >= 0", name="ck_user_portfolios_avg_cost_non_negative"),
+        CheckConstraint("total_cost >= 0", name="ck_user_portfolios_total_cost_non_negative"),
         {"comment": "用戶持倉表"},
     )
 
@@ -52,7 +55,7 @@ class UserPortfolio(BaseModel, TimestampMixin):
     stock = relationship("Stock", back_populates="user_portfolios")
     user = relationship("User", back_populates="portfolios")
     transactions = relationship(
-        "Transaction", back_populates="portfolio", cascade="all, delete-orphan"
+        "Transaction", back_populates="portfolio", passive_deletes=True
     )
 
     @classmethod
@@ -89,6 +92,11 @@ class UserPortfolio(BaseModel, TimestampMixin):
         transaction_type: str,
     ) -> Optional["UserPortfolio"]:
         """創建或更新持倉（根據交易類型）"""
+        if quantity <= 0:
+            raise ValueError("交易數量必須大於 0")
+        if price <= 0:
+            raise ValueError("交易價格必須大於 0")
+
         portfolio = cls.get_portfolio_by_stock(session, user_id, stock_id)
 
         if transaction_type == "BUY":
@@ -114,6 +122,8 @@ class UserPortfolio(BaseModel, TimestampMixin):
 
         elif transaction_type == "SELL":
             if portfolio:
+                if quantity > portfolio.quantity:
+                    raise ValueError("賣出數量不可超過目前持倉")
                 # 減少持有數量
                 portfolio.quantity -= quantity
                 if portfolio.quantity <= 0:

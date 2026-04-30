@@ -3,7 +3,7 @@
 負責: /refresh, /collect, /collect-all, /collect-batch
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Any
 from datetime import date, timedelta
@@ -112,6 +112,7 @@ async def collect_stock_data(
 @router.post("/collect-all", response_model=Dict[str, Any])
 async def collect_all_stocks_data(
     days: int = 7,
+    market: str | None = Query(None, pattern="^(TW|US)$"),
     db: AsyncSession = Depends(get_database_session),
     data_collection_service: DataCollectionService = Depends(
         get_data_collection_service_clean
@@ -122,7 +123,7 @@ async def collect_all_stocks_data(
     """
     try:
         summary = await data_collection_service.collect_active_stocks_data(
-            db, days=days
+            db, market=market, days=days
         )
 
         return {

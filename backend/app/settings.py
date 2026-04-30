@@ -15,7 +15,9 @@ from typing import Optional
 class DatabaseSettings(BaseSettings):
     """資料庫設定"""
 
-    url: str = Field(..., env="URL")
+    url: str = Field(
+        "postgresql://postgres:postgres@localhost:5432/stock_analysis", env="URL"
+    )
     echo: bool = Field(False, env="ECHO")
     pool_size: int = Field(10, env="POOL_SIZE")
     max_overflow: int = Field(20, env="MAX_OVERFLOW")
@@ -125,6 +127,7 @@ class Settings(BaseSettings):
 
     # Legacy flat keys for backward compatibility
     DATABASE_URL: Optional[str] = Field(None, alias="DATABASE_URL")
+    DATABASE_DATABASE_URL: Optional[str] = Field(None, alias="DATABASE_DATABASE_URL")
     DATABASE_ECHO: Optional[bool] = Field(None, alias="DATABASE_ECHO")
     DATABASE_POOL_SIZE: Optional[int] = Field(None, alias="DATABASE_POOL_SIZE")
     DATABASE_MAX_OVERFLOW: Optional[int] = Field(None, alias="DATABASE_MAX_OVERFLOW")
@@ -162,6 +165,8 @@ class Settings(BaseSettings):
     def apply_legacy_overrides(cls, settings: "Settings") -> "Settings":
         if settings.DATABASE_URL:
             settings.database.url = settings.DATABASE_URL
+        if settings.DATABASE_DATABASE_URL:
+            settings.database.url = settings.DATABASE_DATABASE_URL
         if settings.DATABASE_ECHO is not None:
             settings.database.echo = settings.DATABASE_ECHO
         if settings.DATABASE_POOL_SIZE is not None:
@@ -247,6 +252,7 @@ class Settings(BaseSettings):
         # 支援從 .env 檔案載入
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
 
 # 建立全域設定實例

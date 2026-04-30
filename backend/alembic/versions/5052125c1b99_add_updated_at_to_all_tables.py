@@ -34,8 +34,13 @@ def upgrade() -> None:
     from sqlalchemy import text
 
     conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    existing_tables = set(inspector.get_table_names())
 
     for table_name in tables:
+        if table_name not in existing_tables:
+            continue
+
         # 檢查欄位是否已存在
         result = conn.execute(
             text(
@@ -74,4 +79,9 @@ def downgrade() -> None:
     ]
 
     for table_name in tables:
-        op.drop_column(table_name, "updated_at")
+        inspector = sa.inspect(op.get_bind())
+        if table_name not in set(inspector.get_table_names()):
+            continue
+        columns = {column["name"] for column in inspector.get_columns(table_name)}
+        if "updated_at" in columns:
+            op.drop_column(table_name, "updated_at")

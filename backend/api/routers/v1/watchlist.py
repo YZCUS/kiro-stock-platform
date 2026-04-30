@@ -1,247 +1,254 @@
 """
-自選股相關的 API 路由
+Watchlist compatibility API.
+
+The active data model is user_stock_lists/user_stock_list_items. These endpoints
+preserve the old /watchlist contract by mapping it to the user's default list.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.database import get_db
+from sqlalchemy.orm import selectinload
+
+from app.dependencies import get_database_session
 from core.auth_dependencies import get_current_active_user
 from api.schemas.watchlist import (
+    PopularStock,
     WatchlistAdd,
     WatchlistItemResponse,
     WatchlistResponse,
     WatchlistStockDetail,
-    PopularStock,
 )
-from domain.models.user import User
-from domain.models.user_watchlist import UserWatchlist
+from domain.models.price_history import PriceHistory
 from domain.models.stock import Stock
-from typing import List
+from domain.models.user import User
+from domain.models.user_stock_list import UserStockList, UserStockListItem
 
 router = APIRouter(prefix="/watchlist", tags=["自選股"])
+
+DEFAULT_WATCHLIST_NAME = "我的觀察清單"
+
+
+async def _get_or_create_default_list(db: AsyncSession, user_id) -> UserStockList:
+    result = await db.execute(
+        select(UserStockList)
+        .where(UserStockList.user_id == user_id, UserStockList.is_default == True)
+        .order_by(UserStockList.sort_order, UserStockList.created_at, UserStockList.id)
+        .limit(1)
+    )
+    stock_list = result.scalar_one_or_none()
+    if stock_list:
+        return stock_list
+
+    named_result = await db.execute(
+        select(UserStockList)
+        .where(
+            UserStockList.user_id == user_id,
+            UserStockList.name == DEFAULT_WATCHLIST_NAME,
+        )
+        .order_by(UserStockList.sort_order, UserStockList.created_at, UserStockList.id)
+        .limit(1)
+    )
+    stock_list = named_result.scalar_one_or_none()
+    if stock_list:
+        stock_list.is_default = True
+        await db.flush()
+        return stock_list
+
+    stock_list = UserStockList(
+        user_id=user_id,
+        name=DEFAULT_WATCHLIST_NAME,
+        description="預設觀察清單",
+        is_default=True,
+        sort_order=0,
+    )
+    db.add(stock_list)
+    await db.flush()
+    return stock_list
+
+
+def _item_response(item: UserStockListItem, user_id: str) -> WatchlistItemResponse:
+    return WatchlistItemResponse(
+        id=item.id,
+        stock_id=item.stock_id,
+        user_id=user_id,
+        created_at=item.created_at,
+        stock=item.stock.to_dict() if item.stock else None,
+    )
 
 
 @router.get("/", response_model=WatchlistResponse)
 async def get_my_watchlist(
+    db: AsyncSession = Depends(get_database_session),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
 ):
-    """
-    取得當前用戶的自選股清單
+    """Return the current user's default observation list."""
+    stock_list = await _get_or_create_default_list(db, current_user.id)
+    await db.commit()
 
-    Args:
-        current_user: 當前用戶
-        db: 資料庫 session
-
-    Returns:
-        WatchlistResponse: 自選股清單
-    """
-
-    def _get_watchlist_with_stocks(session):
-        items = UserWatchlist.get_user_watchlist(session, current_user.id)
-        # Access stock relationship within sync context
-        result = []
-        for item in items:
-            result.append(
-                {
-                    "id": item.id,
-                    "stock_id": item.stock_id,
-                    "user_id": str(item.user_id),
-                    "created_at": item.created_at,
-                    "stock": item.stock.to_dict() if item.stock else None,
-                }
-            )
-        return result
-
-    items_data = await db.run_sync(_get_watchlist_with_stocks)
-
-    items = [WatchlistItemResponse(**item_data) for item_data in items_data]
-
-    return WatchlistResponse(total=len(items), items=items)
+    result = await db.execute(
+        select(UserStockListItem)
+        .where(UserStockListItem.list_id == stock_list.id)
+        .options(selectinload(UserStockListItem.stock))
+        .order_by(UserStockListItem.sort_order, UserStockListItem.created_at)
+    )
+    items = result.scalars().all()
+    return WatchlistResponse(
+        total=len(items),
+        items=[_item_response(item, str(current_user.id)) for item in items],
+    )
 
 
-@router.get("/detailed", response_model=List[WatchlistStockDetail])
+@router.get("/detailed", response_model=list[WatchlistStockDetail])
 async def get_my_watchlist_detailed(
+    db: AsyncSession = Depends(get_database_session),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
 ):
-    """
-    取得當前用戶的自選股清單（包含最新價格）
+    """Return default observation list stocks with latest price data."""
+    stock_list = await _get_or_create_default_list(db, current_user.id)
+    await db.commit()
 
-    Args:
-        current_user: 當前用戶
-        db: 資料庫 session
+    result = await db.execute(
+        select(UserStockListItem, Stock)
+        .join(Stock, Stock.id == UserStockListItem.stock_id)
+        .where(UserStockListItem.list_id == stock_list.id)
+        .order_by(UserStockListItem.sort_order, UserStockListItem.created_at)
+    )
 
-    Returns:
-        List[WatchlistStockDetail]: 自選股詳細資訊清單
-    """
+    response = []
+    for item, stock in result.all():
+        price_result = await db.execute(
+            select(PriceHistory)
+            .where(PriceHistory.stock_id == stock.id)
+            .order_by(desc(PriceHistory.date))
+            .limit(1)
+        )
+        latest = price_result.scalar_one_or_none()
+        latest_price = None
+        if latest:
+            latest_price = {
+                "close": float(latest.close_price) if latest.close_price else None,
+                "date": latest.date.isoformat() if latest.date else None,
+                "volume": latest.volume,
+            }
 
-    def _get_detailed_watchlist(session):
-        items = UserWatchlist.get_user_watchlist(session, current_user.id)
-        detailed_items = []
-        for item in items:
-            stock_data = item.get_stock_with_latest_price()
-            if stock_data:
-                detailed_items.append(stock_data)
-        return detailed_items
+        response.append(
+            WatchlistStockDetail(
+                watchlist_id=item.id,
+                stock=stock.to_dict(),
+                added_at=item.created_at.isoformat() if item.created_at else None,
+                latest_price=latest_price,
+            )
+        )
 
-    detailed_items_data = await db.run_sync(_get_detailed_watchlist)
-
-    return [WatchlistStockDetail(**item_data) for item_data in detailed_items_data]
+    return response
 
 
-@router.post(
-    "/", response_model=WatchlistItemResponse, status_code=status.HTTP_201_CREATED
-)
+@router.post("/", response_model=WatchlistItemResponse)
 async def add_to_watchlist(
     watchlist_data: WatchlistAdd,
+    db: AsyncSession = Depends(get_database_session),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
 ):
-    """
-    新增股票到自選股
+    """Add a stock to the user's default observation list."""
+    stock = await db.get(Stock, watchlist_data.stock_id)
+    if not stock:
+        raise HTTPException(status_code=404, detail="股票不存在")
 
-    Args:
-        watchlist_data: 要新增的股票ID
-        current_user: 當前用戶
-        db: 資料庫 session
-
-    Returns:
-        WatchlistItemResponse: 新增的自選股項目
-
-    Raises:
-        HTTPException: 如果股票不存在
-    """
-    # 檢查股票是否存在
-    stock = await db.run_sync(
-        lambda session: session.query(Stock)
-        .filter(Stock.id == watchlist_data.stock_id)
-        .first()
-    )
-
-    if stock is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="股票不存在")
-
-    # 新增到自選股
-    watchlist_item = await db.run_sync(
-        lambda session: UserWatchlist.add_to_watchlist(
-            session, user_id=current_user.id, stock_id=watchlist_data.stock_id
+    stock_list = await _get_or_create_default_list(db, current_user.id)
+    result = await db.execute(
+        select(UserStockListItem).where(
+            UserStockListItem.list_id == stock_list.id,
+            UserStockListItem.stock_id == watchlist_data.stock_id,
         )
     )
+    item = result.scalar_one_or_none()
+    if item is None:
+        item = UserStockListItem(
+            list_id=stock_list.id, stock_id=watchlist_data.stock_id
+        )
+        db.add(item)
+        await db.flush()
+
     await db.commit()
-    await db.refresh(watchlist_item)
-
-    return WatchlistItemResponse(
-        id=watchlist_item.id,
-        stock_id=watchlist_item.stock_id,
-        user_id=str(watchlist_item.user_id),
-        created_at=watchlist_item.created_at,
-        stock=watchlist_item.stock.to_dict() if watchlist_item.stock else None,
-    )
+    await db.refresh(item)
+    item.stock = stock
+    return _item_response(item, str(current_user.id))
 
 
-@router.delete("/{stock_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{stock_id}")
 async def remove_from_watchlist(
     stock_id: int,
+    db: AsyncSession = Depends(get_database_session),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
 ):
-    """
-    從自選股移除股票
-
-    Args:
-        stock_id: 股票ID
-        current_user: 當前用戶
-        db: 資料庫 session
-
-    Raises:
-        HTTPException: 如果股票不在自選股中
-    """
-    removed = await db.run_sync(
-        lambda session: UserWatchlist.remove_from_watchlist(
-            session, user_id=current_user.id, stock_id=stock_id
+    """Remove a stock from the user's default observation list."""
+    stock_list = await _get_or_create_default_list(db, current_user.id)
+    result = await db.execute(
+        select(UserStockListItem).where(
+            UserStockListItem.list_id == stock_list.id,
+            UserStockListItem.stock_id == stock_id,
         )
     )
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="股票不在自選股中")
 
-    if not removed:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="該股票不在您的自選股中"
-        )
-
+    await db.delete(item)
     await db.commit()
+    return {"message": "已從自選股移除", "stock_id": stock_id}
 
 
-@router.get("/check/{stock_id}", response_model=dict)
+@router.get("/check/{stock_id}")
 async def check_in_watchlist(
     stock_id: int,
+    db: AsyncSession = Depends(get_database_session),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
 ):
-    """
-    檢查股票是否在自選股中
+    """Check whether a stock is in the user's default observation list."""
+    stock_list = await _get_or_create_default_list(db, current_user.id)
+    await db.commit()
 
-    Args:
-        stock_id: 股票ID
-        current_user: 當前用戶
-        db: 資料庫 session
-
-    Returns:
-        dict: {"in_watchlist": bool, "stock_id": int}
-    """
-    is_in_watchlist = await db.run_sync(
-        lambda session: UserWatchlist.is_in_watchlist(
-            session, user_id=current_user.id, stock_id=stock_id
+    result = await db.execute(
+        select(UserStockListItem.id).where(
+            UserStockListItem.list_id == stock_list.id,
+            UserStockListItem.stock_id == stock_id,
         )
     )
+    return {"in_watchlist": result.scalar_one_or_none() is not None, "stock_id": stock_id}
 
-    return {"in_watchlist": is_in_watchlist, "stock_id": stock_id}
 
-
-@router.get("/popular", response_model=List[PopularStock])
-async def get_popular_stocks(limit: int = 10, db: AsyncSession = Depends(get_db)):
-    """
-    取得熱門自選股（被最多用戶加入的股票）
-
-    Args:
-        limit: 返回數量限制
-        db: 資料庫 session
-
-    Returns:
-        List[PopularStock]: 熱門自選股清單
-    """
-    popular_stocks = await db.run_sync(
-        lambda session: UserWatchlist.get_popular_stocks(session, limit)
+@router.get("/popular", response_model=list[PopularStock])
+async def get_popular_stocks(
+    limit: int = Query(10, ge=1, le=100),
+    db: AsyncSession = Depends(get_database_session),
+):
+    """Return stocks most frequently included in user observation lists."""
+    watchlist_count = func.count(UserStockListItem.id).label("watchlist_count")
+    result = await db.execute(
+        select(Stock, watchlist_count)
+        .join(UserStockListItem, UserStockListItem.stock_id == Stock.id)
+        .group_by(Stock.id)
+        .order_by(watchlist_count.desc())
+        .limit(limit)
     )
-
     return [
-        PopularStock(
-            stock=item["stock"].to_dict(), watchlist_count=item["watchlist_count"]
-        )
-        for item in popular_stocks
+        PopularStock(stock=stock.to_dict(), watchlist_count=count)
+        for stock, count in result.all()
     ]
 
 
 @router.get("/stats")
-async def get_watchlist_stats(db: AsyncSession = Depends(get_db)):
-    """
-    取得自選股統計資訊（不需要登入）
+async def get_watchlist_stats(db: AsyncSession = Depends(get_database_session)):
+    """Return aggregate observation list statistics."""
+    distinct_result = await db.execute(
+        select(func.count(distinct(UserStockListItem.stock_id)))
+    )
+    total_result = await db.execute(select(func.count(UserStockListItem.id)))
 
-    Returns:
-        dict: 包含不重複股票數量等統計資訊
-    """
-    from sqlalchemy import select, func, distinct
-
-    # 計算所有 watchlist 中不重複的股票數量
-    query = select(func.count(distinct(UserWatchlist.stock_id)))
-    result = await db.execute(query)
-    unique_stocks_count = result.scalar() or 0
-
-    # 計算總共有多少筆 watchlist 記錄
-    total_query = select(func.count(UserWatchlist.id))
-    total_result = await db.execute(total_query)
-    total_watchlist_entries = total_result.scalar() or 0
-
+    unique_stocks_count = distinct_result.scalar() or 0
     return {
         "unique_stocks_count": unique_stocks_count,
-        "total_entries": total_watchlist_entries,
+        "total_unique_stocks": unique_stocks_count,
+        "total_entries": total_result.scalar() or 0,
     }

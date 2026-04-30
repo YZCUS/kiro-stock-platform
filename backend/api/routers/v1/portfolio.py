@@ -203,7 +203,7 @@ async def get_portfolio_summary(
         raise HTTPException(status_code=500, detail=f"取得持倉摘要失敗: {str(e)}")
 
 
-@router.get("/{portfolio_id}", response_model=PortfolioResponse)
+@router.get("/{portfolio_id:int}", response_model=PortfolioResponse)
 async def get_portfolio_detail(
     portfolio_id: int,
     db: AsyncSession = Depends(get_database_session),
@@ -279,7 +279,7 @@ async def get_portfolio_detail(
         raise HTTPException(status_code=500, detail=f"取得持倉詳情失敗: {str(e)}")
 
 
-@router.delete("/{portfolio_id}")
+@router.delete("/{portfolio_id:int}")
 async def delete_portfolio(
     portfolio_id: int,
     db: AsyncSession = Depends(get_database_session),
@@ -336,17 +336,9 @@ async def create_transaction(
         if not stock:
             raise HTTPException(status_code=404, detail="股票不存在")
 
-        # 查詢或創建持倉
-        portfolio_query = select(UserPortfolio).where(
-            UserPortfolio.user_id == current_user.id,
-            UserPortfolio.stock_id == transaction_req.stock_id,
-        )
-        portfolio_result = await db.execute(portfolio_query)
-        portfolio = portfolio_result.scalar_one_or_none()
-
-        # 更新持倉（使用同步方法）
-        def update_portfolio_sync(session):
-            return UserPortfolio.create_or_update_position(
+        # 持倉變更和交易記錄必須在同一個 transaction 中完成
+        def apply_transaction_sync(session):
+            portfolio = UserPortfolio.create_or_update_position(
                 session=session,
                 user_id=current_user.id,
                 stock_id=transaction_req.stock_id,
@@ -354,26 +346,9 @@ async def create_transaction(
                 price=Decimal(str(transaction_req.price)),
                 transaction_type=transaction_req.transaction_type,
             )
-
-        portfolio = await db.run_sync(update_portfolio_sync)
-        await db.commit()
-
-        # 獲取 portfolio_id（清倉時為 None）
-        if portfolio is None:
-            portfolio_id = None
-        else:
-            # 重新查詢持倉以獲取ID
-            portfolio_query = select(UserPortfolio).where(
-                UserPortfolio.user_id == current_user.id,
-                UserPortfolio.stock_id == transaction_req.stock_id,
-            )
-            portfolio_result = await db.execute(portfolio_query)
-            portfolio = portfolio_result.scalar_one_or_none()
+            session.flush()
             portfolio_id = portfolio.id if portfolio else None
-
-        # 創建交易記錄（使用同步方法）
-        def create_transaction_sync(session):
-            return Transaction.create_transaction(
+            transaction = Transaction.create_transaction(
                 session=session,
                 user_id=current_user.id,
                 portfolio_id=portfolio_id,
@@ -386,9 +361,12 @@ async def create_transaction(
                 tax=Decimal(str(transaction_req.tax)),
                 note=transaction_req.note,
             )
+            session.flush()
+            return transaction
 
-        transaction = await db.run_sync(create_transaction_sync)
+        transaction = await db.run_sync(apply_transaction_sync)
         await db.commit()
+        await db.refresh(transaction)
 
         return TransactionResponse(
             id=transaction.id,
@@ -410,6 +388,9 @@ async def create_transaction(
 
     except HTTPException:
         raise
+    except ValueError as e:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         await db.rollback()
         import traceback

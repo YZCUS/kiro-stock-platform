@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from domain.repositories.trading_signal_repository_interface import (
     ITradingSignalRepository,
 )
+from domain.models.stock import Stock
 from domain.models.trading_signal import TradingSignal
 
 
@@ -18,6 +19,23 @@ class TradingSignalRepository(ITradingSignalRepository):
 
     def __init__(self, db_session: AsyncSession):
         self.db = db_session
+
+    def _apply_filters(self, query, filters: Optional[Dict[str, Any]] = None):
+        if not filters:
+            return query
+
+        if "stock_id" in filters:
+            query = query.where(TradingSignal.stock_id == filters["stock_id"])
+        if "signal_type" in filters:
+            query = query.where(TradingSignal.signal_type == filters["signal_type"])
+        if "min_confidence" in filters:
+            query = query.where(TradingSignal.confidence >= filters["min_confidence"])
+        if "start_date" in filters:
+            query = query.where(TradingSignal.date >= filters["start_date"])
+        if "end_date" in filters:
+            query = query.where(TradingSignal.date <= filters["end_date"])
+
+        return query
 
     async def get_recent_signals(
         self,
@@ -47,16 +65,12 @@ class TradingSignalRepository(ITradingSignalRepository):
     ) -> List:
         """列出交易信號（帶過濾器）"""
         query = select(TradingSignal)
+        if market:
+            query = query.join(Stock, TradingSignal.stock_id == Stock.id).where(
+                Stock.market == market
+            )
 
-        if filters:
-            if "stock_id" in filters:
-                query = query.where(TradingSignal.stock_id == filters["stock_id"])
-            if "signal_type" in filters:
-                query = query.where(TradingSignal.signal_type == filters["signal_type"])
-            if "min_confidence" in filters:
-                query = query.where(
-                    TradingSignal.confidence >= filters["min_confidence"]
-                )
+        query = self._apply_filters(query, filters)
 
         query = query.order_by(desc(TradingSignal.date)).offset(offset).limit(limit)
 
@@ -71,12 +85,12 @@ class TradingSignalRepository(ITradingSignalRepository):
     ) -> int:
         """計算交易信號數量"""
         query = select(func.count(TradingSignal.id))
+        if market:
+            query = query.join(Stock, TradingSignal.stock_id == Stock.id).where(
+                Stock.market == market
+            )
 
-        if filters:
-            if "stock_id" in filters:
-                query = query.where(TradingSignal.stock_id == filters["stock_id"])
-            if "signal_type" in filters:
-                query = query.where(TradingSignal.signal_type == filters["signal_type"])
+        query = self._apply_filters(query, filters)
 
         result = await db.execute(query)
         return result.scalar() or 0
@@ -89,7 +103,23 @@ class TradingSignalRepository(ITradingSignalRepository):
     ) -> Dict[str, any]:
         """取得信號統計（簡化版）"""
         count = await self.count_signals(db, filters, market)
-        return {"total_signals": count}
+
+        type_query = select(
+            TradingSignal.signal_type, func.count(TradingSignal.id)
+        ).group_by(TradingSignal.signal_type)
+        if market:
+            type_query = type_query.join(Stock, TradingSignal.stock_id == Stock.id).where(
+                Stock.market == market
+            )
+        type_query = self._apply_filters(type_query, filters)
+        type_result = await db.execute(type_query)
+        by_type = {row[0]: row[1] for row in type_result.all()}
+
+        return {
+            "total_signals": count,
+            "by_type": by_type,
+            "by_strength": {},
+        }
 
     async def get_detailed_signal_stats(
         self,
@@ -108,6 +138,23 @@ class TradingSignalRepository(ITradingSignalRepository):
     ) -> TradingSignal:
         """創建交易信號"""
         signal = TradingSignal(**signal_data)
+        db.add(signal)
+        await db.flush()
+        await db.refresh(signal)
+        return signal
+
+    async def update_signal(
+        self, db: AsyncSession, signal_id: int, signal_data: Dict[str, any]
+    ) -> Optional[TradingSignal]:
+        """更新交易信號"""
+        signal = await self.get_signal(db, signal_id)
+        if not signal:
+            return None
+
+        for field, value in signal_data.items():
+            if value is not None and hasattr(signal, field):
+                setattr(signal, field, value)
+
         db.add(signal)
         await db.flush()
         await db.refresh(signal)

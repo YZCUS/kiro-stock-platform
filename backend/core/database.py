@@ -15,6 +15,7 @@ import logging
 
 import os
 import sys
+from core.database_url import make_async_database_url
 
 # 設定日誌
 logger = logging.getLogger(__name__)
@@ -32,9 +33,10 @@ if not _is_testing:
 
         # 建立異步資料庫引擎
         engine = create_async_engine(
-            settings.database.url.replace("postgresql://", "postgresql+asyncpg://"),
+            make_async_database_url(settings.database.url),
             echo=settings.app.debug,
             future=True,
+            pool_pre_ping=True,
         )
     except Exception as e:
         # 如果設定有問題，則使用記憶體資料庫

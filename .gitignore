@@ -188,6 +188,7 @@ MIGRATION_*.md
 !README.md
 !CLAUDE.md
 !CHANGELOG.md
+!AGENTS.md
 
 # Exclude documentation directories
 docs/

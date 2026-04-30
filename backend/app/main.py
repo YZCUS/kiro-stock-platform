@@ -9,7 +9,6 @@ import logging
 from typing import Optional
 
 from core.config import settings
-from core.database import engine, Base
 from api.v1.api import api_router
 from api.v1.websocket import (
     websocket_endpoint,
@@ -31,11 +30,7 @@ async def lifespan(app: FastAPI):
     # 啟動時執行
     logger.info("正在啟動股票分析平台...")
 
-    # 建立資料庫表格
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    logger.info("資料庫初始化完成")
+    logger.info("資料庫 schema 由 Alembic migration 管理")
 
     # 初始化 WebSocket 管理器
     websocket_init_success = False

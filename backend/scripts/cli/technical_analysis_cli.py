@@ -16,6 +16,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.settings import settings
+from core.database_url import make_async_database_url
 
 # ✅ Clean Architecture: 使用 domain services
 from domain.services.technical_analysis_service import IndicatorType
@@ -37,7 +38,7 @@ class TechnicalAnalysisCLI:
 
     def __init__(self):
         self.engine = create_async_engine(
-            settings.database.url.replace("postgresql://", "postgresql+asyncpg://"),
+            make_async_database_url(settings.database.url),
             echo=False,
         )
         self.async_session_local = sessionmaker(

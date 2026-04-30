@@ -85,6 +85,7 @@ class TechnicalAnalysisService:
         stock_id: int,
         indicators: List[IndicatorType] = None,
         days: int = 100,
+        save_to_db: bool = False,
     ) -> AnalysisResult:
         """
         計算股票技術指標
@@ -188,6 +189,127 @@ class TechnicalAnalysisService:
                 d.isoformat() if isinstance(d, date) else d for d in result.dates
             ],
             "summary": summary,
+        }
+
+    async def get_stock_indicators(
+        self,
+        db_session: AsyncSession,
+        stock_id: int,
+        indicator_types: Optional[List[str]] = None,
+        days: int = 100,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Return calculated indicator series grouped by indicator type."""
+        selected = indicator_types or ["RSI", "SMA_20", "MACD"]
+        result: Dict[str, List[Dict[str, Any]]] = {}
+
+        for indicator_name in selected:
+            indicator = IndicatorType(indicator_name.upper())
+            calculated = await self.calculate_indicator(
+                db_session, stock_id, indicator, days=days
+            )
+            result[indicator.value] = [
+                {"date": item_date, "value": value}
+                for item_date, value in zip(
+                    calculated["dates"], calculated["values"]
+                )
+            ]
+
+        return result
+
+    async def get_indicator_series(
+        self,
+        db: AsyncSession,
+        stock_id: int,
+        indicator_type: Optional[str] = None,
+        period: Optional[int] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        page: int = 1,
+        page_size: int = 100,
+        per_page: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Return a paginated calculated indicator list for API compatibility."""
+        if per_page is not None:
+            page_size = per_page
+
+        selected = [indicator_type.upper()] if indicator_type else ["RSI", "SMA_20", "MACD"]
+        grouped = await self.get_stock_indicators(
+            db_session=db,
+            stock_id=stock_id,
+            indicator_types=selected,
+            days=max(page * page_size, (period or 0) * 3, 100),
+        )
+
+        items = []
+        for current_type, series in grouped.items():
+            for point in series:
+                point_date = point["date"]
+                if start_date and point_date < start_date.isoformat():
+                    continue
+                if end_date and point_date > end_date.isoformat():
+                    continue
+                items.append(
+                    {
+                        "stock_id": stock_id,
+                        "indicator_type": current_type,
+                        "date": point_date,
+                        "value": point["value"],
+                        "parameters": {},
+                    }
+                )
+
+        total = len(items)
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        return {
+            "items": items[start:end],
+            "total": total,
+            "page": page,
+            "per_page": page_size,
+            "total_pages": (total + page_size - 1) // page_size,
+        }
+
+    async def get_indicators_summary(
+        self,
+        db: AsyncSession,
+        stock_id: int,
+        indicator_types: Optional[str] = None,
+        period: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Return latest calculated values for the requested indicators."""
+        if indicator_types:
+            selected = [item.strip().upper() for item in indicator_types.split(",") if item.strip()]
+        else:
+            selected = ["RSI", "SMA_20", "MACD"]
+
+        indicators: Dict[str, Any] = {}
+        days = max((period or 30) * 2, 60)
+
+        for indicator_name in selected:
+            indicator = IndicatorType(indicator_name)
+            calculated = await self.calculate_indicator(db, stock_id, indicator, days=days)
+            values = calculated["values"]
+            indicators[indicator.value] = {
+                "symbol": calculated["symbol"],
+                "indicators": {
+                    indicator.value.lower(): [
+                        {"date": item_date, "value": value}
+                        for item_date, value in zip(calculated["dates"], values)
+                    ]
+                },
+                "period": period or calculated["summary"].get("period", 14),
+                "timestamp": datetime.now().isoformat(),
+                "success": bool(values),
+                "data_points": len(values),
+                "summary": calculated["summary"],
+            }
+
+        return {
+            "stock_id": stock_id,
+            "symbol": next(iter(indicators.values()))["symbol"] if indicators else "",
+            "timeframe": "1d",
+            "indicators": indicators,
         }
 
     async def get_stock_technical_summary(

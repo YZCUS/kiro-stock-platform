@@ -2,7 +2,17 @@
 交易記錄模型
 """
 
-from sqlalchemy import Column, Integer, String, Numeric, ForeignKey, Date, Text, Index
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Numeric,
+    ForeignKey,
+    Date,
+    Text,
+    Index,
+    CheckConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from domain.models.base import BaseModel, TimestampMixin
@@ -58,6 +68,14 @@ class Transaction(BaseModel, TimestampMixin):
     __table_args__ = (
         Index("idx_transactions_user_date", "user_id", "transaction_date"),
         Index("idx_transactions_stock_date", "stock_id", "transaction_date"),
+        CheckConstraint(
+            "transaction_type IN ('BUY', 'SELL')",
+            name="ck_transactions_transaction_type",
+        ),
+        CheckConstraint("quantity > 0", name="ck_transactions_quantity_positive"),
+        CheckConstraint("price > 0", name="ck_transactions_price_positive"),
+        CheckConstraint("fee >= 0", name="ck_transactions_fee_non_negative"),
+        CheckConstraint("tax >= 0", name="ck_transactions_tax_non_negative"),
         {"comment": "交易記錄表"},
     )
 
@@ -82,6 +100,13 @@ class Transaction(BaseModel, TimestampMixin):
         note: Optional[str] = None,
     ) -> "Transaction":
         """創建交易記錄"""
+        if quantity <= 0:
+            raise ValueError("交易數量必須大於 0")
+        if price <= 0:
+            raise ValueError("交易價格必須大於 0")
+        if fee < 0 or tax < 0:
+            raise ValueError("手續費和交易稅不可為負數")
+
         # 計算總金額
         if transaction_type == "BUY":
             total = (price * quantity) + fee + tax

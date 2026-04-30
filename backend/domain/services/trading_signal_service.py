@@ -354,6 +354,11 @@ class TradingSignalService:
     ) -> Dict[str, Any]:
         return await self.signal_repo.create_signal(db, signal_data)
 
+    async def update_signal(
+        self, db: AsyncSession, signal_id: int, signal_data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        return await self.signal_repo.update_signal(db, signal_id, signal_data)
+
     async def delete_signal(self, db: AsyncSession, signal_id: int) -> None:
         await self.signal_repo.delete_signal(db, signal_id)
 

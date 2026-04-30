@@ -10,6 +10,7 @@ from sqlalchemy import (
     Text,
     ForeignKey,
     UniqueConstraint,
+    Index,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -43,6 +44,12 @@ class UserStockList(BaseModel, TimestampMixin):
     # 約束條件
     __table_args__ = (
         UniqueConstraint("user_id", "name", name="uq_user_stock_lists_user_id_name"),
+        Index(
+            "uq_user_stock_lists_one_default_per_user",
+            "user_id",
+            unique=True,
+            postgresql_where=is_default.is_(True),
+        ),
         {"comment": "用戶股票清單表"},
     )
 
@@ -135,6 +142,7 @@ class UserStockListItem(BaseModel, TimestampMixin):
         UniqueConstraint(
             "list_id", "stock_id", name="uq_user_stock_list_items_list_id_stock_id"
         ),
+        Index("ix_user_stock_list_items_list_sort", "list_id", "sort_order"),
         {"comment": "用戶股票清單項目表"},
     )
 
@@ -184,6 +192,7 @@ class UserStockListItem(BaseModel, TimestampMixin):
             "stock_id": self.stock_id,
             "stock": self.stock.to_dict() if self.stock else None,
             "note": self.note,
+            "sort_order": self.sort_order,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

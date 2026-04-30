@@ -13,7 +13,6 @@ import uuid
 
 from domain.models.user_strategy_subscription import UserStrategySubscription
 from domain.models.user_strategy_stock_list import UserStrategyStockList
-from domain.models.user_watchlist import UserWatchlist
 from domain.models.user_portfolio import UserPortfolio
 from domain.models.user_stock_list import UserStockList, UserStockListItem
 from domain.models.stock import Stock
@@ -30,6 +29,23 @@ class StrategySubscriptionService:
     3. 根據訂閱配置計算需要監控的股票列表
     4. 驗證策略類型和參數的有效性
     """
+
+    async def _ensure_lists_belong_to_user(
+        self, db: AsyncSession, user_id: uuid.UUID, list_ids: Optional[List[int]]
+    ) -> None:
+        """Validate selected stock lists before linking them to a subscription."""
+        if not list_ids:
+            return
+
+        result = await db.execute(
+            select(UserStockList.id).filter(
+                UserStockList.user_id == user_id, UserStockList.id.in_(list_ids)
+            )
+        )
+        found_ids = set(result.scalars().all())
+        missing_ids = sorted(set(list_ids) - found_ids)
+        if missing_ids:
+            raise ValueError(f"Stock lists not found for user: {missing_ids}")
 
     async def create_subscription(
         self,
@@ -77,6 +93,9 @@ class StrategySubscriptionService:
         # 3. 驗證參數有效性
         if not strategy.validate_params(params):
             raise ValueError(f"Invalid parameters for strategy '{strategy_type}'")
+
+        if not monitor_all_lists:
+            await self._ensure_lists_belong_to_user(db, user_id, selected_list_ids)
 
         # 4. 檢查是否已存在訂閱（使用同步查詢轉換為異步）
         result = await db.execute(
@@ -182,6 +201,7 @@ class StrategySubscriptionService:
     async def update_subscription(
         self,
         db: AsyncSession,
+        user_id: uuid.UUID,
         subscription_id: int,
         params: Optional[Dict[str, Any]] = None,
         monitor_all_lists: Optional[bool] = None,
@@ -208,7 +228,8 @@ class StrategySubscriptionService:
         # 1. 獲取訂閱記錄
         result = await db.execute(
             select(UserStrategySubscription).filter(
-                UserStrategySubscription.id == subscription_id
+                UserStrategySubscription.id == subscription_id,
+                UserStrategySubscription.user_id == user_id,
             )
         )
         subscription = result.scalar_one_or_none()
@@ -234,6 +255,12 @@ class StrategySubscriptionService:
 
         # 4. 更新清單關聯
         if selected_list_ids is not None:
+            target_monitor_all_lists = subscription.monitor_all_lists
+            if monitor_all_lists is not None:
+                target_monitor_all_lists = monitor_all_lists
+            if not target_monitor_all_lists:
+                await self._ensure_lists_belong_to_user(db, user_id, selected_list_ids)
+
             # 刪除舊的關聯
             old_lists = (
                 (
@@ -263,7 +290,11 @@ class StrategySubscriptionService:
         return subscription
 
     async def delete_subscription(
-        self, db: AsyncSession, subscription_id: int, hard_delete: bool = False
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        subscription_id: int,
+        hard_delete: bool = False,
     ) -> bool:
         """
         刪除訂閱
@@ -278,7 +309,8 @@ class StrategySubscriptionService:
         """
         result = await db.execute(
             select(UserStrategySubscription).filter(
-                UserStrategySubscription.id == subscription_id
+                UserStrategySubscription.id == subscription_id,
+                UserStrategySubscription.user_id == user_id,
             )
         )
         subscription = result.scalar_one_or_none()
@@ -297,7 +329,11 @@ class StrategySubscriptionService:
         return True
 
     async def toggle_subscription(
-        self, db: AsyncSession, subscription_id: int, is_active: Optional[bool] = None
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        subscription_id: int,
+        is_active: Optional[bool] = None,
     ) -> UserStrategySubscription:
         """
         切換訂閱狀態（啟用/停用）
@@ -315,7 +351,8 @@ class StrategySubscriptionService:
         """
         result = await db.execute(
             select(UserStrategySubscription).filter(
-                UserStrategySubscription.id == subscription_id
+                UserStrategySubscription.id == subscription_id,
+                UserStrategySubscription.user_id == user_id,
             )
         )
         subscription = result.scalar_one_or_none()

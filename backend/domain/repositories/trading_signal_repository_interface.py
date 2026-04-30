@@ -72,6 +72,13 @@ class ITradingSignalRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def update_signal(
+        self, db: AsyncSession, signal_id: int, signal_data: Dict[str, any]
+    ) -> Optional[dict]:
+        """更新交易信號"""
+        raise NotImplementedError
+
+    @abstractmethod
     async def delete_signal(self, db: AsyncSession, signal_id: int) -> None:
         """刪除交易信號"""
         raise NotImplementedError

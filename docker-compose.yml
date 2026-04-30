@@ -13,7 +13,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - stock_network
 
@@ -75,7 +74,9 @@ services:
 
   # Apache Airflow Webserver
   airflow-webserver:
-    image: apache/airflow:2.8.0
+    build:
+      context: ./airflow
+    image: kiro-stock-platform-airflow:latest
     container_name: stock_analysis_airflow_webserver
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
@@ -118,7 +119,9 @@ services:
 
   # Apache Airflow Scheduler
   airflow-scheduler:
-    image: apache/airflow:2.8.0
+    build:
+      context: ./airflow
+    image: kiro-stock-platform-airflow:latest
     container_name: stock_analysis_airflow_scheduler
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor

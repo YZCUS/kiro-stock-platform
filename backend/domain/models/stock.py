@@ -4,7 +4,16 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Column, String, DateTime, Boolean, func, CheckConstraint
+from sqlalchemy import (
+    Column,
+    String,
+    DateTime,
+    Boolean,
+    func,
+    CheckConstraint,
+    Index,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 from domain.models.base import BaseModel, TimestampMixin
 from typing import List, Optional, TYPE_CHECKING
@@ -43,6 +52,8 @@ class Stock(BaseModel, TimestampMixin):
     # 約束條件
     __table_args__ = (
         CheckConstraint("market IN ('TW', 'US')", name="ck_stocks_market"),
+        UniqueConstraint("symbol", "market", name="uq_stocks_symbol_market"),
+        Index("ix_stocks_market_is_active", "market", "is_active"),
         {"comment": "股票基本資料表"},
     )
 
@@ -77,13 +88,6 @@ class Stock(BaseModel, TimestampMixin):
 
     transactions = relationship(
         "Transaction",
-        back_populates="stock",
-        cascade="all, delete-orphan",
-        lazy="dynamic",
-    )
-
-    user_watchlists = relationship(
-        "UserWatchlist",
         back_populates="stock",
         cascade="all, delete-orphan",
         lazy="dynamic",

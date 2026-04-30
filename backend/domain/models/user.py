@@ -46,9 +46,6 @@ class User(BaseModel, TimestampMixin):
     stock_lists = relationship(
         "UserStockList", back_populates="user", cascade="all, delete-orphan"
     )
-    watchlists = relationship(
-        "UserWatchlist", back_populates="user", cascade="all, delete-orphan"
-    )
     strategy_subscriptions = relationship(
         "UserStrategySubscription", back_populates="user", cascade="all, delete-orphan"
     )

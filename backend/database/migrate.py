@@ -12,9 +12,11 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from alembic.config import Config
 from alembic import command as alembic_command
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from app.settings import settings
 from core.database import Base
+from core.database_url import make_async_database_url
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -29,9 +31,10 @@ class DatabaseManager:
         backend_dir = Path(__file__).parent.parent
         alembic_ini_path = backend_dir / "alembic.ini"
         self.alembic_cfg = Config(str(alembic_ini_path))
+        self.alembic_cfg.set_main_option("script_location", str(backend_dir / "alembic"))
 
         self.engine = create_async_engine(
-            settings.database.url.replace("postgresql://", "postgresql+asyncpg://"),
+            make_async_database_url(settings.database.url),
             echo=True,
         )
 
@@ -40,7 +43,7 @@ class DatabaseManager:
         try:
             # 嘗試連接到資料庫
             async with self.engine.begin() as conn:
-                await conn.execute("SELECT 1")
+                await conn.execute(text("SELECT 1"))
             logger.info("資料庫已存在")
         except Exception as e:
             logger.error(f"資料庫連接失敗: {e}")

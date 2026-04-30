@@ -13,6 +13,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from app.settings import settings
+from core.database_url import make_sync_database_url
 from core.database import Base
 
 # 匯入所有模型以確保它們被註冊到 Base.metadata
@@ -20,7 +21,6 @@ from domain.models.stock import Stock
 from domain.models.price_history import PriceHistory
 from domain.models.technical_indicator import TechnicalIndicator
 from domain.models.trading_signal import TradingSignal
-from domain.models.user_watchlist import UserWatchlist
 from domain.models.system_log import SystemLog
 from domain.models.user import User
 from domain.models.user_portfolio import UserPortfolio
@@ -51,7 +51,7 @@ target_metadata = Base.metadata
 
 def get_url():
     """取得資料庫 URL"""
-    return settings.database.url.replace("postgresql://", "postgresql+psycopg2://")
+    return make_sync_database_url(settings.database.url)
 
 
 def run_migrations_offline() -> None:

@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.dependencies import (
     get_database_session,
@@ -43,6 +43,7 @@ class TradingSignalResponse(BaseModel):
     id: Optional[int] = None
     stock_id: int
     symbol: str
+    market: Optional[str] = None
     signal_type: str
     strength: str
     price: Optional[float]
@@ -61,33 +62,101 @@ class SignalStatsResponse(BaseModel):
     cross_signals: int
     avg_confidence: float
     top_stocks: List[Dict[str, Any]]
+    by_type: Dict[str, int] = Field(default_factory=dict)
+    by_strength: Dict[str, int] = Field(default_factory=dict)
+    accuracy: Optional[float] = None
 
 
 class SignalHistoryResponse(BaseModel):
+    items: List[TradingSignalResponse]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
     signals: List[TradingSignalResponse]
     pagination: Dict[str, int]
     stats: Dict[str, Any]
 
 
-def _serialize_signal(signal: Dict[str, Any], symbol: str) -> TradingSignalResponse:
+class SignalCreateRequest(BaseModel):
+    stock_id: int
+    signal_type: str
+    strength: Optional[str] = None
+    price: Optional[float] = None
+    confidence: Optional[float] = None
+    date: Optional[date] = None
+    description: Optional[str] = None
+    indicators: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SignalUpdateRequest(BaseModel):
+    signal_type: Optional[str] = None
+    price: Optional[float] = None
+    confidence: Optional[float] = None
+    date: Optional[date] = None
+    description: Optional[str] = None
+    indicators: Optional[Dict[str, Any]] = None
+
+
+def _normalize_signal_type(signal_type: str) -> str:
+    return signal_type.lower().replace("-", "_")
+
+
+def _get_signal_value(signal: Any, key: str, default: Any = None) -> Any:
+    if isinstance(signal, dict):
+        return signal.get(key, default)
+    return getattr(signal, key, default)
+
+
+def _confidence_strength(confidence: Optional[float]) -> str:
+    if confidence is None:
+        return SignalStrength.MODERATE.value
+    if confidence >= 0.75:
+        return SignalStrength.STRONG.value
+    if confidence >= 0.45:
+        return SignalStrength.MODERATE.value
+    return SignalStrength.WEAK.value
+
+
+def _serialize_signal(
+    signal: Any, symbol: str, market: Optional[str] = None
+) -> TradingSignalResponse:
+    confidence = _get_signal_value(signal, "confidence")
+    if confidence is not None:
+        confidence = float(confidence)
+
+    price = _get_signal_value(signal, "price")
+    if price is not None:
+        price = float(price)
+
     return TradingSignalResponse(
-        id=signal.get("id"),
-        stock_id=signal.get("stock_id"),
+        id=_get_signal_value(signal, "id"),
+        stock_id=_get_signal_value(signal, "stock_id"),
         symbol=symbol,
-        signal_type=signal.get("signal_type", ""),
-        strength=signal.get("strength", SignalStrength.MODERATE.value),
-        price=signal.get("price"),
-        confidence=signal.get("confidence"),
-        date=signal.get("date", date.today()),
-        description=signal.get("description", ""),
-        indicators=signal.get("indicators", {}),
-        created_at=signal.get("created_at", datetime.now()),
+        market=market,
+        signal_type=_get_signal_value(signal, "signal_type", ""),
+        strength=_get_signal_value(signal, "strength")
+        or _confidence_strength(confidence),
+        price=price,
+        confidence=confidence,
+        date=_get_signal_value(signal, "date", date.today()),
+        description=_get_signal_value(signal, "description", "") or "",
+        indicators=_get_signal_value(signal, "indicators", {}) or {},
+        created_at=_get_signal_value(signal, "created_at", datetime.now()),
     )
+
+
+def _stock_symbol(stock: Any) -> str:
+    return getattr(stock, "symbol", "")
+
+
+def _stock_market(stock: Any) -> Optional[str]:
+    return getattr(stock, "market", None)
 
 
 @router.get("/", response_model=SignalHistoryResponse)
 async def get_all_signals(
-    signal_type: Optional[SignalTypeEnum] = Query(None, description="信號類型"),
+    signal_type: Optional[str] = Query(None, description="信號類型"),
     market: Optional[str] = Query(None, description="市場代碼"),
     min_confidence: float = Query(0.0, ge=0.0, le=1.0, description="最小信心度"),
     start_date: Optional[date] = Query(None, description="開始日期"),
@@ -103,7 +172,7 @@ async def get_all_signals(
         filters: Dict[str, Any] = {}
 
         if signal_type:
-            filters["signal_type"] = signal_type.value
+            filters["signal_type"] = _normalize_signal_type(signal_type)
         if min_confidence > 0:
             filters["min_confidence"] = min_confidence
         if start_date:
@@ -129,12 +198,21 @@ async def get_all_signals(
 
         signal_responses = []
         for signal in signals:
-            stock = await stock_service.get_stock_by_id(db, signal["stock_id"])
-            signal_responses.append(_serialize_signal(signal, stock.symbol))
+            stock = await stock_service.get_stock_by_id(
+                db, _get_signal_value(signal, "stock_id")
+            )
+            signal_responses.append(
+                _serialize_signal(signal, _stock_symbol(stock), _stock_market(stock))
+            )
 
         total_pages = (total_count + page_size - 1) // page_size
 
         return SignalHistoryResponse(
+            items=signal_responses,
+            total=total_count,
+            page=page,
+            per_page=page_size,
+            total_pages=total_pages,
             signals=signal_responses,
             pagination={
                 "total": total_count,
@@ -154,7 +232,7 @@ async def get_all_signals(
 @router.get("/history", response_model=List[TradingSignalResponse])
 async def get_signal_history(
     days: int = Query(30, ge=1, le=365, description="歷史天數"),
-    signal_type: Optional[SignalTypeEnum] = Query(None, description="信號類型"),
+    signal_type: Optional[str] = Query(None, description="信號類型"),
     market: Optional[str] = Query(None, description="市場代碼"),
     limit: int = Query(100, ge=1, le=500, description="返回數量限制"),
     db: AsyncSession = Depends(get_database_session),
@@ -170,7 +248,7 @@ async def get_signal_history(
             "end_date": end_date,
         }
         if signal_type:
-            filters["signal_type"] = signal_type.value
+            filters["signal_type"] = _normalize_signal_type(signal_type)
 
         signals = await signal_service.list_signals(
             db,
@@ -181,8 +259,12 @@ async def get_signal_history(
 
         responses = []
         for signal in signals:
-            stock = await stock_service.get_stock_by_id(db, signal["stock_id"])
-            responses.append(_serialize_signal(signal, stock.symbol))
+            stock = await stock_service.get_stock_by_id(
+                db, _get_signal_value(signal, "stock_id")
+            )
+            responses.append(
+                _serialize_signal(signal, _stock_symbol(stock), _stock_market(stock))
+            )
 
         return responses
 
@@ -220,16 +302,156 @@ async def get_signal_statistics(
             cross_signals=stats.get("cross_signals", 0),
             avg_confidence=stats.get("avg_confidence", 0.0),
             top_stocks=stats.get("top_stocks", []),
+            by_type=stats.get("by_type", {}),
+            by_strength=stats.get("by_strength", {}),
         )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"取得信號統計失敗: {str(e)}")
 
 
+@router.post("/", response_model=TradingSignalResponse)
+async def create_signal(
+    request: SignalCreateRequest,
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    signal_service: TradingSignalService = Depends(get_trading_signal_service_clean),
+):
+    try:
+        stock = await stock_service.get_stock_by_id(db, request.stock_id)
+        signal = await signal_service.create_signal(
+            db,
+            {
+                "stock_id": request.stock_id,
+                "signal_type": _normalize_signal_type(request.signal_type),
+                "price": request.price,
+                "confidence": request.confidence,
+                "date": request.date or date.today(),
+                "description": request.description,
+            },
+        )
+        await db.commit()
+        return _serialize_signal(signal, _stock_symbol(stock), _stock_market(stock))
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"建立交易信號失敗: {str(e)}")
+
+
+@router.get("/detail/{signal_id}", response_model=TradingSignalResponse)
+async def get_signal_detail(
+    signal_id: int,
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    signal_service: TradingSignalService = Depends(get_trading_signal_service_clean),
+):
+    try:
+        signal = await signal_service.get_signal(db, signal_id)
+        if not signal:
+            raise HTTPException(status_code=404, detail="交易信號不存在")
+
+        stock = await stock_service.get_stock_by_id(
+            db, _get_signal_value(signal, "stock_id")
+        )
+        return _serialize_signal(signal, _stock_symbol(stock), _stock_market(stock))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"取得交易信號失敗: {str(e)}")
+
+
+@router.patch("/{signal_id}", response_model=TradingSignalResponse)
+async def update_signal(
+    signal_id: int,
+    request: SignalUpdateRequest,
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    signal_service: TradingSignalService = Depends(get_trading_signal_service_clean),
+):
+    try:
+        update_data = request.model_dump(exclude_unset=True)
+        update_data.pop("indicators", None)
+        if "signal_type" in update_data and update_data["signal_type"]:
+            update_data["signal_type"] = _normalize_signal_type(update_data["signal_type"])
+
+        signal = await signal_service.update_signal(db, signal_id, update_data)
+        if not signal:
+            raise HTTPException(status_code=404, detail="交易信號不存在")
+
+        await db.commit()
+        stock = await stock_service.get_stock_by_id(
+            db, _get_signal_value(signal, "stock_id")
+        )
+        return _serialize_signal(signal, _stock_symbol(stock), _stock_market(stock))
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"更新交易信號失敗: {str(e)}")
+
+
+@router.get("/stock/{stock_id}", response_model=SignalHistoryResponse)
+async def get_stock_signals_paginated(
+    stock_id: int,
+    signal_type: Optional[str] = Query(None, description="信號類型"),
+    days: int = Query(30, ge=1, le=365, description="歷史天數"),
+    page: int = Query(1, ge=1, description="頁碼"),
+    page_size: int = Query(50, ge=1, le=200, description="每頁數量"),
+    db: AsyncSession = Depends(get_database_session),
+    stock_service: StockService = Depends(get_stock_service),
+    signal_service: TradingSignalService = Depends(get_trading_signal_service_clean),
+):
+    try:
+        stock = await stock_service.get_stock_by_id(db, stock_id)
+        end_date = date.today()
+        start_date = end_date - timedelta(days=days)
+        filters = {
+            "stock_id": stock_id,
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+        if signal_type:
+            filters["signal_type"] = _normalize_signal_type(signal_type)
+
+        offset = (page - 1) * page_size
+        signals = await signal_service.list_signals(
+            db, filters=filters, offset=offset, limit=page_size
+        )
+        total_count = await signal_service.count_signals(db, filters=filters)
+        signal_responses = [
+            _serialize_signal(signal, _stock_symbol(stock), _stock_market(stock))
+            for signal in signals
+        ]
+        total_pages = (total_count + page_size - 1) // page_size
+
+        return SignalHistoryResponse(
+            items=signal_responses,
+            total=total_count,
+            page=page,
+            per_page=page_size,
+            total_pages=total_pages,
+            signals=signal_responses,
+            pagination={
+                "total": total_count,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+            },
+            stats={"total_signals": total_count},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"取得股票信號失敗: {str(e)}")
+
+
 @router.get("/{stock_id}", response_model=List[TradingSignalResponse])
 async def get_stock_signals(
     stock_id: int,
-    signal_type: Optional[SignalTypeEnum] = Query(None, description="信號類型"),
+    signal_type: Optional[str] = Query(None, description="信號類型"),
     days: int = Query(30, ge=1, le=365, description="歷史天數"),
     limit: int = Query(50, ge=1, le=200, description="返回數量限制"),
     db: AsyncSession = Depends(get_database_session),
@@ -248,7 +470,7 @@ async def get_stock_signals(
             "end_date": end_date,
         }
         if signal_type:
-            filters["signal_type"] = signal_type.value
+            filters["signal_type"] = _normalize_signal_type(signal_type)
 
         signals = await signal_service.list_signals(
             db,
@@ -256,7 +478,10 @@ async def get_stock_signals(
             limit=limit,
         )
 
-        return [_serialize_signal(signal, stock.symbol) for signal in signals]
+        return [
+            _serialize_signal(signal, _stock_symbol(stock), _stock_market(stock))
+            for signal in signals
+        ]
 
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -322,13 +547,16 @@ async def detect_stock_signals(
                         "indicators": response.indicators,
                     },
                 )
-                response.id = saved.get("id")
+                response.id = _get_signal_value(saved, "id")
+            await db.commit()
 
         return responses
 
     except ValueError as e:
+        await db.rollback()
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        await db.rollback()
         raise HTTPException(status_code=500, detail=f"信號偵測失敗: {str(e)}")
 
 

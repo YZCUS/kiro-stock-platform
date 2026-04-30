@@ -13,7 +13,6 @@ RUN pip install --no-cache-dir -r /requirements.txt
 
 # Copy DAGs and include files
 COPY --chown=airflow:root dags/ /opt/airflow/dags/
-COPY --chown=airflow:root include/ /opt/airflow/include/
 
 # Set environment variables
 ENV AIRFLOW__CORE__LOAD_EXAMPLES=False

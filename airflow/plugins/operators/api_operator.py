@@ -28,13 +28,14 @@ class APICallOperator(BaseOperator):
     支援自動檢測大數據並使用外部存儲（Redis）
     """
 
-    template_fields = ['endpoint', 'method', 'payload']
+    template_fields = ['endpoint', 'method', 'payload', 'params']
 
     def __init__(
         self,
         endpoint: str,
         method: str = 'GET',
         payload: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
         base_url: Optional[str] = None,
         timeout: int = DEFAULT_API_TIMEOUT,
         use_external_storage: bool = True,
@@ -45,6 +46,7 @@ class APICallOperator(BaseOperator):
         self.endpoint = endpoint
         self.method = method.upper()
         self.payload = payload or {}
+        self.params = params or {}
         self.base_url = base_url or os.getenv('BACKEND_API_URL', DEFAULT_BACKEND_API_URL)
         self.timeout = timeout
         self.use_external_storage = use_external_storage
@@ -60,13 +62,19 @@ class APICallOperator(BaseOperator):
         try:
             response = None
             if self.method == 'GET':
-                response = requests.get(url, params=self.payload, timeout=self.timeout)
+                response = requests.get(
+                    url, params=self.params or self.payload, timeout=self.timeout
+                )
             elif self.method == 'POST':
-                response = requests.post(url, json=self.payload, timeout=self.timeout)
+                response = requests.post(
+                    url, params=self.params or None, json=self.payload, timeout=self.timeout
+                )
             elif self.method == 'PUT':
-                response = requests.put(url, json=self.payload, timeout=self.timeout)
+                response = requests.put(
+                    url, params=self.params or None, json=self.payload, timeout=self.timeout
+                )
             elif self.method == 'DELETE':
-                response = requests.delete(url, timeout=self.timeout)
+                response = requests.delete(url, params=self.params or None, timeout=self.timeout)
             else:
                 raise ValueError(f"不支援的HTTP方法: {self.method}")
 

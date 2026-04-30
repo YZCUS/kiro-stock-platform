@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any
 from datetime import date
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -19,7 +19,7 @@ from app.dependencies import (
 )
 from api.schemas.stocks import PriceDataResponse
 from domain.services.stock_service import StockService
-from domain.services.data_collection_service import DataCollectionService
+from domain.services.data_collection_service import DataCollectionService, DataCollectionStatus
 from domain.models.stock import Stock
 from domain.models.price_history import PriceHistory
 
@@ -179,6 +179,7 @@ async def backfill_stock_data(
     start_date: Optional[date] = Query(None, description="開始日期"),
     end_date: Optional[date] = Query(None, description="結束日期"),
     force: bool = Query(False, description="強制回填（暫未實現，預留參數）"),
+    body: Optional[Dict[str, Any]] = Body(None),
     db: AsyncSession = Depends(get_database_session),
     data_collection_service: DataCollectionService = Depends(
         get_data_collection_service_clean
@@ -190,6 +191,15 @@ async def backfill_stock_data(
     注意：force 參數目前暫未實現，數據收集服務會自動處理重複數據
     """
     try:
+        if body:
+            start_date = start_date or body.get("start_date")
+            end_date = end_date or body.get("end_date")
+            force = force or bool(body.get("force", False))
+        if isinstance(start_date, str):
+            start_date = date.fromisoformat(start_date)
+        if isinstance(end_date, str):
+            end_date = date.fromisoformat(end_date)
+
         # 注意：force 參數暫未實現，預留供未來功能
         _ = force  # 消除未使用警告
 
@@ -201,7 +211,7 @@ async def backfill_stock_data(
             raise HTTPException(status_code=404, detail=str(exc))
 
         return {
-            "success": result.status == result.status.SUCCESS,
+            "success": result.status == DataCollectionStatus.SUCCESS,
             "message": result.status.value,
             "data_points": result.records_collected,
             "errors": result.errors,
