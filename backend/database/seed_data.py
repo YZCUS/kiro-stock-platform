@@ -13,7 +13,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from app.settings import settings
-from core.database_url import make_async_database_url
+from core.database_url import make_async_database_url, make_async_engine_kwargs
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -290,6 +290,7 @@ async def main():
     engine = create_async_engine(
         make_async_database_url(settings.database.url),
         echo=False,
+        **make_async_engine_kwargs(settings.database.url),
     )
 
     AsyncSessionLocal = async_sessionmaker(

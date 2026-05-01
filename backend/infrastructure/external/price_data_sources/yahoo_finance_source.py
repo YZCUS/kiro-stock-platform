@@ -5,10 +5,11 @@ Yahoo Finance 數據源實現
 """
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Dict, Any, List, Optional
 import asyncio
 import pandas as pd
+from zoneinfo import ZoneInfo
 
 from domain.repositories.price_data_source_interface import (
     IPriceDataSource,
@@ -136,6 +137,49 @@ class YahooFinanceSource(IPriceDataSource):
             logger.error(f"Error fetching prices by period for {symbol}: {e}")
             raise PriceDataSourceError(
                 f"Failed to fetch prices by period for {symbol}: {str(e)}"
+            ) from e
+
+    async def fetch_bars(
+        self,
+        symbol: str,
+        timeframe: str,
+        start_at: datetime,
+        end_at: datetime,
+        market: str = "US",
+    ) -> List[Dict[str, Any]]:
+        """Fetch normalized OHLCV bars for a supported timeframe."""
+        try:
+            formatted_symbol = self._format_symbol(symbol, market)
+            interval = self._map_timeframe_to_interval(timeframe)
+            # yfinance's date parser is strict for history(start=..., end=...).
+            # Date-only strings work for both daily and intraday intervals.
+            start_arg = start_at.date().isoformat()
+            end_arg = (end_at.date() + timedelta(days=1)).isoformat()
+
+            loop = asyncio.get_event_loop()
+            df = await loop.run_in_executor(
+                None,
+                lambda: self.wrapper.get_ticker(formatted_symbol).history(
+                    start=start_arg,
+                    end=end_arg,
+                    interval=interval,
+                ),
+            )
+
+            if df.empty:
+                raise DataUnavailableError(
+                    f"No {timeframe} bars available for {formatted_symbol} "
+                    f"between {start_at} and {end_at}"
+                )
+
+            return self._dataframe_to_bar_dict_list(df, market, timeframe)
+
+        except DataUnavailableError:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching {timeframe} bars for {symbol}: {e}")
+            raise PriceDataSourceError(
+                f"Failed to fetch {timeframe} bars for {symbol}: {str(e)}"
             ) from e
 
     async def validate_symbol(self, symbol: str, market: str = "US") -> bool:
@@ -285,3 +329,65 @@ class YahooFinanceSource(IPriceDataSource):
             result.append(price_data)
 
         return result
+
+    def _dataframe_to_bar_dict_list(
+        self, df: pd.DataFrame, market: str, timeframe: str
+    ) -> List[Dict[str, Any]]:
+        """Convert a yfinance DataFrame into normalized bar records."""
+        result = []
+
+        for idx, row in df.iterrows():
+            result.append(
+                {
+                    "timestamp": self._normalize_bar_timestamp(
+                        idx, market, timeframe
+                    ),
+                    "open": float(row.get("Open", 0)),
+                    "high": float(row.get("High", 0)),
+                    "low": float(row.get("Low", 0)),
+                    "close": float(row.get("Close", 0)),
+                    "volume": int(row.get("Volume", 0)),
+                    "adj_close": float(row.get("Adj Close", row.get("Close", 0))),
+                }
+            )
+
+        return result
+
+    def _normalize_bar_timestamp(
+        self, index_value, market: str, timeframe: str
+    ) -> datetime:
+        market_tz = self._market_timezone(market)
+
+        if isinstance(index_value, pd.Timestamp):
+            timestamp = index_value.to_pydatetime()
+        elif isinstance(index_value, datetime):
+            timestamp = index_value
+        else:
+            timestamp = pd.to_datetime(index_value).to_pydatetime()
+
+        if timeframe in {"1d", "1w"}:
+            local_date = timestamp.date()
+            return datetime.combine(local_date, time.min, tzinfo=market_tz)
+
+        if timestamp.tzinfo is None:
+            return timestamp.replace(tzinfo=market_tz)
+        return timestamp.astimezone(market_tz)
+
+    def _map_timeframe_to_interval(self, timeframe: str) -> str:
+        interval_map = {
+            "1m": "1m",
+            "5m": "5m",
+            "15m": "15m",
+            "30m": "30m",
+            "1h": "60m",
+            "1d": "1d",
+            "1w": "1wk",
+        }
+        if timeframe not in interval_map:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+        return interval_map[timeframe]
+
+    def _market_timezone(self, market: str) -> ZoneInfo:
+        if market == "TW":
+            return ZoneInfo("Asia/Taipei")
+        return ZoneInfo("America/New_York")

@@ -6,7 +6,7 @@
 """
 
 from abc import ABC, abstractmethod
-from datetime import date
+from datetime import date, datetime
 from typing import List, Dict, Any, Optional
 
 
@@ -60,6 +60,37 @@ class IPriceDataSource(ABC):
         Raises:
             ValueError: 股票代碼無效或 period 參數錯誤
             Exception: 數據獲取失敗
+        """
+        pass
+
+    @abstractmethod
+    async def fetch_bars(
+        self,
+        symbol: str,
+        timeframe: str,
+        start_at: datetime,
+        end_at: datetime,
+        market: str = "US",
+    ) -> List[Dict[str, Any]]:
+        """
+        獲取指定 timeframe 的 OHLCV K 線資料。
+
+        Args:
+            symbol: 股票代碼
+            timeframe: K 線週期（1m, 5m, 15m, 30m, 1h, 1d, 1w）
+            start_at: 起始時間（inclusive）
+            end_at: 結束時間（exclusive）
+            market: 市場代碼（US, TW 等）
+
+        Returns:
+            List[Dict] 包含以下鍵值：
+            - timestamp: datetime - K 線起始時間
+            - open: float - 開盤價
+            - high: float - 最高價
+            - low: float - 最低價
+            - close: float - 收盤價
+            - volume: int - 成交量
+            - adj_close: Optional[float] - 調整後收盤價
         """
         pass
 

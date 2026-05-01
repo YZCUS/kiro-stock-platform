@@ -64,14 +64,31 @@ class PaperBrokerAdapter(IBrokerAdapter):
         ]
 
     async def place_order(self, order: BrokerOrderRequest) -> BrokerOrderResult:
+        fill_price = self._resolve_fill_price(order)
+        if fill_price is None:
+            return BrokerOrderResult(
+                broker_order_ref=f"paper-{uuid4()}",
+                status=BrokerOrderStatus.ACCEPTED,
+                submitted_quantity=order.quantity,
+                submitted_at=datetime.now(timezone.utc),
+                raw_payload={
+                    "client_order_id": order.client_order_id,
+                    "paper": True,
+                    "message": "Paper order accepted without reference price",
+                },
+            )
+
         return BrokerOrderResult(
             broker_order_ref=f"paper-{uuid4()}",
-            status=BrokerOrderStatus.ACCEPTED,
+            status=BrokerOrderStatus.FILLED,
             submitted_quantity=order.quantity,
+            filled_quantity=order.quantity,
+            avg_fill_price=fill_price,
             submitted_at=datetime.now(timezone.utc),
             raw_payload={
                 "client_order_id": order.client_order_id,
                 "paper": True,
+                "fill_price": str(fill_price),
             },
         )
 
@@ -83,3 +100,18 @@ class PaperBrokerAdapter(IBrokerAdapter):
             submitted_at=datetime.now(timezone.utc),
             raw_payload={"paper": True},
         )
+
+    def _resolve_fill_price(self, order: BrokerOrderRequest) -> Optional[Decimal]:
+        if order.limit_price is not None:
+            return order.limit_price
+        if order.stop_price is not None:
+            return order.stop_price
+
+        reference_price = order.metadata.get("reference_price")
+        if reference_price is None:
+            return None
+
+        price = Decimal(str(reference_price))
+        if price <= 0:
+            return None
+        return price

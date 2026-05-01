@@ -16,7 +16,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.settings import settings
-from core.database_url import make_async_database_url
+from core.database_url import make_async_database_url, make_async_engine_kwargs
 
 # ✅ Clean Architecture: 使用 domain services
 from domain.services.technical_analysis_service import IndicatorType
@@ -40,6 +40,7 @@ class TechnicalAnalysisCLI:
         self.engine = create_async_engine(
             make_async_database_url(settings.database.url),
             echo=False,
+            **make_async_engine_kwargs(settings.database.url),
         )
         self.async_session_local = sessionmaker(
             self.engine, class_=AsyncSession, expire_on_commit=False

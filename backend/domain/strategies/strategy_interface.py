@@ -43,6 +43,26 @@ class StrategyType(str, Enum):
     ML_PREDICTION = "ml_prediction"  # 機器學習預測策略
 
 
+@dataclass(frozen=True)
+class IndicatorSpec:
+    """Indicator requirement declared by a strategy."""
+
+    name: str
+    timeframe: str = "1d"
+    parameters: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class StrategySpec:
+    """Data and output contract for a strategy implementation."""
+
+    name: str
+    required_timeframes: List[str]
+    lookback_bars: Dict[str, int]
+    required_indicators: List[IndicatorSpec] = field(default_factory=list)
+    output_type: str = "signal"
+
+
 @dataclass
 class TradingSignal:
     """
@@ -236,3 +256,18 @@ class IStrategyEngine(ABC):
         可選實作：子類可以覆蓋此方法以添加自定義驗證邏輯
         """
         return True
+
+    def get_spec(self) -> StrategySpec:
+        """
+        Declare the data contract for this strategy.
+
+        Existing legacy strategies default to daily bars. New strategies should
+        override this so workers can validate data readiness before execution.
+        """
+        return StrategySpec(
+            name=self.strategy_type.value,
+            required_timeframes=["1d"],
+            lookback_bars={"1d": 100},
+            required_indicators=[],
+            output_type="signal",
+        )

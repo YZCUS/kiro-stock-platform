@@ -11,9 +11,11 @@ from .price_data_source_interface import (
     RateLimitError,
     AuthenticationError,
 )
+from .market_data_bar_repository_interface import IMarketDataBarRepository
 
 __all__ = [
     "IPriceDataSource",
+    "IMarketDataBarRepository",
     "PriceDataSourceError",
     "SymbolNotFoundError",
     "DataUnavailableError",

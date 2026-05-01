@@ -26,6 +26,7 @@ from plugins.workflows.stock_collection import (
     try_main_collection_workflow_tw,
     decide_next_step,
     execute_fallback_collection_tw,
+    run_market_data_pipeline_tw,
     # Notifications
     send_completion_notification,
     # Cleanup
@@ -120,6 +121,13 @@ collection_complete_task = EmptyOperator(
     dag=dag
 )
 
+# 多 timeframe K 線管線
+market_data_pipeline_task = PythonOperator(
+    task_id='run_market_data_pipeline',
+    python_callable=run_market_data_pipeline_tw,
+    dag=dag
+)
+
 # 數據品質驗證
 validate_data_task = PythonOperator(
     task_id='validate_data_quality',
@@ -171,7 +179,8 @@ next_step_branch >> fallback_collection_task  # 備援路徑
 [collection_success_task, fallback_collection_task] >> collection_complete_task
 
 # 後續處理
-collection_complete_task >> validate_data_task
+collection_complete_task >> market_data_pipeline_task
+market_data_pipeline_task >> validate_data_task
 validate_data_task >> verify_dependencies_task
 verify_dependencies_task >> send_notification_task
 send_notification_task >> cleanup_storage_task

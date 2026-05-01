@@ -145,7 +145,8 @@ class YFinanceWrapper:
         else:
             start_date = pd.to_datetime(start)
 
-        dates = pd.date_range(start=start_date, end=end_date, freq="D")
+        freq = _interval_to_pandas_frequency(interval)
+        dates = pd.date_range(start=start_date, end=end_date, freq=freq)
 
         # 生成模擬數據
         n = len(dates)
@@ -233,6 +234,20 @@ class MockTicker:
         df = pd.DataFrame(data, index=dates)
         df.index.name = "Date"
         return df
+
+
+def _interval_to_pandas_frequency(interval: str) -> str:
+    """Map yfinance interval names to pandas frequency aliases for mock data."""
+    return {
+        "1m": "1min",
+        "5m": "5min",
+        "15m": "15min",
+        "30m": "30min",
+        "60m": "1h",
+        "1h": "1h",
+        "1d": "D",
+        "1wk": "W-MON",
+    }.get(interval, "D")
 
 
 # 全域實例

@@ -15,7 +15,7 @@ import logging
 
 import os
 import sys
-from core.database_url import make_async_database_url
+from core.database_url import make_async_database_url, make_async_engine_kwargs
 
 # 設定日誌
 logger = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ if not _is_testing:
             echo=settings.app.debug,
             future=True,
             pool_pre_ping=True,
+            **make_async_engine_kwargs(settings.database.url),
         )
     except Exception as e:
         # 如果設定有問題，則使用記憶體資料庫

@@ -65,6 +65,13 @@ class Stock(BaseModel, TimestampMixin):
         lazy="dynamic",
     )
 
+    market_data_bars = relationship(
+        "MarketDataBar",
+        back_populates="stock",
+        cascade="all, delete-orphan",
+        lazy="dynamic",
+    )
+
     technical_indicators = relationship(
         "TechnicalIndicator",
         back_populates="stock",

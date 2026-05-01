@@ -14,9 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
 from domain.strategies.strategy_interface import (
+    IndicatorSpec,
     IStrategyEngine,
     TradingSignal,
     SignalDirection,
+    StrategySpec,
     StrategyType,
 )
 from domain.models.technical_indicator import TechnicalIndicator
@@ -83,6 +85,30 @@ class GoldenCrossStrategy(IStrategyEngine):
             "volume_period": 20,  # 平均成交量計算週期
             "signal_validity_days": 5,  # 信號有效天數
         }
+
+    def get_spec(self) -> StrategySpec:
+        """Declare daily-bar requirements for the golden cross strategy."""
+        params = self.get_default_params()
+        return StrategySpec(
+            name=self.strategy_type.value,
+            required_timeframes=["1d"],
+            lookback_bars={
+                "1d": max(params["long_period"], params["volume_period"]) + 10
+            },
+            required_indicators=[
+                IndicatorSpec(
+                    name=f"SMA_{params['short_period']}",
+                    timeframe="1d",
+                    parameters={"period": params["short_period"]},
+                ),
+                IndicatorSpec(
+                    name=f"SMA_{params['long_period']}",
+                    timeframe="1d",
+                    parameters={"period": params["long_period"]},
+                ),
+            ],
+            output_type="signal",
+        )
 
     async def analyze(
         self, stock_id: int, db: AsyncSession, params: Optional[Dict[str, Any]] = None

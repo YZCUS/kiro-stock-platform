@@ -91,8 +91,9 @@ class OrderIntent(BaseModel, TimestampMixin):
         ),
         CheckConstraint(
             "status IN ('DRAFT', 'PENDING_RISK_CHECK', 'RISK_APPROVED', "
-            "'RISK_BLOCKED', 'REQUIRES_REVIEW', 'SUBMITTED', "
-            "'PARTIALLY_FILLED', 'FILLED', 'CANCELLED', 'REJECTED', 'FAILED')",
+            "'RISK_BLOCKED', 'REQUIRES_REVIEW', 'QUEUED_FOR_EXECUTION', "
+            "'SUBMITTING', 'SUBMITTED', 'PARTIALLY_FILLED', 'FILLED', "
+            "'CANCELLED', 'REJECTED', 'FAILED')",
             name="ck_order_intents_status",
         ),
         CheckConstraint("quantity > 0", name="ck_order_intents_quantity_positive"),

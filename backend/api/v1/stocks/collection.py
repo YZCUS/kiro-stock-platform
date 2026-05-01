@@ -174,6 +174,11 @@ async def collect_batch_stocks_data(
         return {
             "success": summary["success"],
             "message": summary["message"],
+            "total_stocks": summary["total_stocks"],
+            "success_count": summary["success_count"],
+            "error_count": summary["error_count"],
+            "total_records": summary["total_records"],
+            "total_data_saved": summary["total_records"],
             "processed": summary["total_stocks"],
             "successful": summary["success_count"],
             "failed": summary["error_count"],

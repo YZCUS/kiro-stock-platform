@@ -28,13 +28,14 @@ class APICallOperator(BaseOperator):
     支援自動檢測大數據並使用外部存儲（Redis）
     """
 
-    template_fields = ['endpoint', 'method', 'payload', 'params']
+    template_fields = ['endpoint', 'method', 'payload', 'query_params']
 
     def __init__(
         self,
         endpoint: str,
         method: str = 'GET',
         payload: Optional[Dict[str, Any]] = None,
+        query_params: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, Any]] = None,
         base_url: Optional[str] = None,
         timeout: int = DEFAULT_API_TIMEOUT,
@@ -46,7 +47,9 @@ class APICallOperator(BaseOperator):
         self.endpoint = endpoint
         self.method = method.upper()
         self.payload = payload or {}
-        self.params = params or {}
+        # Do not store HTTP query params on `self.params`; Airflow reserves that
+        # attribute for DAG/task Params and converts values into Param objects.
+        self.query_params = query_params if query_params is not None else (params or {})
         self.base_url = base_url or os.getenv('BACKEND_API_URL', DEFAULT_BACKEND_API_URL)
         self.timeout = timeout
         self.use_external_storage = use_external_storage
@@ -63,18 +66,18 @@ class APICallOperator(BaseOperator):
             response = None
             if self.method == 'GET':
                 response = requests.get(
-                    url, params=self.params or self.payload, timeout=self.timeout
+                    url, params=self.query_params or self.payload, timeout=self.timeout
                 )
             elif self.method == 'POST':
                 response = requests.post(
-                    url, params=self.params or None, json=self.payload, timeout=self.timeout
+                    url, params=self.query_params or None, json=self.payload, timeout=self.timeout
                 )
             elif self.method == 'PUT':
                 response = requests.put(
-                    url, params=self.params or None, json=self.payload, timeout=self.timeout
+                    url, params=self.query_params or None, json=self.payload, timeout=self.timeout
                 )
             elif self.method == 'DELETE':
-                response = requests.delete(url, params=self.params or None, timeout=self.timeout)
+                response = requests.delete(url, params=self.query_params or None, timeout=self.timeout)
             else:
                 raise ValueError(f"不支援的HTTP方法: {self.method}")
 

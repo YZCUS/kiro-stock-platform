@@ -1,5 +1,26 @@
 version: '3.8'
 
+x-backend-worker-common: &backend-worker-common
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  env_file:
+    - path: ./backend/.env
+      required: false
+  environment:
+    - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/stock_analysis}
+    - REDIS_URL=redis://redis:6379
+    - PYTHONPATH=/app
+  depends_on:
+    - postgres
+    - redis
+  volumes:
+    - ./backend:/app
+  networks:
+    - stock_network
+  profiles:
+    - workers
+
 services:
   # PostgreSQL 資料庫
   postgres:
@@ -36,10 +57,11 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - ./backend/.env  # 使用 backend 目錄下的 .env 文件
+      - path: ./backend/.env  # 使用 backend 目錄下的 .env 文件
+        required: false
     environment:
-      # 容器內部連接使用服務名稱（覆蓋 .env 中的設定）
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stock_analysis
+      # Application data DB. Uses root .env DATABASE_URL when present; falls back to local Postgres.
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/stock_analysis}
       - REDIS_URL=redis://redis:6379
       - PYTHONPATH=/app
     depends_on:
@@ -50,6 +72,51 @@ services:
     networks:
       - stock_network
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  order-execution-worker:
+    <<: *backend-worker-common
+    container_name: stock_analysis_order_execution_worker
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/stock_analysis}
+      - REDIS_URL=redis://redis:6379
+      - PYTHONPATH=/app
+      - ORDER_EXECUTION_QUEUE_CONSUMER_NAME=order-execution-worker
+    command: python -m scripts.run_worker order-execution
+
+  broker-sync-worker:
+    <<: *backend-worker-common
+    container_name: stock_analysis_broker_sync_worker
+    command: python -m scripts.run_worker broker-sync
+
+  market-data-worker:
+    <<: *backend-worker-common
+    container_name: stock_analysis_market_data_worker
+    command: python -m scripts.run_worker market-data
+
+  bar-aggregation-worker:
+    <<: *backend-worker-common
+    container_name: stock_analysis_bar_aggregation_worker
+    command: python -m scripts.run_worker bar-aggregation
+
+  data-validation-worker:
+    <<: *backend-worker-common
+    container_name: stock_analysis_data_validation_worker
+    command: python -m scripts.run_worker data-validation
+
+  indicator-worker:
+    <<: *backend-worker-common
+    container_name: stock_analysis_indicator_worker
+    command: python -m scripts.run_worker indicator
+
+  strategy-worker:
+    <<: *backend-worker-common
+    container_name: stock_analysis_strategy_worker
+    command: python -m scripts.run_worker strategy
+
+  notification-worker:
+    <<: *backend-worker-common
+    container_name: stock_analysis_notification_worker
+    command: python -m scripts.run_worker notification
 
   # React 前端應用
   frontend:
@@ -88,7 +155,7 @@ services:
       - AIRFLOW__CORE__DEFAULT_TIMEZONE=Asia/Taipei
       - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true
       - AIRFLOW__WEBSERVER__WARN_DEPLOYMENT_EXPOSURE=False
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stock_analysis
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/stock_analysis}
       - REDIS_URL=redis://redis:6379
       - BACKEND_API_URL=http://backend:8000/api/v1
       - PYTHONPATH=/opt/airflow/dags:/opt/airflow:/opt/airflow/backend
@@ -98,7 +165,6 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
-      - ./airflow/airflow.cfg:/opt/airflow/airflow.cfg
       - ./backend:/opt/airflow/backend
     depends_on:
       - postgres
@@ -130,7 +196,7 @@ services:
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
       - AIRFLOW__CORE__DEFAULT_TIMEZONE=Asia/Taipei
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stock_analysis
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/stock_analysis}
       - REDIS_URL=redis://redis:6379
       - BACKEND_API_URL=http://backend:8000/api/v1
       - PYTHONPATH=/opt/airflow/dags:/opt/airflow:/opt/airflow/backend
@@ -138,7 +204,6 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
-      - ./airflow/airflow.cfg:/opt/airflow/airflow.cfg
       - ./backend:/opt/airflow/backend
     depends_on:
       - postgres

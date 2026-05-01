@@ -17,7 +17,8 @@ from plugins.workflows.stock_collection.collection_workflows import (
     decide_next_step,
     execute_fallback_collection,
     execute_fallback_collection_tw,
-    execute_fallback_collection_us
+    execute_fallback_collection_us,
+    run_market_data_pipeline_tw,
 )
 from plugins.workflows.stock_collection.notifications import send_completion_notification
 from plugins.workflows.stock_collection.cleanup import cleanup_external_storage
@@ -39,6 +40,7 @@ __all__ = [
     'execute_fallback_collection',
     'execute_fallback_collection_tw',
     'execute_fallback_collection_us',
+    'run_market_data_pipeline_tw',
     'send_completion_notification',
     'cleanup_external_storage',
 ]

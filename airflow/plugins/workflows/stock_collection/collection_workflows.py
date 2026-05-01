@@ -9,6 +9,30 @@ def decide_collection_strategy(**context):
     return 'try_main_collection'  # 總是先嘗試主要路徑
 
 
+def run_market_data_pipeline_tw(**context):
+    """Run multi-timeframe market data collect/aggregate/validate after legacy collection."""
+    from plugins.operators.api_operator import APICallOperator
+
+    print("啟動多 timeframe market data pipeline...")
+    operator = APICallOperator(
+        task_id="run_market_data_pipeline_tw_api",
+        endpoint="/stocks/market-data/orchestrate",
+        method="POST",
+        payload={
+            "market": "TW",
+            "limit": 100,
+            "days": 7,
+            "source_timeframes": ["1d", "5m"],
+            "derived_timeframes": ["15m", "30m", "1h", "1w"],
+            "enqueue": False,
+        },
+        timeout=900,
+    )
+    result = operator.execute(context)
+    print(f"多 timeframe pipeline 完成: {result}")
+    return result
+
+
 def _get_market_from_context(context):
     """從 context 中獲取市場類型"""
     ti = context.get('task_instance') or context.get('ti')
@@ -668,10 +692,13 @@ def _extract_collection_statistics(collection_data, market_name=''):
         tuple: (total_stocks, success_count, error_count, total_data_saved, api_message)
     """
     if isinstance(collection_data, dict):
-        total_stocks = collection_data.get('total_stocks', 0)
-        success_count = collection_data.get('success_count', 0)
-        error_count = collection_data.get('error_count', 0)
-        total_data_saved = collection_data.get('total_data_saved', 0)
+        total_stocks = collection_data.get('total_stocks', collection_data.get('processed', 0))
+        success_count = collection_data.get('success_count', collection_data.get('successful', 0))
+        error_count = collection_data.get('error_count', collection_data.get('failed', 0))
+        total_data_saved = collection_data.get(
+            'total_data_saved',
+            collection_data.get('total_records', collection_data.get('records_collected', 0)),
+        )
         api_message = collection_data.get('message', '')
     elif isinstance(collection_data, list):
         list_length = len(collection_data)
@@ -725,7 +752,7 @@ def _try_main_collection_with_market(context, market, market_name):
         task_id=f"main_get_{market.lower()}_stocks",
         endpoint="/stocks/active",
         method="GET",
-        params={'market': market}
+        query_params={'market': market}
     )
 
     stocks_result = get_stocks_operator.execute(context)
@@ -773,7 +800,7 @@ def _try_main_collection_with_market(context, market, market_name):
             task_id=f"main_collect_{market.lower()}_all_fallback",
             endpoint="/stocks/collect-all",
             method="POST",
-            params={'market': market}
+            query_params={'market': market}
         )
         collection_result = collect_operator.execute(context)
         actual_stocks_fetched = None
@@ -842,7 +869,7 @@ def _execute_fallback_with_market(context, market, market_name):
         task_id=f"fallback_collect_{market.lower()}_all",
         endpoint="/stocks/collect-all",
         method="POST",
-        params={'market': market}
+        query_params={'market': market}
     )
 
     collection_result = collect_all_operator.execute(context)

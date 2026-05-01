@@ -22,6 +22,9 @@ if TYPE_CHECKING:
     from domain.repositories.trading_signal_repository_interface import (
         ITradingSignalRepository,
     )
+    from domain.repositories.market_data_bar_repository_interface import (
+        IMarketDataBarRepository,
+    )
     from domain.services.stock_service import StockService
     from domain.services.technical_analysis_service import TechnicalAnalysisService
     from domain.services.data_collection_service import DataCollectionService
@@ -205,6 +208,17 @@ def get_trading_signal_repository_clean(
     return TradingSignalRepository(db)
 
 
+def get_market_data_bar_repository(
+    db: AsyncSession = Depends(get_database_session),
+) -> "IMarketDataBarRepository":
+    """取得多 timeframe K 線儲存庫。"""
+    from infrastructure.persistence.market_data_bar_repository import (
+        MarketDataBarRepository,
+    )
+
+    return MarketDataBarRepository()
+
+
 # =============================================================================
 # Domain Services 依賴 (Clean Architecture實現)
 # =============================================================================
@@ -237,13 +251,39 @@ def get_data_collection_service_clean(
     price_repo: "IPriceHistoryRepository" = Depends(get_price_history_repository_clean),
     cache_service: ICacheService = Depends(get_cache_service),
     price_data_source: "IPriceDataSource" = Depends(get_price_data_source),
+    bar_repo: "IMarketDataBarRepository" = Depends(get_market_data_bar_repository),
 ) -> "DataCollectionService":
     """取得數據收集服務 (Clean Architecture版本)"""
     from domain.services.data_collection_service import DataCollectionService
 
     return DataCollectionService(
-        stock_repo, price_repo, cache_service, price_data_source
+        stock_repo, price_repo, cache_service, price_data_source, bar_repo
     )
+
+
+def get_market_data_ingestion_service(
+    stock_repo: "IStockRepository" = Depends(get_stock_repository),
+    bar_repo: "IMarketDataBarRepository" = Depends(get_market_data_bar_repository),
+    price_data_source: "IPriceDataSource" = Depends(get_price_data_source),
+):
+    """取得多 timeframe market data ingestion service。"""
+    from domain.services.market_data_ingestion_service import (
+        MarketDataIngestionService,
+    )
+
+    return MarketDataIngestionService(stock_repo, bar_repo, price_data_source)
+
+
+def get_market_data_validation_service(
+    stock_repo: "IStockRepository" = Depends(get_stock_repository),
+    bar_repo: "IMarketDataBarRepository" = Depends(get_market_data_bar_repository),
+):
+    """取得 market data completeness validation service。"""
+    from domain.services.market_data_validation_service import (
+        MarketDataValidationService,
+    )
+
+    return MarketDataValidationService(stock_repo, bar_repo)
 
 
 def get_trading_signal_service_clean(
@@ -258,6 +298,22 @@ def get_trading_signal_service_clean(
     from domain.services.trading_signal_service import TradingSignalService
 
     return TradingSignalService(stock_repo, price_repo, cache_service, signal_repo)
+
+
+def get_market_data_access_service(
+    bar_repo: "IMarketDataBarRepository" = Depends(get_market_data_bar_repository),
+):
+    """取得 timeframe-aware market data access service。"""
+    from domain.services.market_data_access_service import MarketDataAccessService
+
+    return MarketDataAccessService(bar_repo)
+
+
+def get_bar_aggregation_service():
+    """取得 K 線聚合服務。"""
+    from domain.services.bar_aggregation_service import BarAggregationService
+
+    return BarAggregationService()
 
 
 def get_data_validation_service_clean(
@@ -290,6 +346,55 @@ def get_order_intent_service():
     from domain.services.order_intent_service import OrderIntentService
 
     return OrderIntentService()
+
+
+_order_execution_queue_singleton = None
+
+
+def get_order_execution_queue():
+    """取得下單執行佇列。預設使用 Redis Streams。"""
+    global _order_execution_queue_singleton
+
+    if _order_execution_queue_singleton is not None:
+        return _order_execution_queue_singleton
+
+    settings = get_settings()
+    backend = settings.order_execution_queue.backend.strip().lower()
+
+    if backend in {"memory", "in_memory", "inmemory"}:
+        from infrastructure.execution import InMemoryOrderExecutionQueue
+
+        _order_execution_queue_singleton = InMemoryOrderExecutionQueue(
+            max_attempts=settings.order_execution_queue.max_attempts
+        )
+        return _order_execution_queue_singleton
+
+    if backend in {"redis", "redis_stream", "redis_streams"}:
+        from infrastructure.execution import RedisStreamOrderExecutionQueue
+
+        redis_client = get_redis_client(settings)
+        if redis_client is None:
+            raise RuntimeError("Redis Streams order execution queue is unavailable")
+
+        _order_execution_queue_singleton = RedisStreamOrderExecutionQueue(
+            redis_client=redis_client,
+            stream_name=settings.order_execution_queue.stream_name,
+            consumer_group=settings.order_execution_queue.consumer_group,
+            consumer_name=settings.order_execution_queue.consumer_name,
+            dead_letter_stream=settings.order_execution_queue.dead_letter_stream,
+            max_attempts=settings.order_execution_queue.max_attempts,
+            pending_idle_ms=settings.order_execution_queue.pending_idle_ms,
+        )
+        return _order_execution_queue_singleton
+
+    raise RuntimeError(f"Unsupported order execution queue backend: {backend}")
+
+
+def get_order_execution_worker():
+    """取得下單執行 worker。"""
+    from domain.services.order_execution_worker import OrderExecutionWorker
+
+    return OrderExecutionWorker()
 
 
 # =============================================================================

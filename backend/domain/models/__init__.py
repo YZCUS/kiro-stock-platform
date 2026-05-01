@@ -6,6 +6,7 @@ Domain Models - SQLAlchemy實體定義
 # 重新導出所有模型，保持向後兼容性
 from .stock import Stock
 from .price_history import PriceHistory
+from .market_data_bar import MarketDataBar
 from .technical_indicator import TechnicalIndicator
 from .trading_signal import TradingSignal
 from .system_log import SystemLog
@@ -30,6 +31,7 @@ from .risk import RiskCheckResult, RiskProfile
 __all__ = [
     "Stock",
     "PriceHistory",
+    "MarketDataBar",
     "TechnicalIndicator",
     "TradingSignal",
     "SystemLog",

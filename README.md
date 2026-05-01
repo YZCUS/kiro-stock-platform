@@ -152,11 +152,18 @@ kiro-stock-platform/
 │   │   ├── schemas/           # Pydantic 模型 (請求/回應)
 │   │   └── utils/             # API 工具函數
 │   ├── domain/                 # 領域層 (業務核心)
+│   │   ├── execution/         # 下單執行命令與 queue 介面
+│   │   ├── market_data/       # 多 timeframe K 線 DTO 與 timeframe 規則
+│   │   ├── workers/           # 通用背景任務 command 與 queue 介面
 │   │   ├── services/          # 業務邏輯服務
 │   │   │   ├── stock_service.py                # 股票業務邏輯
 │   │   │   ├── technical_analysis_service.py   # 技術分析
 │   │   │   ├── data_collection_service.py      # 數據收集
-│   │   │   └── trading_signal_service.py       # 交易信號
+│   │   │   ├── bar_aggregation_service.py      # K 線 timeframe 聚合
+│   │   │   ├── task_worker_runtime.py          # 通用 worker runtime
+│   │   │   ├── trading_signal_service.py       # 交易信號
+│   │   │   ├── order_intent_service.py         # 下單意圖與風控流程
+│   │   │   └── order_execution_worker.py       # broker 送單 worker
 │   │   └── repositories/      # Repository 介面 (Ports)
 │   │       ├── stock_repository_interface.py
 │   │       └── price_history_repository_interface.py
@@ -168,10 +175,13 @@ kiro-stock-platform/
 │   │   │   └── redis_cache_service.py
 │   │   ├── external/          # 外部服務整合
 │   │   │   └── yfinance_wrapper.py  # Yahoo Finance API
+│   │   ├── execution/         # queue adapters（Redis Streams / in-memory）
+│   │   ├── workers/           # 通用 Redis Streams task queue adapter
 │   │   └── scheduler/         # 排程服務
 │   ├── models/                 # SQLAlchemy 領域模型
 │   │   └── domain/            # 資料庫實體定義
 │   │       ├── stock.py
+│   │       ├── market_data_bar.py    # 多 timeframe OHLCV K 線
 │   │       ├── price_history.py
 │   │       ├── technical_indicator.py
 │   │       ├── trading_signal.py
@@ -186,8 +196,9 @@ kiro-stock-platform/
 │   ├── database/              # 資料庫工具
 │   │   ├── migrate.py         # 遷移腳本
 │   │   └── seed_data.py       # 種子資料
-│   ├── scripts/               # CLI 工具
-│   │   └── create_tables.py  # 資料表建立
+│   ├── scripts/               # CLI / worker 工具
+│   │   ├── create_tables.py  # 資料表建立
+│   │   └── run_worker.py     # 背景 worker 入口
 │   └── tests/                 # 測試套件
 │       ├── unit/              # 單元測試 (領域服務)
 │       ├── integration/       # 整合測試 (API)
@@ -246,6 +257,39 @@ kiro-stock-platform/
 - HTTP 路由和請求處理
 - 輸入驗證和回應格式化
 - 委派業務邏輯到領域服務
+
+### 交易執行架構
+
+交易策略或使用者操作只會建立 `OrderIntent`，不直接送 broker。`POST /api/v1/trading/order-intents/{id}/submit` 會先執行風控，通過後把 `OrderExecutionCommand` 排入 execution queue，並將意圖狀態更新為 `QUEUED_FOR_EXECUTION`。
+
+實際送單由 `OrderExecutionWorker` 消費 command 後執行，送單期間狀態為 `SUBMITTING`，broker 回應後才轉為 `SUBMITTED`、`FILLED`、`REJECTED` 或 `FAILED`。預設 queue adapter 是 Redis Streams，介面抽象在 `domain/execution/queue_interface.py`；本地測試可切換為 `InMemoryOrderExecutionQueue`。
+
+Redis Streams 使用 consumer group、ack、retry 與 dead-letter stream。worker 成功處理後 `XACK`；失敗時依 `ORDER_EXECUTION_QUEUE_MAX_ATTEMPTS` 重試，超過次數會寫入 `ORDER_EXECUTION_QUEUE_DEAD_LETTER_STREAM`。worker crash 後未 ack 的 pending message 會在 `ORDER_EXECUTION_QUEUE_PENDING_IDLE_MS` 後被重新 claim。
+
+### Worker 與 Market Data 架構
+
+Backend API 只負責建立 request、intent 或 task，耗時工作透過 Redis Streams 交給獨立 worker。Docker worker services 放在 `workers` profile：
+
+```bash
+docker compose --profile workers up
+```
+
+目前 worker entrypoint 是 `python -m scripts.run_worker <worker-type>`，支援：
+
+- `order-execution`：消費 `order_execution`，執行 paper broker，之後接 IBKR。
+- `broker-sync`：預留 broker account / position / fills 同步任務。
+- `market-data`：消費 `market_data_tasks`，按順序執行 1d / 5m 擷取、derived timeframe 聚合與完整性驗證。
+- `bar-aggregation`：消費 `bar_aggregation_tasks`，將低 timeframe K 線聚合成高 timeframe。
+- `data-validation`：消費 `data_validation_tasks`，檢查 expected bars、缺漏、重複與 OHLCV 合法性。
+- `indicator`：預留 multi-timeframe 技術指標計算任務。
+- `strategy`：消費 `strategy_tasks`，檢查策略宣告的 timeframe / indicator 資料需求。
+- `notification`：預留通知任務。
+
+K 線資料統一存於 `market_data_bars`，以 `timeframe` 區分 `1m`、`5m`、`15m`、`30m`、`1h`、`1d`、`1w`。直接從資料源取得的 5m / 1d 標記為 `source`，由系統聚合產生的 15m / 30m / 1h 標記為 `derived`，並記錄 `generated_from_timeframe`。策略需透過 `StrategySpec` 宣告 `required_timeframes`、`lookback_bars` 與 `required_indicators`，再由 worker 檢查資料是否足夠。
+
+完整資料流程與驗證方式見 `docs/market-data-pipeline.md`。Airflow 的台股日線 DAG 會在 legacy `price_history` 收集後呼叫 `/api/v1/stocks/market-data/orchestrate`，將資料同步寫入 `market_data_bars` 並產生 derived timeframes。
+
+缺 source K 棒時系統不做線性回填，也不反推低 timeframe。derived bar 會先標為 `partial`；pipeline 會嘗試直接補受影響的 `15m`、`30m`、`1h` 或 `1w` provider bar，並標記 `quality_status=backfilled`。策略資料讀取只使用 `complete`、`backfilled` 或 `corrected`。
 
 ## API 端點文檔
 
@@ -590,6 +634,13 @@ make logs        # 查看服務日誌
 ### Backend
 - `DATABASE_URL` - PostgreSQL 連接字串
 - `REDIS_URL` - Redis 連接字串
+- `ORDER_EXECUTION_QUEUE_BACKEND` - 下單佇列後端，預設 `redis_streams`；測試可用 `in_memory`
+- `ORDER_EXECUTION_QUEUE_STREAM_NAME` - Redis Stream 名稱，預設 `order_execution`
+- `ORDER_EXECUTION_QUEUE_CONSUMER_GROUP` - Redis consumer group，預設 `order_execution_workers`
+- `ORDER_EXECUTION_QUEUE_DEAD_LETTER_STREAM` - 失敗超限後寫入的 stream，預設 `order_execution_dead`
+- `ORDER_EXECUTION_QUEUE_MAX_ATTEMPTS` - 下單命令最大處理次數，預設 `3`
+- `ORDER_EXECUTION_QUEUE_PENDING_IDLE_MS` - pending message 可被重新 claim 的閒置毫秒數，預設 `60000`
+- Generic worker streams - `market_data_tasks`, `bar_aggregation_tasks`, `data_validation_tasks`, `indicator_tasks`, `strategy_tasks`, `broker_sync_tasks`, `notification_tasks`
 - `BACKEND_API_URL` - Backend API URL (Airflow 使用)
 
 ### Airflow

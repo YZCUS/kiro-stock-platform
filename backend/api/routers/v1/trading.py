@@ -2,28 +2,35 @@
 交易整合 API
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas.trading import (
-    BrokerOrderResponse,
     BrokerStatusResponse,
+    OrderExecutionCommandResponse,
     OrderIntentCreateRequest,
     OrderIntentListResponse,
+    OrderIntentQueuedResponse,
     OrderIntentResponse,
     RiskCheckResponse,
 )
 from app.dependencies import (
     get_broker_adapter,
     get_database_session,
+    get_order_execution_queue,
+    get_order_execution_worker,
     get_order_intent_service,
     get_risk_engine,
 )
 from app.settings import Settings, get_settings
 from core.auth_dependencies import get_current_active_user
-from domain.brokers import BrokerError, IBrokerAdapter
+from domain.brokers import IBrokerAdapter
+from domain.execution import IOrderExecutionQueue, OrderExecutionCommand
 from domain.models.order_intent import OrderIntent
+from domain.models.risk import RiskCheckResult
 from domain.models.user import User
 from domain.orders import OrderIntentRequest, OrderSide, OrderType, TimeInForce
 from domain.risk import IRiskEngine
@@ -31,6 +38,7 @@ from domain.services.order_intent_service import OrderIntentService
 
 
 router = APIRouter(prefix="/trading", tags=["trading"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/broker/status", response_model=BrokerStatusResponse)
@@ -147,40 +155,81 @@ async def evaluate_order_intent_risk(
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@router.post("/order-intents/{intent_id}/submit", response_model=BrokerOrderResponse)
+@router.post(
+    "/order-intents/{intent_id}/submit", response_model=OrderIntentQueuedResponse
+)
 async def submit_order_intent(
     intent_id: int,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_database_session),
     current_user: User = Depends(get_current_active_user),
     service: OrderIntentService = Depends(get_order_intent_service),
     risk_engine: IRiskEngine = Depends(get_risk_engine),
-    broker: IBrokerAdapter = Depends(get_broker_adapter),
+    execution_queue: IOrderExecutionQueue = Depends(get_order_execution_queue),
     settings: Settings = Depends(get_settings),
 ):
     """
     送出下單意圖。
 
-    若尚未通過風控，會先執行風控；未通過則不會送 broker。
+    若尚未通過風控，會先執行風控；未通過則不會進入執行佇列。
+    實際 broker 送單由 execution worker 處理，
+    避免 API request 直接卡在券商連線。
     """
     try:
-        _, broker_order = await service.submit_order_intent(
-            db, current_user.id, intent_id, risk_engine, broker, settings
+        intent, command, risk_result = await service.queue_order_intent(
+            db,
+            current_user.id,
+            intent_id,
+            risk_engine,
+            execution_queue,
+            settings,
         )
-        return BrokerOrderResponse(
-            id=broker_order.id,
-            order_intent_id=broker_order.order_intent_id,
-            broker_order_ref=broker_order.broker_order_ref,
-            status=broker_order.status,
-            submitted_quantity=broker_order.submitted_quantity,
-            filled_quantity=broker_order.filled_quantity,
-            avg_fill_price=broker_order.avg_fill_price,
-            submitted_at=broker_order.submitted_at,
-            raw_payload=broker_order.raw_payload,
+        if (
+            background_tasks is not None
+            and settings.broker.provider.lower() == "paper"
+        ):
+            background_tasks.add_task(_process_next_order_execution_background)
+
+        return OrderIntentQueuedResponse(
+            order_intent=_serialize_order_intent(intent),
+            command=_serialize_execution_command(command),
+            risk_check=(
+                _serialize_risk_check_result(risk_result) if risk_result else None
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except BrokerError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+async def _process_next_order_execution_background() -> None:
+    """Process one queued paper order after the API response is returned."""
+    from core.database import AsyncSessionLocal
+
+    if AsyncSessionLocal is None:
+        logger.warning(
+            "Order execution skipped because database session is unavailable"
+        )
+        return
+
+    settings = get_settings()
+    queue = get_order_execution_queue()
+    broker = get_broker_adapter(settings)
+    worker = get_order_execution_worker()
+
+    async with AsyncSessionLocal() as db:
+        try:
+            await worker.process_next(
+                db=db,
+                execution_queue=queue,
+                broker=broker,
+                settings=settings,
+                timeout=0,
+            )
+        except Exception:
+            await db.rollback()
+            logger.exception("Failed to process queued paper order execution")
 
 
 def _serialize_order_intent(intent: OrderIntent) -> OrderIntentResponse:
@@ -209,4 +258,29 @@ def _serialize_order_intent(intent: OrderIntent) -> OrderIntentResponse:
         expires_at=intent.expires_at,
         created_at=intent.created_at,
         updated_at=intent.updated_at,
+    )
+
+
+def _serialize_risk_check_result(result: RiskCheckResult) -> RiskCheckResponse:
+    return RiskCheckResponse(
+        id=result.id,
+        order_intent_id=result.order_intent_id,
+        decision=result.decision,
+        reason_code=result.reason_code,
+        reason_message=result.reason_message,
+        evaluated_by=result.evaluated_by,
+        evaluated_at=result.evaluated_at,
+        metadata=result.metadata_json,
+    )
+
+
+def _serialize_execution_command(
+    command: OrderExecutionCommand,
+) -> OrderExecutionCommandResponse:
+    return OrderExecutionCommandResponse(
+        order_intent_id=command.order_intent_id,
+        idempotency_key=command.idempotency_key,
+        attempt=command.attempt,
+        requested_at=command.requested_at,
+        metadata=command.metadata,
     )

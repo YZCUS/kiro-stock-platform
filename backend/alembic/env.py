@@ -19,6 +19,7 @@ from core.database import Base
 # 匯入所有模型以確保它們被註冊到 Base.metadata
 from domain.models.stock import Stock
 from domain.models.price_history import PriceHistory
+from domain.models.market_data_bar import MarketDataBar
 from domain.models.technical_indicator import TechnicalIndicator
 from domain.models.trading_signal import TradingSignal
 from domain.models.system_log import SystemLog

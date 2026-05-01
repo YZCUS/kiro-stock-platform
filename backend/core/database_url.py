@@ -1,6 +1,9 @@
 """Database URL helpers for runtime and migration engines."""
 
+from uuid import uuid4
+
 from sqlalchemy.engine import make_url
+from sqlalchemy.pool import NullPool
 
 
 def _is_postgresql(drivername: str) -> bool:
@@ -30,6 +33,26 @@ def make_async_database_url(database_url: str) -> str:
         query.setdefault("prepared_statement_cache_size", "0")
 
     return _render(url.set(drivername="postgresql+asyncpg", query=query))
+
+
+def make_async_connect_args(database_url: str) -> dict:
+    """Return asyncpg connect args required by specific hosting targets."""
+    url = make_url(database_url)
+    if _is_postgresql(url.drivername) and _is_transaction_pooler(url.host, url.port):
+        return {
+            "statement_cache_size": 0,
+            "prepared_statement_name_func": lambda: f"__asyncpg_{uuid4()}__",
+        }
+    return {}
+
+
+def make_async_engine_kwargs(database_url: str) -> dict:
+    """Return SQLAlchemy async engine kwargs for the target database URL."""
+    url = make_url(database_url)
+    kwargs = {"connect_args": make_async_connect_args(database_url)}
+    if _is_postgresql(url.drivername) and _is_transaction_pooler(url.host, url.port):
+        kwargs["poolclass"] = NullPool
+    return kwargs
 
 
 def make_sync_database_url(database_url: str) -> str:

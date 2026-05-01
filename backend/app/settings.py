@@ -44,6 +44,21 @@ class RedisSettings(BaseSettings):
         env_prefix = "REDIS_"
 
 
+class OrderExecutionQueueSettings(BaseSettings):
+    """下單執行佇列設定"""
+
+    backend: str = Field("redis_streams", env="BACKEND")
+    stream_name: str = Field("order_execution", env="STREAM_NAME")
+    consumer_group: str = Field("order_execution_workers", env="CONSUMER_GROUP")
+    consumer_name: Optional[str] = Field(None, env="CONSUMER_NAME")
+    dead_letter_stream: str = Field("order_execution_dead", env="DEAD_LETTER_STREAM")
+    max_attempts: int = Field(3, env="MAX_ATTEMPTS")
+    pending_idle_ms: int = Field(60000, env="PENDING_IDLE_MS")
+
+    class Config:
+        env_prefix = "ORDER_EXECUTION_QUEUE_"
+
+
 class ExternalAPISettings(BaseSettings):
     """外部 API 設定"""
 
@@ -147,6 +162,7 @@ class Settings(BaseSettings):
 
     database: DatabaseSettings = DatabaseSettings()
     redis: RedisSettings = RedisSettings()
+    order_execution_queue: OrderExecutionQueueSettings = OrderExecutionQueueSettings()
     external_api: ExternalAPISettings = ExternalAPISettings()
     broker: BrokerSettings = BrokerSettings()
     ibkr: IBKRSettings = IBKRSettings()
@@ -170,6 +186,28 @@ class Settings(BaseSettings):
     REDIS_DEFAULT_TTL: Optional[int] = Field(None, alias="REDIS_DEFAULT_TTL")
     REDIS_STOCK_LIST_TTL: Optional[int] = Field(None, alias="REDIS_STOCK_LIST_TTL")
     REDIS_PRICE_DATA_TTL: Optional[int] = Field(None, alias="REDIS_PRICE_DATA_TTL")
+
+    ORDER_EXECUTION_QUEUE_BACKEND: Optional[str] = Field(
+        None, alias="ORDER_EXECUTION_QUEUE_BACKEND"
+    )
+    ORDER_EXECUTION_QUEUE_STREAM_NAME: Optional[str] = Field(
+        None, alias="ORDER_EXECUTION_QUEUE_STREAM_NAME"
+    )
+    ORDER_EXECUTION_QUEUE_CONSUMER_GROUP: Optional[str] = Field(
+        None, alias="ORDER_EXECUTION_QUEUE_CONSUMER_GROUP"
+    )
+    ORDER_EXECUTION_QUEUE_CONSUMER_NAME: Optional[str] = Field(
+        None, alias="ORDER_EXECUTION_QUEUE_CONSUMER_NAME"
+    )
+    ORDER_EXECUTION_QUEUE_DEAD_LETTER_STREAM: Optional[str] = Field(
+        None, alias="ORDER_EXECUTION_QUEUE_DEAD_LETTER_STREAM"
+    )
+    ORDER_EXECUTION_QUEUE_MAX_ATTEMPTS: Optional[int] = Field(
+        None, alias="ORDER_EXECUTION_QUEUE_MAX_ATTEMPTS"
+    )
+    ORDER_EXECUTION_QUEUE_PENDING_IDLE_MS: Optional[int] = Field(
+        None, alias="ORDER_EXECUTION_QUEUE_PENDING_IDLE_MS"
+    )
 
     SECRET_KEY: Optional[str] = Field(None, alias="SECRET_KEY")
     JWT_ALGORITHM: Optional[str] = Field(None, alias="JWT_ALGORITHM")
@@ -258,6 +296,35 @@ class Settings(BaseSettings):
             settings.redis.stock_list_ttl = settings.REDIS_STOCK_LIST_TTL
         if settings.REDIS_PRICE_DATA_TTL is not None:
             settings.redis.price_data_ttl = settings.REDIS_PRICE_DATA_TTL
+
+        if settings.ORDER_EXECUTION_QUEUE_BACKEND:
+            settings.order_execution_queue.backend = (
+                settings.ORDER_EXECUTION_QUEUE_BACKEND
+            )
+        if settings.ORDER_EXECUTION_QUEUE_STREAM_NAME:
+            settings.order_execution_queue.stream_name = (
+                settings.ORDER_EXECUTION_QUEUE_STREAM_NAME
+            )
+        if settings.ORDER_EXECUTION_QUEUE_CONSUMER_GROUP:
+            settings.order_execution_queue.consumer_group = (
+                settings.ORDER_EXECUTION_QUEUE_CONSUMER_GROUP
+            )
+        if settings.ORDER_EXECUTION_QUEUE_CONSUMER_NAME:
+            settings.order_execution_queue.consumer_name = (
+                settings.ORDER_EXECUTION_QUEUE_CONSUMER_NAME
+            )
+        if settings.ORDER_EXECUTION_QUEUE_DEAD_LETTER_STREAM:
+            settings.order_execution_queue.dead_letter_stream = (
+                settings.ORDER_EXECUTION_QUEUE_DEAD_LETTER_STREAM
+            )
+        if settings.ORDER_EXECUTION_QUEUE_MAX_ATTEMPTS is not None:
+            settings.order_execution_queue.max_attempts = (
+                settings.ORDER_EXECUTION_QUEUE_MAX_ATTEMPTS
+            )
+        if settings.ORDER_EXECUTION_QUEUE_PENDING_IDLE_MS is not None:
+            settings.order_execution_queue.pending_idle_ms = (
+                settings.ORDER_EXECUTION_QUEUE_PENDING_IDLE_MS
+            )
 
         if settings.SECRET_KEY:
             settings.security.secret_key = settings.SECRET_KEY

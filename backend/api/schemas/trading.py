@@ -56,6 +56,16 @@ class BrokerOrderResponse(BaseModel):
     raw_payload: Optional[Dict[str, Any]]
 
 
+class OrderExecutionCommandResponse(BaseModel):
+    """送單執行命令。"""
+
+    order_intent_id: int
+    idempotency_key: str
+    attempt: int
+    requested_at: datetime
+    metadata: Dict[str, Any]
+
+
 class OrderIntentResponse(BaseModel):
     """下單意圖響應。"""
 
@@ -90,6 +100,14 @@ class OrderIntentListResponse(BaseModel):
 
     items: List[OrderIntentResponse]
     total: int
+
+
+class OrderIntentQueuedResponse(BaseModel):
+    """下單意圖已排入執行佇列。"""
+
+    order_intent: OrderIntentResponse
+    command: OrderExecutionCommandResponse
+    risk_check: Optional[RiskCheckResponse] = None
 
 
 class BrokerStatusResponse(BaseModel):

@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from app.settings import settings
 from core.database import Base
-from core.database_url import make_async_database_url
+from core.database_url import make_async_database_url, make_async_engine_kwargs
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +36,7 @@ class DatabaseManager:
         self.engine = create_async_engine(
             make_async_database_url(settings.database.url),
             echo=True,
+            **make_async_engine_kwargs(settings.database.url),
         )
 
     async def create_database(self):

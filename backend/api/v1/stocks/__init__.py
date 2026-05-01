@@ -8,6 +8,7 @@
 - indicators.py: 技術指標計算、摘要、批次處理
 - collection.py: 數據收集、刷新、批次收集
 - validation.py: 數據驗證
+- market_data.py: 多 timeframe K 線資料
 - crud.py: 創建、更新、刪除操作
 
 設計優勢：
@@ -29,6 +30,7 @@ from . import prices
 from . import indicators
 from . import collection
 from . import validation
+from . import market_data
 from . import crud
 
 # 創建主路由器
@@ -47,6 +49,7 @@ router.include_router(indicators.router, tags=["技術指標"])
 # 數據維護操作
 router.include_router(collection.router, tags=["數據收集"])
 router.include_router(validation.router, tags=["數據驗證"])
+router.include_router(market_data.router, tags=["多時間框架K線"])
 
 # 導出主路由器供上級模組使用
 __all__ = [
