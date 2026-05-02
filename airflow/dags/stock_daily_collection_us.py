@@ -32,6 +32,7 @@ from plugins.workflows.stock_collection import (
     try_main_collection_workflow_us,
     decide_next_step,
     execute_fallback_collection_us,
+    prefetch_price_cache_us,
     # Notifications
     send_completion_notification,
     # Cleanup
@@ -126,6 +127,13 @@ collection_complete_task = EmptyOperator(
     dag=dag
 )
 
+# 本地價格快取預抓
+prefetch_price_cache_task = PythonOperator(
+    task_id='prefetch_price_cache',
+    python_callable=prefetch_price_cache_us,
+    dag=dag
+)
+
 # 數據品質驗證
 validate_data_task = PythonOperator(
     task_id='validate_data_quality',
@@ -177,7 +185,8 @@ next_step_branch >> fallback_collection_task  # 備援路徑
 [collection_success_task, fallback_collection_task] >> collection_complete_task
 
 # 後續處理
-collection_complete_task >> validate_data_task
+collection_complete_task >> prefetch_price_cache_task
+prefetch_price_cache_task >> validate_data_task
 validate_data_task >> verify_dependencies_task
 verify_dependencies_task >> send_notification_task
 send_notification_task >> cleanup_storage_task

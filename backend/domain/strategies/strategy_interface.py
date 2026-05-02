@@ -36,6 +36,7 @@ class StrategyType(str, Enum):
     GOLDEN_CROSS = "golden_cross"  # 黃金交叉策略
     DEATH_CROSS = "death_cross"  # 死亡交叉策略
     RSI_REVERSAL = "rsi_reversal"  # RSI 反轉策略
+    MACD_CROSSOVER = "macd_crossover"  # MACD 交叉策略
     MACD_DIVERGENCE = "macd_divergence"  # MACD 背離策略
     BOLLINGER_BREAKOUT = "bollinger_breakout"  # 布林帶突破策略
     VOLUME_SPIKE = "volume_spike"  # 成交量異常策略
@@ -242,6 +243,23 @@ class IStrategyEngine(ABC):
             }
         """
         return {}
+
+    def get_parameter_schema(self) -> List[Dict[str, Any]]:
+        """
+        獲取策略參數的 UI schema。
+
+        key 仍維持後端使用的英文欄位，label/description 提供前端中文顯示。
+        """
+        schema = []
+        for key, value in self.get_default_params().items():
+            if isinstance(value, bool):
+                field_type = "boolean"
+            elif isinstance(value, (int, float)):
+                field_type = "number"
+            else:
+                field_type = "text"
+            schema.append({"key": key, "label": key, "type": field_type})
+        return schema
 
     def validate_params(self, params: Dict[str, Any]) -> bool:
         """

@@ -3,12 +3,27 @@
  */
 
 // 最新價格資訊
+export interface PriceFreshnessInfo {
+  has_data?: boolean;
+  latest_date?: string | null;
+  last_updated_at?: string | null;
+  age_days?: number | null;
+  stale_after_days?: number;
+  is_stale?: boolean;
+  source?: string;
+}
+
 export interface LatestPriceInfo {
   close: number | null;
   change: number | null;
   change_percent: number | null;
   date: string | null;
   volume: number | null;
+  is_stale?: boolean;
+  age_days?: number | null;
+  last_updated_at?: string | null;
+  source?: string;
+  is_realtime?: boolean;
 }
 
 // 基礎類型

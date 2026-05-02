@@ -2,11 +2,13 @@
  * API Integration Layer with Fallback Support
  */
 import axios from 'axios';
-import { TradingSignal, TradingSignalType } from '../types';
+import { Stock, TradingSignalType } from '../types';
+import { getApiBaseUrl } from './runtimeConfig';
 
 // Environment configuration
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = getApiBaseUrl();
 const API_TIMEOUT = 10000; // 10 seconds
+const ENABLE_API_MOCKS = process.env.NEXT_PUBLIC_ENABLE_API_MOCKS === 'true';
 
 // Create axios instance
 const apiClient = axios.create({
@@ -26,15 +28,6 @@ interface MockTradingSignal {
   timestamp: string;
   confidence: number;
   description: string;
-}
-
-interface StockData {
-  symbol: string;
-  price: number;
-  change: number;
-  change_percent: number;
-  volume: number;
-  timestamp: string;
 }
 
 interface FetchParams {
@@ -68,22 +61,38 @@ const mockTradingSignals: MockTradingSignal[] = [
   }
 ];
 
-const mockStockData: StockData[] = [
+const mockStockData: Stock[] = [
   {
+    id: 1,
     symbol: '2330.TW',
-    price: 580.0,
-    change: 5.0,
-    change_percent: 0.87,
-    volume: 12500000,
-    timestamp: new Date().toISOString()
+    market: 'TW',
+    name: '台積電',
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    latest_price: {
+      close: 580.0,
+      change: 5.0,
+      change_percent: 0.87,
+      date: new Date().toISOString(),
+      volume: 12500000,
+    },
   },
   {
+    id: 2,
     symbol: 'AAPL',
-    price: 185.0,
-    change: -2.5,
-    change_percent: -1.33,
-    volume: 85000000,
-    timestamp: new Date().toISOString()
+    market: 'US',
+    name: 'Apple Inc.',
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    latest_price: {
+      close: 185.0,
+      change: -2.5,
+      change_percent: -1.33,
+      date: new Date().toISOString(),
+      volume: 85000000,
+    },
   }
 ];
 
@@ -92,6 +101,19 @@ let fallbackModeActive = false;
 
 export function isFallbackModeActive(): boolean {
   return fallbackModeActive;
+}
+
+function handleApiError(error: unknown, context: string): never {
+  fallbackModeActive = false;
+
+  if (ENABLE_API_MOCKS) {
+    fallbackModeActive = true;
+    console.warn(`${context} failed, using explicitly enabled mock data:`, error);
+    throw error;
+  }
+
+  console.error(`${context} failed:`, error);
+  throw error instanceof Error ? error : new Error(context);
 }
 
 // API integration functions with fallback
@@ -108,8 +130,12 @@ export async function fetchSignalsWithFallback(params: FetchParams = {}): Promis
     fallbackModeActive = false;
     return response.data; // 直接返回完整的分頁結構
   } catch (error) {
-    console.warn('API call failed, using mock data:', error);
+    if (!ENABLE_API_MOCKS) {
+      handleApiError(error, 'Fetch signals API call');
+    }
+
     fallbackModeActive = true;
+    console.warn('Fetch signals API call failed, using explicitly enabled mock data:', error);
 
     // Filter mock data based on params if needed
     let filtered = mockTradingSignals;
@@ -138,7 +164,7 @@ export async function fetchSignalsWithFallback(params: FetchParams = {}): Promis
 }
 
 export async function fetchStocksWithFallback(params: FetchParams = {}): Promise<{
-  items: StockData[];
+  items: Stock[];
   total: number;
   page: number;
   per_page: number;
@@ -150,8 +176,12 @@ export async function fetchStocksWithFallback(params: FetchParams = {}): Promise
     fallbackModeActive = false;
     return response.data; // 直接返回完整的分頁結構
   } catch (error) {
-    console.warn('API call failed, using mock data:', error);
+    if (!ENABLE_API_MOCKS) {
+      handleApiError(error, 'Fetch stocks API call');
+    }
+
     fallbackModeActive = true;
+    console.warn('Fetch stocks API call failed, using explicitly enabled mock data:', error);
 
     // Filter mock data based on params if needed
     let filtered = mockStockData;
@@ -186,8 +216,12 @@ export async function fetchIndicatorsWithFallback(params: FetchParams = {}) {
     fallbackModeActive = false;
     return response.data.indicators || response.data;
   } catch (error) {
-    console.warn('API call failed, using mock data:', error);
+    if (!ENABLE_API_MOCKS) {
+      handleApiError(error, 'Fetch indicators API call');
+    }
+
     fallbackModeActive = true;
+    console.warn('Fetch indicators API call failed, using explicitly enabled mock data:', error);
 
     // Mock indicator data
     return {
@@ -210,23 +244,35 @@ export async function fetchIndicatorsWithFallback(params: FetchParams = {}) {
   }
 }
 
-export async function createStockWithFallback(stockData: { symbol: string; market: 'TW' | 'US'; name?: string }): Promise<StockData> {
+export async function createStockWithFallback(stockData: { symbol: string; market: 'TW' | 'US'; name?: string }): Promise<Stock> {
   try {
     const response = await apiClient.post('/api/v1/stocks/', stockData);
     fallbackModeActive = false;
     return response.data;
   } catch (error) {
-    console.warn('API call failed, using mock data:', error);
+    if (!ENABLE_API_MOCKS) {
+      handleApiError(error, 'Create stock API call');
+    }
+
     fallbackModeActive = true;
+    console.warn('Create stock API call failed, using explicitly enabled mock data:', error);
 
     // Return mock created stock
     return {
+      id: Date.now(),
       symbol: stockData.symbol,
-      price: 100.0,
-      change: 0,
-      change_percent: 0,
-      volume: 0,
-      timestamp: new Date().toISOString()
+      market: stockData.market,
+      name: stockData.name || null,
+      is_active: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      latest_price: {
+        close: null,
+        change: null,
+        change_percent: null,
+        date: null,
+        volume: null,
+      },
     };
   }
 }
@@ -236,8 +282,12 @@ export async function deleteStockWithFallback(stockId: number): Promise<void> {
     await apiClient.delete(`/api/v1/stocks/${stockId}`);
     fallbackModeActive = false;
   } catch (error) {
-    console.warn('API call failed, using mock behavior:', error);
+    if (!ENABLE_API_MOCKS) {
+      handleApiError(error, 'Delete stock API call');
+    }
+
     fallbackModeActive = true;
+    console.warn('Delete stock API call failed, using explicitly enabled mock behavior:', error);
     // For mock, just return successfully
   }
 }

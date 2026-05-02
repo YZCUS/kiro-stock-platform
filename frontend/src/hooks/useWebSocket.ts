@@ -8,6 +8,39 @@ import { addRealtimeSignal } from '../store/slices/signalsSlice';
 import { getWebSocketManager, WebSocketEventType, WebSocketCallback } from '../lib/websocket';
 import { WebSocketMessage, TradingSignal } from '../types';
 
+interface PriceUpdateData {
+  stock_id?: number;
+  timestamp: string;
+  price: number;
+  change?: number;
+  change_percent?: number;
+  volume?: number;
+  ohlc?: {
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+  };
+  [key: string]: unknown;
+}
+
+interface IndicatorUpdateData {
+  stock_id?: number;
+  indicator_type?: string;
+  data?: Array<{
+    date: string;
+    value: number;
+  }>;
+  [key: string]: unknown;
+}
+
+interface SystemNotification {
+  id: number;
+  message?: string;
+  timestamp: Date;
+  [key: string]: unknown;
+}
+
 /**
  * 基礎 WebSocket Hook
  */
@@ -106,8 +139,8 @@ export function useWebSocket() {
  */
 export function useWebSocketEvent(
   eventType: WebSocketEventType,
-  callback: WebSocketCallback,
-  deps: React.DependencyList = []
+  callback: WebSocketCallback<WebSocketMessage>,
+  _deps: React.DependencyList = []
 ) {
   const wsManager = useRef(getWebSocketManager());
 
@@ -118,7 +151,7 @@ export function useWebSocketEvent(
     return () => {
       manager.off(eventType, callback);
     };
-  }, [eventType, ...deps]);
+  }, [eventType, callback]);
 }
 
 /**
@@ -171,7 +204,7 @@ export function useStockSubscription(stockId: number | null, symbol?: string) {
  * 即時價格更新 Hook
  */
 export function usePriceUpdates(stockId: number | null) {
-  const [priceData, setPriceData] = useState<any>(null);
+  const [priceData, setPriceData] = useState<PriceUpdateData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   // 訂閱股票
@@ -181,8 +214,9 @@ export function usePriceUpdates(stockId: number | null) {
   useWebSocketEvent(
     WebSocketEventType.PRICE_UPDATE,
     useCallback((message: WebSocketMessage) => {
-      if (message.data && message.data.stock_id === stockId) {
-        setPriceData(message.data);
+      const data = message.data as PriceUpdateData | undefined;
+      if (data && data.stock_id === stockId) {
+        setPriceData(data);
         setLastUpdate(new Date());
       }
     }, [stockId]),
@@ -230,17 +264,18 @@ export function useSignalUpdates() {
  * 訂閱由 usePriceUpdates 處理以避免重複訂閱
  */
 export function useIndicatorUpdates(stockId: number | null) {
-  const [indicators, setIndicators] = useState<Record<string, any>>({});
+  const [indicators, setIndicators] = useState<Record<string, IndicatorUpdateData>>({});
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   // 監聽指標更新（不訂閱，避免與 usePriceUpdates 重複）
   useWebSocketEvent(
     WebSocketEventType.INDICATOR_UPDATE,
     useCallback((message: WebSocketMessage) => {
-      if (message.data && message.data.stock_id === stockId) {
+      const data = message.data as IndicatorUpdateData | undefined;
+      if (data && data.stock_id === stockId && data.indicator_type) {
         setIndicators(prev => ({
           ...prev,
-          [message.data.indicator_type]: message.data
+          [data.indicator_type as string]: data
         }));
         setLastUpdate(new Date());
       }
@@ -259,14 +294,14 @@ export function useIndicatorUpdates(stockId: number | null) {
  * 市場狀態更新 Hook
  */
 export function useMarketStatus() {
-  const [marketStatus, setMarketStatus] = useState<Record<string, any>>({});
+  const [marketStatus, setMarketStatus] = useState<Record<string, unknown>>({});
 
   // 監聽市場狀態更新
   useWebSocketEvent(
     WebSocketEventType.MARKET_STATUS,
     useCallback((message: WebSocketMessage) => {
       if (message.data) {
-        setMarketStatus(message.data);
+        setMarketStatus(message.data as Record<string, unknown>);
       }
     }, []),
     []
@@ -279,7 +314,7 @@ export function useMarketStatus() {
  * 系統通知 Hook
  */
 export function useSystemNotifications() {
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<SystemNotification[]>([]);
 
   // 監聽系統通知
   useWebSocketEvent(

@@ -86,6 +86,77 @@ class GoldenCrossStrategy(IStrategyEngine):
             "signal_validity_days": 5,  # 信號有效天數
         }
 
+    def get_parameter_schema(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "key": "short_period",
+                "label": "短期均線週期",
+                "type": "number",
+                "min": 2,
+                "max": 60,
+                "step": 1,
+                "description": "用來判斷短期趨勢的移動平均天數",
+            },
+            {
+                "key": "long_period",
+                "label": "長期均線週期",
+                "type": "number",
+                "min": 5,
+                "max": 250,
+                "step": 1,
+                "description": "用來判斷中長期趨勢的移動平均天數",
+            },
+            {
+                "key": "volume_confirmation",
+                "label": "啟用成交量確認",
+                "type": "boolean",
+                "description": "要求突破時成交量同步放大",
+            },
+            {
+                "key": "volume_threshold",
+                "label": "成交量放大倍數",
+                "type": "number",
+                "min": 1,
+                "max": 5,
+                "step": 0.1,
+            },
+            {
+                "key": "volume_period",
+                "label": "平均成交量週期",
+                "type": "number",
+                "min": 5,
+                "max": 120,
+                "step": 1,
+            },
+            {
+                "key": "signal_validity_days",
+                "label": "信號有效天數",
+                "type": "number",
+                "min": 1,
+                "max": 30,
+                "step": 1,
+            },
+        ]
+
+    def validate_params(self, params: Dict[str, Any]) -> bool:
+        try:
+            short_period = int(params["short_period"])
+            long_period = int(params["long_period"])
+            volume_threshold = float(params["volume_threshold"])
+            volume_period = int(params["volume_period"])
+            signal_validity_days = int(params["signal_validity_days"])
+        except (KeyError, TypeError, ValueError):
+            return False
+
+        return (
+            2 <= short_period <= 60
+            and 5 <= long_period <= 250
+            and short_period < long_period
+            and 1 <= volume_threshold <= 5
+            and 5 <= volume_period <= 120
+            and 1 <= signal_validity_days <= 30
+        )
+
     def get_spec(self) -> StrategySpec:
         """Declare daily-bar requirements for the golden cross strategy."""
         params = self.get_default_params()

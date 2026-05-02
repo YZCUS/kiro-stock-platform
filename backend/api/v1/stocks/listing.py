@@ -8,7 +8,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, func
 
 from app.dependencies import get_database_session, get_stock_service
 from api.schemas.stocks import StockResponse, StockListResponse, LatestPriceInfo
@@ -43,22 +43,49 @@ async def get_stocks(
             per_page=per_page,
         )
 
-        # 為每個股票獲取最新價格資訊
+        stock_ids = [
+            stock.id if hasattr(stock, "id") else stock["id"]
+            for stock in result["items"]
+        ]
+        prices_by_stock = {}
+
+        if stock_ids:
+            price_rank = (
+                func.row_number()
+                .over(
+                    partition_by=PriceHistory.stock_id,
+                    order_by=PriceHistory.date.desc(),
+                )
+                .label("price_rank")
+            )
+            ranked_prices = (
+                select(
+                    PriceHistory.stock_id.label("stock_id"),
+                    PriceHistory.date.label("date"),
+                    PriceHistory.close_price.label("close_price"),
+                    PriceHistory.volume.label("volume"),
+                    PriceHistory.updated_at.label("updated_at"),
+                    price_rank,
+                )
+                .where(PriceHistory.stock_id.in_(stock_ids))
+                .subquery()
+            )
+            prices_query = (
+                select(ranked_prices)
+                .where(ranked_prices.c.price_rank <= 2)
+                .order_by(ranked_prices.c.stock_id, ranked_prices.c.date.desc())
+            )
+            prices_result = await db.execute(prices_query)
+
+            for price in prices_result.mappings().all():
+                prices_by_stock.setdefault(price["stock_id"], []).append(dict(price))
+
+        # 為每個股票加入本地最新價格資訊
         stock_responses = []
         for stock in result["items"]:
             # stock_service 返回的是 dict，需要用 ['id'] 訪問
             stock_id = stock.id if hasattr(stock, "id") else stock["id"]
-
-            # 查詢最新兩個交易日的價格（用於計算漲跌）
-            price_query = (
-                select(PriceHistory)
-                .where(PriceHistory.stock_id == stock_id)
-                .order_by(desc(PriceHistory.date))
-                .limit(2)
-            )
-
-            price_result = await db.execute(price_query)
-            prices = price_result.scalars().all()
+            prices = prices_by_stock.get(stock_id, [])
 
             # 轉換股票資料
             stock_data = StockResponse.model_validate(stock).model_dump()
@@ -66,13 +93,19 @@ async def get_stocks(
             # 如果有價格資料，計算最新價格和漲跌
             if prices and len(prices) > 0:
                 latest = prices[0]
-                close_price = float(latest.close_price) if latest.close_price else None
+                close_price = (
+                    float(latest["close_price"])
+                    if latest["close_price"] is not None
+                    else None
+                )
 
                 change = None
                 change_percent = None
-                if close_price and len(prices) > 1:
+                if close_price is not None and len(prices) > 1:
                     prev_close = (
-                        float(prices[1].close_price) if prices[1].close_price else None
+                        float(prices[1]["close_price"])
+                        if prices[1]["close_price"] is not None
+                        else None
                     )
                     if prev_close and prev_close != 0:
                         change = close_price - prev_close
@@ -82,8 +115,9 @@ async def get_stocks(
                     "close": close_price,
                     "change": change,
                     "change_percent": change_percent,
-                    "date": latest.date.isoformat() if latest.date else None,
-                    "volume": latest.volume,
+                    "date": latest["date"].isoformat() if latest["date"] else None,
+                    "volume": latest["volume"],
+                    **stock_service.build_price_freshness(latest),
                 }
 
             stock_responses.append(StockResponse(**stock_data))

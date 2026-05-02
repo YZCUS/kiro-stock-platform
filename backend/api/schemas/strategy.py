@@ -19,6 +19,9 @@ class StrategyInfoResponse(BaseModel):
     name: str = Field(..., description="策略顯示名稱")
     description: str = Field(..., description="策略說明")
     default_params: Dict[str, Any] = Field(..., description="預設參數")
+    parameter_schema: List[Dict[str, Any]] = Field(
+        default_factory=list, description="策略參數 UI schema"
+    )
 
     class Config:
         json_schema_extra = {
@@ -31,6 +34,13 @@ class StrategyInfoResponse(BaseModel):
                     "long_period": 20,
                     "volume_confirmation": True,
                 },
+                "parameter_schema": [
+                    {
+                        "key": "short_period",
+                        "label": "短期均線週期",
+                        "type": "number",
+                    }
+                ],
             }
         }
 
@@ -49,6 +59,13 @@ class StrategyListResponse(BaseModel):
                         "name": "黃金交叉策略",
                         "description": "當短期均線向上穿越長期均線時產生買入信號",
                         "default_params": {"short_period": 5, "long_period": 20},
+                        "parameter_schema": [
+                            {
+                                "key": "short_period",
+                                "label": "短期均線週期",
+                                "type": "number",
+                            }
+                        ],
                     }
                 ]
             }

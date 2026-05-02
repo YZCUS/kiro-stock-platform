@@ -300,6 +300,7 @@ class StockService:
         return {
             "symbol": stock.symbol,
             "data": [self._serialize_price_full(price) for price in prices],
+            "freshness": self.build_price_freshness(prices[0] if prices else None),
         }
 
     async def get_latest_price_with_change(
@@ -333,6 +334,47 @@ class StockService:
             "change_percent": change_percent,
             "volume": latest_price.volume,
             "timestamp": latest_price.date.isoformat(),
+            "freshness": self.build_price_freshness(latest_price),
+        }
+
+    def build_price_freshness(
+        self, latest_price, stale_after_days: int = 1
+    ) -> Dict[str, Any]:
+        """Build cache freshness metadata from the latest local price row."""
+        if not latest_price:
+            return {
+                "has_data": False,
+                "latest_date": None,
+                "last_updated_at": None,
+                "age_days": None,
+                "stale_after_days": stale_after_days,
+                "is_stale": True,
+                "source": "price_history",
+            }
+
+        price_date = (
+            latest_price.get("date")
+            if isinstance(latest_price, dict)
+            else latest_price.date
+        )
+        updated_at = (
+            latest_price.get("updated_at")
+            if isinstance(latest_price, dict)
+            else getattr(latest_price, "updated_at", None)
+        )
+
+        today = datetime.now().date()
+        age_days = max((today - price_date).days, 0) if price_date else None
+        return {
+            "has_data": True,
+            "latest_date": price_date.isoformat() if price_date else None,
+            "last_updated_at": self._serialize_datetime(
+                updated_at
+            ),
+            "age_days": age_days,
+            "stale_after_days": stale_after_days,
+            "is_stale": age_days is None or age_days > stale_after_days,
+            "source": "price_history",
         }
 
     def _serialize_price(self, price) -> Dict[str, Any]:

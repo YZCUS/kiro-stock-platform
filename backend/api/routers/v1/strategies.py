@@ -13,7 +13,7 @@ from core.auth_dependencies import get_current_active_user
 from domain.models.user import User
 from domain.services.strategy_subscription_service import StrategySubscriptionService
 from domain.services.strategy_signal_service import StrategySignalService
-from domain.strategies.strategy_registry import strategy_registry
+from domain.strategies import strategy_registry
 from api.schemas.strategy import (
     StrategyInfoResponse,
     StrategyListResponse,
@@ -64,6 +64,7 @@ async def get_available_strategies():
                 name=strategy.name,
                 description=strategy.description,
                 default_params=strategy.get_default_params(),
+                parameter_schema=strategy.get_parameter_schema(),
             )
         )
 

@@ -136,8 +136,8 @@ export default function SignalCard({ signal, onUpdateStatus }: SignalCardProps) 
         <div className="flex gap-2 pt-3 border-t">
           <Button
             size="sm"
-            variant="outline"
-            className="flex-1 text-green-600 hover:text-green-700 hover:bg-green-50"
+            variant="successOutline"
+            className="flex-1"
             onClick={() => onUpdateStatus(signal.id, 'triggered')}
           >
             <Check className="h-4 w-4 mr-1" />
@@ -145,8 +145,8 @@ export default function SignalCard({ signal, onUpdateStatus }: SignalCardProps) 
           </Button>
           <Button
             size="sm"
-            variant="outline"
-            className="flex-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+            variant="destructiveOutline"
+            className="flex-1"
             onClick={() => onUpdateStatus(signal.id, 'cancelled')}
           >
             <X className="h-4 w-4 mr-1" />

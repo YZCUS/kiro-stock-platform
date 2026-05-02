@@ -4,6 +4,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { Button } from '@/components/ui/button';
 
 export default function Error({
   error,
@@ -39,12 +40,11 @@ export default function Error({
         <p className="text-gray-600 mb-6">
           {error.message || '系統發生未預期的錯誤，請稍後再試'}
         </p>
-        <button
+        <Button
           onClick={reset}
-          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
         >
           重試
-        </button>
+        </Button>
       </div>
     </div>
   );

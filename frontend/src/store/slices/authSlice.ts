@@ -6,6 +6,7 @@ import { UserResponse } from '@/services/authApi';
 
 interface AuthState {
   isAuthenticated: boolean;
+  initialized: boolean;
   user: UserResponse | null;
   token: string | null;
   loading: boolean;
@@ -14,6 +15,7 @@ interface AuthState {
 
 const initialState: AuthState = {
   isAuthenticated: false,
+  initialized: false,
   user: null,
   token: null,
   loading: false,
@@ -31,8 +33,12 @@ const authSlice = createSlice({
       state.error = action.payload;
       state.loading = false;
     },
+    authInitialized: (state) => {
+      state.initialized = true;
+    },
     loginSuccess: (state, action: PayloadAction<{ user: UserResponse; token: string }>) => {
       state.isAuthenticated = true;
+      state.initialized = true;
       state.user = action.payload.user;
       state.token = action.payload.token;
       state.loading = false;
@@ -45,6 +51,7 @@ const authSlice = createSlice({
     },
     logout: (state) => {
       state.isAuthenticated = false;
+      state.initialized = true;
       state.user = null;
       state.token = null;
       state.loading = false;
@@ -57,6 +64,7 @@ const authSlice = createSlice({
     },
     restoreAuth: (state, action: PayloadAction<{ user: UserResponse; token: string }>) => {
       state.isAuthenticated = true;
+      state.initialized = true;
       state.user = action.payload.user;
       state.token = action.payload.token;
     },
@@ -66,6 +74,7 @@ const authSlice = createSlice({
 export const {
   setAuthLoading,
   setAuthError,
+  authInitialized,
   loginSuccess,
   logout,
   restoreAuth,

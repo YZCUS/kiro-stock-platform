@@ -3,57 +3,331 @@
  */
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { createChart, IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  createChart,
+  IChartApi,
+  ISeriesApi,
+  SeriesMarker,
+  UTCTimestamp,
+} from 'lightweight-charts';
 import { usePriceUpdates, useIndicatorUpdates } from '../../hooks/useWebSocket';
-import { Stock } from '../../types';
+import StocksApiService from '../../services/stocksApi';
+import { PriceData, Stock } from '../../types';
 
 export interface RealtimePriceChartProps {
   stock: Pick<Stock, 'id' | 'symbol'> & { name?: string };
   height?: number;
 }
 
+interface ChartCandle {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+interface ChartCandleData extends ChartCandle {
+  time: UTCTimestamp;
+}
+
+interface ChartVolumeData {
+  time: UTCTimestamp;
+  value: number;
+  color: string;
+}
+
+type MovingAveragePeriod = 5 | 20 | 60 | 120;
+
+interface MovingAverageSummary {
+  period: MovingAveragePeriod;
+  label: string;
+  color: string;
+  latestValue: number | null;
+  deductionPrice: number | null;
+  deductionTime: UTCTimestamp | null;
+  barsAvailable: number;
+}
+
+const MOVING_AVERAGE_CONFIGS: Array<{
+  period: MovingAveragePeriod;
+  label: string;
+  color: string;
+}> = [
+  { period: 5, label: '5K', color: '#0891b2' },
+  { period: 20, label: '20K', color: '#2563eb' },
+  { period: 60, label: '60K', color: '#7c3aed' },
+  { period: 120, label: '120K', color: '#ea580c' },
+];
+
+const TRADING_DAYS_PER_YEAR = 252;
+const DEFAULT_HISTORICAL_K_BARS = TRADING_DAYS_PER_YEAR * 3;
+const PRICE_HISTORY_LOOKBACK_YEARS = 3;
+const VOLUME_UP_COLOR = 'rgba(38, 166, 154, 0.35)';
+const VOLUME_DOWN_COLOR = 'rgba(239, 83, 80, 0.35)';
+
+const formatDateInput = (date: Date): string => date.toISOString().slice(0, 10);
+
+const getHistoricalPriceRange = () => {
+  const endDate = new Date();
+  const startDate = new Date(endDate);
+  startDate.setFullYear(startDate.getFullYear() - PRICE_HISTORY_LOOKBACK_YEARS);
+
+  return {
+    start_date: formatDateInput(startDate),
+    end_date: formatDateInput(endDate),
+  };
+};
+
+const isChartCandle = (value: unknown): value is ChartCandle => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candle = value as Record<string, unknown>;
+  return (
+    typeof candle.open === 'number' &&
+    typeof candle.high === 'number' &&
+    typeof candle.low === 'number' &&
+    typeof candle.close === 'number'
+  );
+};
+
+const isChartCandleData = (value: unknown): value is ChartCandleData => {
+  if (!isChartCandle(value)) {
+    return false;
+  }
+
+  return typeof (value as { time?: unknown }).time === 'number';
+};
+
+const calculateMovingAverageData = (
+  chartData: ChartCandleData[],
+  period: MovingAveragePeriod
+) => {
+  return chartData
+    .map((item, index) => {
+      if (index < period - 1) {
+        return null;
+      }
+
+      const sum = chartData
+        .slice(index - period + 1, index + 1)
+        .reduce((acc, curr) => acc + curr.close, 0);
+
+      return {
+        time: item.time,
+        value: sum / period,
+      };
+    })
+    .filter(
+      (item): item is { time: UTCTimestamp; value: number } => item !== null
+    );
+};
+
+const createChartDataFromPrices = (prices: PriceData[]): ChartCandleData[] => {
+  return prices
+    .map((item) => {
+      const date = new Date(item.date);
+      return {
+        time: Math.floor(date.getTime() / 1000) as UTCTimestamp,
+        open: item.open,
+        high: item.high,
+        low: item.low,
+        close: item.close,
+      };
+    })
+    .filter((item) => Number.isFinite(item.time))
+    .sort((a, b) => a.time - b.time);
+};
+
+const createVolumeDataFromPrices = (prices: PriceData[]): ChartVolumeData[] => {
+  return prices
+    .map((item) => {
+      const date = new Date(item.date);
+      return {
+        time: Math.floor(date.getTime() / 1000) as UTCTimestamp,
+        value: item.volume,
+        color: item.close >= item.open ? VOLUME_UP_COLOR : VOLUME_DOWN_COLOR,
+      };
+    })
+    .filter((item) => Number.isFinite(item.time))
+    .sort((a, b) => a.time - b.time);
+};
+
+const shouldBackfillHistoricalData = (
+  prices: PriceData[],
+  startDate: string
+): boolean => {
+  if (prices.length === 0) {
+    return true;
+  }
+
+  const oldestTimestamp = Math.min(
+    ...prices.map((price) => new Date(price.date).getTime())
+  );
+  const requestedStartTimestamp = new Date(startDate).getTime();
+
+  if (!Number.isFinite(oldestTimestamp) || !Number.isFinite(requestedStartTimestamp)) {
+    return false;
+  }
+
+  return oldestTimestamp > requestedStartTimestamp;
+};
+
+const createDeductionMarkers = (
+  chartData: ChartCandleData[]
+): SeriesMarker<UTCTimestamp>[] => {
+  return MOVING_AVERAGE_CONFIGS.flatMap<SeriesMarker<UTCTimestamp>>((config) => {
+    const deductionIndex = chartData.length - config.period;
+    if (deductionIndex < 0) {
+      return [];
+    }
+
+    const candle = chartData[deductionIndex];
+    return [
+      {
+        time: candle.time,
+        position: 'aboveBar',
+        shape: 'circle',
+        color: config.color,
+        text: `${config.label}扣 ${candle.close.toFixed(2)}`,
+        size: 1.2,
+      },
+    ];
+  }).sort((a, b) => a.time - b.time);
+};
+
+const createMovingAverageSummary = (
+  chartData: ChartCandleData[]
+): MovingAverageSummary[] => {
+  return MOVING_AVERAGE_CONFIGS.map((config) => {
+    const movingAverageData = calculateMovingAverageData(
+      chartData,
+      config.period
+    );
+    const latestValue =
+      movingAverageData.length > 0
+        ? movingAverageData[movingAverageData.length - 1].value
+        : null;
+    const deductionIndex = chartData.length - config.period;
+    const deductionCandle =
+      deductionIndex >= 0 ? chartData[deductionIndex] : null;
+
+    return {
+      period: config.period,
+      label: config.label,
+      color: config.color,
+      latestValue,
+      deductionPrice: deductionCandle?.close ?? null,
+      deductionTime: deductionCandle?.time ?? null,
+      barsAvailable: chartData.length,
+    };
+  });
+};
+
+const formatPriceValue = (value: number | null) => {
+  return value === null ? '資料不足' : value.toFixed(2);
+};
+
+const formatChartDate = (time: UTCTimestamp | null) => {
+  if (time === null) {
+    return '';
+  }
+
+  return new Intl.DateTimeFormat('zh-TW', {
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(time * 1000));
+};
+
 const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
   stock,
   height = 400
 }) => {
-  const { id: stockId, symbol, name: stockName } = stock;
+  const { id: stockId, symbol } = stock;
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const smaSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const [historicalData, setHistoricalData] = useState<any[]>([]);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const movingAverageSeriesRefs = useRef<
+    Partial<Record<MovingAveragePeriod, ISeriesApi<'Line'>>>
+  >({});
+  const backfillRequestedStockIdsRef = useRef<Set<number>>(new Set());
+  const [historicalData, setHistoricalData] = useState<PriceData[]>([]);
+  const [chartData, setChartData] = useState<ChartCandleData[]>([]);
 
   // 驗證 stockId 有效性 - 必須是有效的數字
-  const validStockId = stockId && typeof stockId === 'number' && stockId > 0 ? stockId : null;
+  const validStockId =
+    stockId && typeof stockId === 'number' && stockId > 0 ? stockId : null;
 
   // 使用 WebSocket hooks - 只有在 stockId 有效時才訂閱
-  const { priceData, lastUpdate, isSubscribed } = usePriceUpdates(validStockId);
+  const { priceData } = usePriceUpdates(validStockId);
   const { indicators } = useIndicatorUpdates(validStockId);
+  const movingAverageSummary = useMemo(
+    () => createMovingAverageSummary(chartData),
+    [chartData]
+  );
 
   // 載入歷史價格數據
   useEffect(() => {
     // 只有在 stockId 有效時才載入數據
     if (!validStockId) {
       setHistoricalData([]);
+      setChartData([]);
       return;
     }
 
+    let cancelled = false;
+    setHistoricalData([]);
+    setChartData([]);
+
     const loadHistoricalData = async () => {
+      const priceRange = getHistoricalPriceRange();
+
       try {
-        const response = await fetch(`http://localhost:8000/api/v1/stocks/${validStockId}/prices?limit=250`);
-
-        if (!response.ok) {
-          console.error(`Failed to load historical data: ${response.status} ${response.statusText}`);
-          setHistoricalData([]);
-          return;
-        }
-
-        const data = await response.json();
+        const data = await StocksApiService.getStockPrices(validStockId, {
+          ...priceRange,
+          limit: DEFAULT_HISTORICAL_K_BARS,
+        });
 
         // 驗證返回的數據是陣列
         if (Array.isArray(data)) {
+          if (cancelled) {
+            return;
+          }
           setHistoricalData(data);
+
+          if (
+            shouldBackfillHistoricalData(data, priceRange.start_date) &&
+            !backfillRequestedStockIdsRef.current.has(validStockId)
+          ) {
+            backfillRequestedStockIdsRef.current.add(validStockId);
+
+            void StocksApiService.backfillStockData(validStockId, priceRange)
+              .then(async () => {
+                const refreshedData = await StocksApiService.getStockPrices(
+                  validStockId,
+                  {
+                    ...priceRange,
+                    limit: DEFAULT_HISTORICAL_K_BARS,
+                  }
+                );
+
+                if (!cancelled && Array.isArray(refreshedData)) {
+                  setHistoricalData(refreshedData);
+                }
+              })
+              .catch((backfillError) => {
+                console.warn('Failed to backfill chart history:', backfillError);
+              });
+          }
         } else {
           console.error('Historical data is not an array:', data);
           setHistoricalData([]);
@@ -61,10 +335,15 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
       } catch (error) {
         console.error('Failed to load historical data:', error);
         setHistoricalData([]);
+        setChartData([]);
       }
     };
 
     loadHistoricalData();
+
+    return () => {
+      cancelled = true;
+    };
   }, [validStockId]);
 
   // 初始化圖表
@@ -80,7 +359,8 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
       }
       chartRef.current = null;
       seriesRef.current = null;
-      smaSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      movingAverageSeriesRefs.current = {};
     }
 
     // 創建圖表
@@ -102,6 +382,10 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
       },
       rightPriceScale: {
         borderColor: '#ddd',
+        scaleMargins: {
+          top: 0.06,
+          bottom: 0.24,
+        },
       },
       crosshair: {
         mode: 0,
@@ -118,16 +402,38 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
       wickUpColor: '#26a69a',
     });
 
-    // 創建 SMA 系列
-    const smaSeries = chart.addLineSeries({
-      color: '#2196F3',
-      lineWidth: 2,
-      title: 'SMA(20)',
+    const volumeSeries = chart.addHistogramSeries({
+      color: VOLUME_UP_COLOR,
+      priceFormat: {
+        type: 'volume',
+      },
+      priceScaleId: '',
     });
+
+    chart.priceScale('').applyOptions({
+      scaleMargins: {
+        top: 0.78,
+        bottom: 0,
+      },
+    });
+
+    // 創建均線系列
+    const movingAverageSeries = MOVING_AVERAGE_CONFIGS.reduce<
+      Partial<Record<MovingAveragePeriod, ISeriesApi<'Line'>>>
+    >((seriesMap, config) => {
+      seriesMap[config.period] = chart.addLineSeries({
+        color: config.color,
+        lineWidth: 1,
+        title: config.label,
+        priceLineVisible: false,
+      });
+      return seriesMap;
+    }, {});
 
     chartRef.current = chart;
     seriesRef.current = candlestickSeries;
-    smaSeriesRef.current = smaSeries;
+    volumeSeriesRef.current = volumeSeries;
+    movingAverageSeriesRefs.current = movingAverageSeries;
 
     // 處理視窗大小變化
     const handleResize = () => {
@@ -156,10 +462,26 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
         }
         chartRef.current = null;
         seriesRef.current = null;
-        smaSeriesRef.current = null;
+        volumeSeriesRef.current = null;
+        movingAverageSeriesRefs.current = {};
       }
     };
   }, [stockId, height]); // 依賴 stockId，當股票變化時重新創建圖表
+
+  const applyMovingAverageOverlays = useCallback((chartData: ChartCandleData[]) => {
+    MOVING_AVERAGE_CONFIGS.forEach((config) => {
+      const movingAverageSeries = movingAverageSeriesRefs.current[config.period];
+      if (!movingAverageSeries) {
+        return;
+      }
+
+      movingAverageSeries.setData(
+        calculateMovingAverageData(chartData, config.period)
+      );
+    });
+
+    seriesRef.current?.setMarkers(createDeductionMarkers(chartData));
+  }, []);
 
   // 載入歷史數據到圖表
   useEffect(() => {
@@ -169,46 +491,26 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
     }
 
     // 等待圖表初始化完成並確保所有 ref 都存在
-    if (!seriesRef.current || !smaSeriesRef.current || !chartRef.current) {
+    if (!seriesRef.current || !chartRef.current) {
       return;
     }
 
     try {
 
       // 轉換歷史數據為圖表格式
-      const chartData = historicalData
-        .map(item => {
-          const date = new Date(item.date);
-          return {
-            time: Math.floor(date.getTime() / 1000) as UTCTimestamp,
-            open: item.open,
-            high: item.high,
-            low: item.low,
-            close: item.close,
-          };
-        })
-        .sort((a, b) => a.time - b.time);
+      const chartData = createChartDataFromPrices(historicalData);
+      const volumeData = createVolumeDataFromPrices(historicalData);
 
-      // 計算 SMA
-      const smaData = chartData.map((item, index) => {
-        if (index < 19) return null;
-        const sum = chartData
-          .slice(index - 19, index + 1)
-          .reduce((acc, curr) => acc + curr.close, 0);
-        return {
-          time: item.time,
-          value: sum / 20,
-        };
-      }).filter(Boolean) as { time: UTCTimestamp; value: number }[];
-
-      if (seriesRef.current && smaSeriesRef.current) {
+      if (seriesRef.current) {
         seriesRef.current.setData(chartData);
-        smaSeriesRef.current.setData(smaData);
+        volumeSeriesRef.current?.setData(volumeData);
+        applyMovingAverageOverlays(chartData);
+        setChartData(chartData);
       }
     } catch (error) {
       console.error('Failed to set chart data:', error);
     }
-  }, [historicalData]);
+  }, [applyMovingAverageOverlays, historicalData]);
 
   // 處理即時價格更新
   useEffect(() => {
@@ -240,21 +542,9 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
         const chartData = seriesRef.current.data();
         const lastCandle = chartData.length > 0 ? chartData[chartData.length - 1] : null;
 
-        // 檢查 lastCandle 是否為有效的 CandlestickData 並包含必要屬性
-        const isValidCandle = lastCandle &&
-          typeof lastCandle === 'object' &&
-          'close' in lastCandle &&
-          'high' in lastCandle &&
-          'low' in lastCandle &&
-          'open' in lastCandle &&
-          typeof (lastCandle as any).close === 'number' &&
-          typeof (lastCandle as any).high === 'number' &&
-          typeof (lastCandle as any).low === 'number' &&
-          typeof (lastCandle as any).open === 'number';
-
-        const previousClose = isValidCandle ? (lastCandle as any).close : currentPrice;
-        const previousHigh = isValidCandle ? (lastCandle as any).high : currentPrice;
-        const previousLow = isValidCandle ? (lastCandle as any).low : currentPrice;
+        const previousClose = isChartCandle(lastCandle) ? lastCandle.close : currentPrice;
+        const previousHigh = isChartCandle(lastCandle) ? lastCandle.high : currentPrice;
+        const previousLow = isChartCandle(lastCandle) ? lastCandle.low : currentPrice;
 
         candlestickData = {
           time,
@@ -267,6 +557,16 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
 
       // 更新 K 線數據
       seriesRef.current.update(candlestickData);
+      volumeSeriesRef.current?.update({
+        time,
+        value: priceData.volume ?? 0,
+        color: candlestickData.close >= candlestickData.open
+          ? VOLUME_UP_COLOR
+          : VOLUME_DOWN_COLOR,
+      });
+      const updatedChartData = seriesRef.current.data().filter(isChartCandleData);
+      applyMovingAverageOverlays(updatedChartData);
+      setChartData(updatedChartData);
 
       if (process.env.NODE_ENV === 'development') {
         console.log('更新即時價格數據:', {
@@ -292,93 +592,10 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
         });
       }
     }
-  }, [priceData, symbol, stockId]);
-
-  // 處理技術指標更新
-  useEffect(() => {
-    if (!indicators.SMA || !smaSeriesRef.current) return;
-
-    try {
-      const smaData = indicators.SMA;
-      if (smaData.data && smaData.data.length > 0) {
-        const latestSMA = smaData.data[smaData.data.length - 1];
-        const time = Math.floor(new Date(latestSMA.date).getTime() / 1000) as UTCTimestamp;
-
-        smaSeriesRef.current.update({
-          time,
-          value: latestSMA.value,
-        });
-
-        if (process.env.NODE_ENV === 'development') {
-          console.log('更新 SMA 指標:', { time, value: latestSMA.value });
-        }
-      }
-    } catch (error) {
-      console.error('更新指標數據時發生錯誤:', error);
-    }
-  }, [indicators]);
+  }, [applyMovingAverageOverlays, priceData, symbol, stockId]);
 
   return (
     <div className="w-full">
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">
-            {symbol}{stockName ? ` (${stockName})` : ''} 即時價格圖表
-          </h3>
-          <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-gray-600">
-            <span>ID: {stockId}</span>
-            {lastUpdate && (
-              <span>最後更新: {lastUpdate.toLocaleString()}</span>
-            )}
-          </div>
-        </div>
-        <div className="inline-flex items-center gap-2 text-sm text-gray-700">
-          <span
-            className={`h-2.5 w-2.5 rounded-full ${
-              isSubscribed ? 'bg-green-500 animate-pulse' : 'bg-gray-400'
-            }`}
-          />
-          <span>{isSubscribed ? '已訂閱' : '未訂閱'}</span>
-        </div>
-      </div>
-
-      {/* 當前價格和圖表區域 */}
-        {/* 當前價格信息 */}
-        {priceData && (
-          <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div>
-                <div className="text-sm text-gray-600">當前價格</div>
-                <div className="text-lg font-bold text-gray-900">
-                  ${priceData.price?.toFixed(2) || 'N/A'}
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-600">漲跌</div>
-                <div className={`text-lg font-bold ${
-                  (priceData.change || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  {priceData.change >= 0 ? '+' : ''}{priceData.change?.toFixed(2) || 'N/A'}
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-600">漲跌幅</div>
-                <div className={`text-lg font-bold ${
-                  (priceData.change_percent || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  {priceData.change_percent >= 0 ? '+' : ''}{priceData.change_percent?.toFixed(2) || 'N/A'}%
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-600">成交量</div>
-                <div className="text-lg font-bold text-gray-900">
-                  {priceData.volume?.toLocaleString() || 'N/A'}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* 圖表容器 */}
         <div
           ref={chartContainerRef}
@@ -387,7 +604,7 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
         />
 
         {/* 圖例 */}
-        <div className="mt-3 flex items-center justify-center space-x-6">
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
           <div className="flex items-center space-x-2">
             <div className="w-4 h-2 bg-green-500"></div>
             <span className="text-sm text-gray-600">上漲</span>
@@ -397,15 +614,87 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
             <span className="text-sm text-gray-600">下跌</span>
           </div>
           <div className="flex items-center space-x-2">
-            <div className="w-4 h-0.5 bg-blue-500"></div>
-            <span className="text-sm text-gray-600">SMA(20)</span>
+            <div className="h-2 w-4 bg-gray-300"></div>
+            <span className="text-sm text-gray-600">成交量</span>
+          </div>
+          {MOVING_AVERAGE_CONFIGS.map((config) => (
+            <div key={config.period} className="flex items-center space-x-2">
+              <div
+                className="h-0.5 w-4"
+                style={{ backgroundColor: config.color }}
+              />
+              <span className="text-sm text-gray-600">{config.label}均線</span>
+            </div>
+          ))}
+          <div className="flex items-center space-x-2">
+            <div className="h-2.5 w-2.5 rounded-full bg-gray-500"></div>
+            <span className="text-sm text-gray-600">扣抵價標記</span>
+          </div>
+        </div>
+
+        {/* 均線摘要 */}
+        <div className="mt-3 rounded-md border border-gray-200 bg-white p-3">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm font-medium text-gray-700">均線與扣抵價</div>
+          </div>
+          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
+            {movingAverageSummary.map((item) => {
+              const hasEnoughData = item.barsAvailable >= item.period;
+              const placeholderText = '--';
+              const deductionPrice = hasEnoughData
+                ? formatPriceValue(item.deductionPrice)
+                : placeholderText;
+              const deductionDate = hasEnoughData
+                ? formatChartDate(item.deductionTime)
+                : null;
+
+              return (
+                <div
+                  key={item.period}
+                  className="rounded border border-gray-200 p-3"
+                >
+                  <div className="mb-2 flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: item.color }}
+                    />
+                    <span className="text-sm font-medium text-gray-900">
+                      {item.label}
+                    </span>
+                  </div>
+                  <dl className="space-y-2 text-xs">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <dt className="text-gray-500">最新均線</dt>
+                      <dd className="font-semibold tabular-nums text-gray-900">
+                        {hasEnoughData
+                          ? formatPriceValue(item.latestValue)
+                          : placeholderText}
+                      </dd>
+                    </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <dt className="text-gray-500">扣抵價</dt>
+                      <dd className="text-right">
+                        <div className="font-semibold tabular-nums text-gray-900">
+                          {deductionPrice}
+                        </div>
+                        {deductionDate && (
+                          <div className="mt-0.5 whitespace-nowrap text-[11px] text-gray-500">
+                            基準日 {deductionDate}
+                          </div>
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              );
+            })}
           </div>
         </div>
 
         {/* 技術指標信息 */}
         {indicators && Object.keys(indicators).length > 0 && (
           <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-            <div className="text-sm font-medium text-gray-700 mb-2">技術指標</div>
+            <div className="text-sm font-medium text-gray-700 mb-2">即時指標</div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {Object.entries(indicators).map(([key, data]) => (
                 <div key={key} className="text-center">

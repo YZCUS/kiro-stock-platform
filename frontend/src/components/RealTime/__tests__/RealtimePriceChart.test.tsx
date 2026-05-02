@@ -10,6 +10,7 @@ import { configureStore } from '@reduxjs/toolkit';
 import { createChart } from 'lightweight-charts';
 import RealtimePriceChart from '../RealtimePriceChart';
 import { usePriceUpdates, useIndicatorUpdates } from '../../../hooks/useWebSocket';
+import StocksApiService from '../../../services/stocksApi';
 import uiReducer from '../../../store/slices/uiSlice';
 import signalsReducer from '../../../store/slices/signalsSlice';
 
@@ -18,6 +19,7 @@ const mockCandlestickSeries = {
   setData: jest.fn(),
   update: jest.fn(),
   data: jest.fn(() => []),
+  setMarkers: jest.fn(),
 };
 
 const mockSmaSeries = {
@@ -25,9 +27,20 @@ const mockSmaSeries = {
   update: jest.fn(),
 };
 
+const mockVolumeSeries = {
+  setData: jest.fn(),
+  update: jest.fn(),
+};
+
+const mockPriceScale = {
+  applyOptions: jest.fn(),
+};
+
 const mockChartApi = {
   addCandlestickSeries: jest.fn(() => mockCandlestickSeries),
   addLineSeries: jest.fn(() => mockSmaSeries),
+  addHistogramSeries: jest.fn(() => mockVolumeSeries),
+  priceScale: jest.fn(() => mockPriceScale),
   applyOptions: jest.fn(),
   remove: jest.fn(),
 };
@@ -66,9 +79,25 @@ jest.mock('../../../hooks/useWebSocket', () => ({
   useIndicatorUpdates: jest.fn(),
 }));
 
+jest.mock('../../../services/stocksApi', () => ({
+  __esModule: true,
+  default: {
+    getStockPrices: jest.fn(),
+    backfillStockData: jest.fn(),
+  },
+}));
+
 const mockUsePriceUpdates = usePriceUpdates as jest.MockedFunction<typeof usePriceUpdates>;
-const mockUseIndicatorUpdates = useIndicatorUpdates as jest.MockedFunction<typeof useIndicatorUpdates>;
+const mockUseIndicatorUpdates = useIndicatorUpdates as jest.MockedFunction<
+  typeof useIndicatorUpdates
+>;
 const mockCreateChart = createChart as jest.MockedFunction<typeof createChart>;
+const mockGetStockPrices = StocksApiService.getStockPrices as jest.MockedFunction<
+  typeof StocksApiService.getStockPrices
+>;
+const mockBackfillStockData = StocksApiService.backfillStockData as jest.MockedFunction<
+  typeof StocksApiService.backfillStockData
+>;
 
 const setupWebSocketHookMocks = () => {
   mockUsePriceUpdates.mockReturnValue({
@@ -90,6 +119,23 @@ const setupResizeObserverMock = () => {
     disconnect: jest.fn(),
   }));
   global.fetch = jest.fn(() => new Promise(() => {})) as jest.Mock;
+  mockGetStockPrices.mockImplementation(() => new Promise(() => {}));
+  mockBackfillStockData.mockImplementation(() => new Promise(() => {}));
+};
+
+const createHistoricalPrices = (length: number) => {
+  return Array.from({ length }, (_, index) => {
+    const close = 100 + index;
+
+    return {
+      date: new Date(Date.UTC(2024, 0, 1 + index)).toISOString(),
+      open: close - 1,
+      high: close + 1,
+      low: close - 2,
+      close,
+      volume: 1000 + index,
+    };
+  });
 };
 
 // Mock error reporting
@@ -135,7 +181,7 @@ describe('RealtimePriceChart - Props 重構測試', () => {
     setupResizeObserverMock();
   });
 
-  it('應該接受新的 stock props 結構', () => {
+  it('應該接受新的 stock props 結構', async () => {
     render(
       <RealtimePriceChart
         stock={mockStock}
@@ -144,12 +190,22 @@ describe('RealtimePriceChart - Props 重構測試', () => {
       { wrapper: createWrapper() }
     );
 
-    expect(screen.getByText('2330.TW (台積電) 即時價格圖表')).toBeInTheDocument();
+    expect(screen.queryByText('2330.TW (台積電) 即時價格圖表')).not.toBeInTheDocument();
     expect(mockUsePriceUpdates).toHaveBeenCalledWith(1);
     expect(mockUseIndicatorUpdates).toHaveBeenCalledWith(1);
+    await waitFor(() => {
+      expect(mockGetStockPrices).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          start_date: expect.any(String),
+          end_date: expect.any(String),
+          limit: 756,
+        })
+      );
+    });
   });
 
-  it('應該顯示股票符號和名稱', () => {
+  it('不應該在圖表內重複顯示股票標題', () => {
     render(
       <RealtimePriceChart
         stock={mockStock}
@@ -158,13 +214,11 @@ describe('RealtimePriceChart - Props 重構測試', () => {
       { wrapper: createWrapper() }
     );
 
-    // 驗證股票符號顯示
-    expect(screen.getByText(/2330\.TW/)).toBeInTheDocument();
-    // 驗證股票名稱顯示
-    expect(screen.getByText(/台積電/)).toBeInTheDocument();
+    expect(screen.queryByText(/2330\.TW/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/台積電/)).not.toBeInTheDocument();
   });
 
-  it('應該正確處理沒有名稱的股票', () => {
+  it('沒有名稱的股票也不應該顯示內部圖表標題', () => {
     render(
       <RealtimePriceChart
         stock={mockStockWithoutName}
@@ -173,14 +227,10 @@ describe('RealtimePriceChart - Props 重構測試', () => {
       { wrapper: createWrapper() }
     );
 
-    // 驗證股票符號顯示
-    expect(screen.getByText(/2317\.TW/)).toBeInTheDocument();
-    // 驗證沒有額外的括號顯示（因為沒有名稱）
-    const title = screen.getByText(/2317\.TW.*即時價格圖表/);
-    expect(title.textContent).toBe('2317.TW 即時價格圖表');
+    expect(screen.queryByText(/2317\.TW.*即時價格圖表/)).not.toBeInTheDocument();
   });
 
-  it('應該顯示股票ID', () => {
+  it('不應該顯示內部股票 ID', () => {
     render(
       <RealtimePriceChart
         stock={mockStock}
@@ -189,7 +239,7 @@ describe('RealtimePriceChart - Props 重構測試', () => {
       { wrapper: createWrapper() }
     );
 
-    expect(screen.getByText(/ID: 1/)).toBeInTheDocument();
+    expect(screen.queryByText(/ID: 1/)).not.toBeInTheDocument();
   });
 
   it('應該使用正確的高度', () => {
@@ -229,7 +279,7 @@ describe('RealtimePriceChart - 功能測試', () => {
     setupResizeObserverMock();
   });
 
-  it('應該顯示訂閱狀態', () => {
+  it('不應該顯示冗餘的訂閱狀態', () => {
     render(
       <RealtimePriceChart
         stock={mockStock}
@@ -237,14 +287,11 @@ describe('RealtimePriceChart - 功能測試', () => {
       { wrapper: createWrapper() }
     );
 
-    expect(screen.getByText('已訂閱')).toBeInTheDocument();
-
-    // 驗證綠色狀態指示器
-    const statusIndicator = document.querySelector('.bg-green-500.animate-pulse');
-    expect(statusIndicator).toBeInTheDocument();
+    expect(screen.queryByText('已訂閱')).not.toBeInTheDocument();
+    expect(screen.queryByText('未訂閱')).not.toBeInTheDocument();
   });
 
-  it('應該顯示當前價格信息', () => {
+  it('不應該在圖表內重複顯示價格資訊卡', () => {
     render(
       <RealtimePriceChart
         stock={mockStock}
@@ -252,20 +299,13 @@ describe('RealtimePriceChart - 功能測試', () => {
       { wrapper: createWrapper() }
     );
 
-    // 驗證當前價格
-    expect(screen.getByText('$500.00')).toBeInTheDocument();
-
-    // 驗證漲跌
-    expect(screen.getByText('+10.00')).toBeInTheDocument();
-
-    // 驗證漲跌幅
-    expect(screen.getByText('+2.00%')).toBeInTheDocument();
-
-    // 驗證成交量
-    expect(screen.getByText('1,000,000')).toBeInTheDocument();
+    expect(screen.queryByText('當前價格')).not.toBeInTheDocument();
+    expect(screen.queryByText('$500.00')).not.toBeInTheDocument();
+    expect(screen.queryByText('+10.00')).not.toBeInTheDocument();
+    expect(screen.queryByText('+2.00%')).not.toBeInTheDocument();
   });
 
-  it('應該顯示最後更新時間', () => {
+  it('不應該在圖表內重複顯示最後更新時間', () => {
     render(
       <RealtimePriceChart
         stock={mockStock}
@@ -273,10 +313,10 @@ describe('RealtimePriceChart - 功能測試', () => {
       { wrapper: createWrapper() }
     );
 
-    expect(screen.getByText(/最後更新:/)).toBeInTheDocument();
+    expect(screen.queryByText(/最後更新:/)).not.toBeInTheDocument();
   });
 
-  it('應該顯示技術指標信息', () => {
+  it('應該顯示即時指標信息', () => {
     render(
       <RealtimePriceChart
         stock={mockStock}
@@ -284,8 +324,8 @@ describe('RealtimePriceChart - 功能測試', () => {
       { wrapper: createWrapper() }
     );
 
-    // 驗證技術指標區域
-    expect(screen.getByText('技術指標')).toBeInTheDocument();
+    // 驗證即時指標區域
+    expect(screen.getByText('即時指標')).toBeInTheDocument();
     expect(screen.getByText('SMA')).toBeInTheDocument();
     expect(screen.getByText('495.00')).toBeInTheDocument();
   });
@@ -300,7 +340,54 @@ describe('RealtimePriceChart - 功能測試', () => {
 
     expect(screen.getByText('上漲')).toBeInTheDocument();
     expect(screen.getByText('下跌')).toBeInTheDocument();
-    expect(screen.getByText('SMA(20)')).toBeInTheDocument();
+    expect(screen.getByText('成交量')).toBeInTheDocument();
+    expect(screen.getByText('5K均線')).toBeInTheDocument();
+    expect(screen.getByText('20K均線')).toBeInTheDocument();
+    expect(screen.getByText('60K均線')).toBeInTheDocument();
+    expect(screen.getByText('120K均線')).toBeInTheDocument();
+    expect(screen.getByText('扣抵價標記')).toBeInTheDocument();
+  });
+
+  it('應該顯示均線摘要但不暴露載入 K 棒數', async () => {
+    mockGetStockPrices.mockResolvedValueOnce(createHistoricalPrices(130));
+
+    render(
+      <RealtimePriceChart
+        stock={mockStock}
+      />,
+      { wrapper: createWrapper() }
+    );
+
+    expect(screen.getByText('均線與扣抵價')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText('5K')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText(/已載入 .* 根 K 棒/)).not.toBeInTheDocument();
+    expect(screen.getByText('20K')).toBeInTheDocument();
+    expect(screen.getByText('60K')).toBeInTheDocument();
+    expect(screen.getByText('120K')).toBeInTheDocument();
+    expect(screen.getByText('227.00')).toBeInTheDocument();
+    expect(screen.getByText(/225\.00/)).toBeInTheDocument();
+  });
+
+  it('資料不足時不應顯示所需 K 棒數', async () => {
+    mockGetStockPrices.mockResolvedValueOnce(createHistoricalPrices(30));
+
+    render(
+      <RealtimePriceChart
+        stock={mockStock}
+      />,
+      { wrapper: createWrapper() }
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('5K')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText(/需要 \d+ 根/)).not.toBeInTheDocument();
+    expect(screen.getAllByText('--').length).toBeGreaterThan(0);
   });
 });
 
@@ -333,8 +420,7 @@ describe('RealtimePriceChart - 錯誤處理測試', () => {
       { wrapper: createWrapper() }
     );
 
-    // 驗證未訂閱狀態
-    expect(screen.getByText('未訂閱')).toBeInTheDocument();
+    expect(screen.queryByText('未訂閱')).not.toBeInTheDocument();
 
     // 驗證沒有價格信息顯示
     expect(screen.queryByText('當前價格')).not.toBeInTheDocument();
@@ -353,7 +439,7 @@ describe('RealtimePriceChart - 錯誤處理測試', () => {
       { wrapper: createWrapper() }
     );
 
-    expect(screen.getByText('2330.TW 即時價格圖表')).toBeInTheDocument();
+    expect(screen.queryByText('2330.TW 即時價格圖表')).not.toBeInTheDocument();
     expect(mockUsePriceUpdates).toHaveBeenCalledWith(1);
   });
 });
@@ -380,6 +466,84 @@ describe('RealtimePriceChart - Chart integration tests', () => {
     );
   });
 
+  it('應該建立 5K、20K、60K、120K 均線序列', () => {
+    render(
+      <RealtimePriceChart
+        stock={mockStock}
+      />,
+      { wrapper: createWrapper() }
+    );
+
+    expect(mockChartApi.addLineSeries).toHaveBeenCalledTimes(4);
+    expect(mockChartApi.addLineSeries).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '5K' })
+    );
+    expect(mockChartApi.addLineSeries).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '20K' })
+    );
+    expect(mockChartApi.addLineSeries).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '60K' })
+    );
+    expect(mockChartApi.addLineSeries).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '120K' })
+    );
+  });
+
+  it('應該建立成交量柱狀圖序列', () => {
+    render(
+      <RealtimePriceChart
+        stock={mockStock}
+      />,
+      { wrapper: createWrapper() }
+    );
+
+    expect(mockChartApi.addHistogramSeries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+      })
+    );
+    expect(mockChartApi.priceScale).toHaveBeenCalledWith('');
+    expect(mockPriceScale.applyOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scaleMargins: expect.objectContaining({
+          top: 0.78,
+          bottom: 0,
+        }),
+      })
+    );
+  });
+
+  it('應該在各期均線扣抵 K 棒上設定扣抵價標記', async () => {
+    mockGetStockPrices.mockResolvedValueOnce(createHistoricalPrices(130));
+
+    render(
+      <RealtimePriceChart
+        stock={mockStock}
+      />,
+      { wrapper: createWrapper() }
+    );
+
+    await waitFor(() => {
+      expect(mockCandlestickSeries.setMarkers).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ text: '5K扣 225.00' }),
+          expect.objectContaining({ text: '20K扣 210.00' }),
+          expect.objectContaining({ text: '60K扣 170.00' }),
+          expect.objectContaining({ text: '120K扣 110.00' }),
+        ])
+      );
+    });
+
+    const markers = mockCandlestickSeries.setMarkers.mock.calls.at(-1)?.[0];
+    expect(markers.map((marker: { text: string }) => marker.text)).toEqual([
+      '120K扣 110.00',
+      '60K扣 170.00',
+      '20K扣 210.00',
+      '5K扣 225.00',
+    ]);
+  });
+
   it('應該把即時 OHLC 價格更新寫入 K 線序列', async () => {
     render(
       <RealtimePriceChart
@@ -395,6 +559,11 @@ describe('RealtimePriceChart - Chart integration tests', () => {
           high: 505,
           low: 485,
           close: 500,
+        })
+      );
+      expect(mockVolumeSeries.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          value: 1000000,
         })
       );
     });

@@ -96,6 +96,9 @@
    npm install
    npm run dev
    ```
+   `npm run dev` 會啟動 Next.js Fast Refresh，修改前端程式後瀏覽器會即時更新。若遇到本機開發載入舊 CSS 或 JS chunk，改用 `npm run dev:clean` 清除 `.next` 後再啟動；第一次打開頁面會重新編譯，會比平常慢。
+
+   若瀏覽器已經快取過舊的 `localhost:3000` immutable chunk，可暫時改用同一個 dev server 的 `http://127.0.0.1:3000/dashboard`。不要在 `npm run dev` 還在服務頁面時同時跑 `npm run build`；需要 build 時先停掉 dev server。
 
 3. **Airflow 開發**
    ```bash
@@ -131,6 +134,13 @@ make e2e               # Playwright Chromium E2E
 ```
 
 最近一次本地驗證：backend `192 passed`，product coverage `29%`；frontend `126 passed`，statements `24.87%`；E2E `6 passed`。Frontend coverage gate 先固定在目前可通過的 baseline，後續依測試補強逐步拉高。
+
+## 相關文檔
+
+- `docs/market-data-pipeline.md`: OHLCV / multi-timeframe 市場資料管線。
+- `docs/qlib-prediction-service.md`: Qlib prediction service 的部署邊界與 Airflow 觸發流程。
+- `docs/openstock-feature-integration.md`: OpenStock 借鏡功能與 Finnhub/market info 整合邊界。
+- `docs/frontend-routing-and-auth.md`: Next.js 前端登入初始化、受保護路由、白屏與 chunk 404 排查規則。
 
 ## 專案結構（Clean Architecture）
 

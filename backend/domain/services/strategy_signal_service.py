@@ -15,7 +15,7 @@ import uuid
 from domain.models.user_strategy_subscription import UserStrategySubscription
 from domain.models.strategy_signal import StrategySignal
 from domain.models.stock import Stock
-from domain.strategies.strategy_registry import strategy_registry
+from domain.strategies import strategy_registry
 from domain.strategies.strategy_interface import TradingSignal
 from domain.services.strategy_subscription_service import StrategySubscriptionService
 

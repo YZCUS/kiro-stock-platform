@@ -5,6 +5,7 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
+import { PageHeader, PageShell } from '@/components/ui/page';
 
 const HealthCheck = dynamic(
   () => import('../../components/SystemHealth/HealthCheck'),
@@ -20,17 +21,13 @@ const HealthCheck = dynamic(
 
 export default function SystemPage() {
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          系統狀態監控
-        </h1>
-        <p className="text-gray-600">
-          監控系統健康狀態、服務連接和性能指標
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="系統狀態監控"
+        description="監控系統健康狀態、服務連接和性能指標。"
+      />
 
       <HealthCheck />
-    </div>
+    </PageShell>
   );
 }

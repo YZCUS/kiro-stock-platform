@@ -12,12 +12,26 @@ from domain.strategies.strategy_interface import (
 )
 from domain.strategies.strategy_registry import strategy_registry, StrategyRegistry
 from domain.strategies.golden_cross_strategy import GoldenCrossStrategy
+from domain.strategies.technical_indicator_strategies import (
+    BollingerBreakoutStrategy,
+    DeathCrossStrategy,
+    MacdCrossoverStrategy,
+    RsiReversalStrategy,
+    VolumeSpikeStrategy,
+)
+from domain.strategies.ml_prediction_strategy import MLPredictionStrategy
 
 
 # 自動註冊所有策略
 def register_all_strategies():
     """註冊所有策略到registry"""
     strategy_registry.register(GoldenCrossStrategy())
+    strategy_registry.register(DeathCrossStrategy())
+    strategy_registry.register(RsiReversalStrategy())
+    strategy_registry.register(MacdCrossoverStrategy())
+    strategy_registry.register(BollingerBreakoutStrategy())
+    strategy_registry.register(VolumeSpikeStrategy())
+    strategy_registry.register(MLPredictionStrategy())
 
 
 # 在模組載入時自動註冊
@@ -31,5 +45,11 @@ __all__ = [
     "StrategyRegistry",
     "strategy_registry",
     "GoldenCrossStrategy",
+    "DeathCrossStrategy",
+    "RsiReversalStrategy",
+    "MacdCrossoverStrategy",
+    "BollingerBreakoutStrategy",
+    "VolumeSpikeStrategy",
+    "MLPredictionStrategy",
     "register_all_strategies",
 ]

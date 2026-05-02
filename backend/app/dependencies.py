@@ -150,6 +150,27 @@ def get_price_data_source(
     return create_price_data_source(settings.external_api.price_data_source)
 
 
+def get_finnhub_client(settings: Settings = Depends(get_settings)):
+    """取得 Finnhub market-info client。"""
+    from infrastructure.external.finnhub_client import FinnhubClient
+
+    return FinnhubClient(
+        api_key=settings.external_api.finnhub_api_key,
+        base_url=settings.external_api.finnhub_base_url,
+        timeout_seconds=settings.external_api.finnhub_timeout_seconds,
+    )
+
+
+def get_quote_data_source(finnhub_client=Depends(get_finnhub_client)):
+    """取得 near-real-time quote data source。"""
+    return finnhub_client
+
+
+def get_market_info_provider(finnhub_client=Depends(get_finnhub_client)):
+    """取得 search/profile/news market info provider。"""
+    return finnhub_client
+
+
 # =============================================================================
 # Repository 依賴 (新的Clean Architecture實現)
 # =============================================================================
@@ -307,6 +328,44 @@ def get_market_data_access_service(
     from domain.services.market_data_access_service import MarketDataAccessService
 
     return MarketDataAccessService(bar_repo)
+
+
+def get_symbol_mapping_service():
+    """取得 symbol mapping service。"""
+    from domain.services.symbol_mapping_service import SymbolMappingService
+
+    return SymbolMappingService()
+
+
+def get_market_info_service(
+    market_info_provider=Depends(get_market_info_provider),
+    quote_data_source=Depends(get_quote_data_source),
+    symbol_mapping_service=Depends(get_symbol_mapping_service),
+):
+    """取得 market info service。"""
+    from domain.services.market_info_service import MarketInfoService
+
+    return MarketInfoService(
+        market_info_provider,
+        quote_data_source,
+        symbol_mapping_service,
+    )
+
+
+def get_price_alert_service(
+    market_info_service=Depends(get_market_info_service),
+):
+    """取得 price alert service。"""
+    from domain.services.price_alert_service import PriceAlertService
+
+    return PriceAlertService(market_info_service)
+
+
+def get_qlib_data_readiness_service():
+    """取得 Qlib data readiness service。"""
+    from domain.services.qlib_data_readiness_service import QlibDataReadinessService
+
+    return QlibDataReadinessService()
 
 
 def get_bar_aggregation_service():

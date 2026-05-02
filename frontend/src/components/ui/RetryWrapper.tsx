@@ -5,6 +5,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { ButtonLoader } from './LoadingStates';
+import { Button } from './button';
 
 interface RetryWrapperProps {
   children: React.ReactNode;
@@ -98,10 +99,9 @@ export const RetryWrapper: React.FC<RetryWrapperProps> = ({
 
         <div className="text-center">
           {canRetry ? (
-            <button
+            <Button
               onClick={handleRetry}
               disabled={isRetrying}
-              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isRetrying ? (
                 <>
@@ -111,16 +111,16 @@ export const RetryWrapper: React.FC<RetryWrapperProps> = ({
               ) : (
                 retryText
               )}
-            </button>
+            </Button>
           ) : (
             <div className="text-center">
               <p className="text-red-600 mb-3">已達到最大重試次數</p>
-              <button
+              <Button
                 onClick={() => window.location.reload()}
-                className="inline-flex items-center px-4 py-2 bg-gray-600 text-white font-medium rounded-md hover:bg-gray-700 transition-colors"
+                variant="outline"
               >
                 重新載入頁面
-              </button>
+              </Button>
             </div>
           )}
         </div>

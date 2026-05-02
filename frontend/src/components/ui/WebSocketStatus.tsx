@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { useWebSocket } from '../../hooks/useWebSocket';
+import { Button } from './button';
 
 export interface WebSocketStatusProps {
   className?: string;
@@ -35,18 +36,17 @@ const WebSocketStatus: React.FC<WebSocketStatusProps> = ({ className = '' }) => 
 
     if (error) {
       return (
-        <div className="flex flex-col space-y-1">
-          <div className="flex items-center space-x-2 text-red-600">
-            <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-            <span className="text-sm font-medium">連線中斷</span>
-            <button
-              onClick={reconnect}
-              className="text-xs px-2 py-1 bg-red-100 hover:bg-red-200 rounded transition-colors"
-            >
-              重連
-            </button>
-          </div>
-          <div className="text-xs text-red-500 font-mono">{error}</div>
+        <div className="flex items-center space-x-2 text-gray-500" title={error}>
+          <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+          <span className="text-sm font-medium">離線</span>
+          <Button
+            onClick={reconnect}
+            variant="outline"
+            size="xs"
+            aria-label="重新連線"
+          >
+            重試
+          </Button>
         </div>
       );
     }
@@ -55,12 +55,13 @@ const WebSocketStatus: React.FC<WebSocketStatusProps> = ({ className = '' }) => 
       <div className="flex items-center space-x-2 text-gray-500">
         <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
         <span className="text-sm font-medium">未連線</span>
-        <button
+        <Button
           onClick={reconnect}
-          className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+          variant="outline"
+          size="xs"
         >
           連線
-        </button>
+        </Button>
       </div>
     );
   };

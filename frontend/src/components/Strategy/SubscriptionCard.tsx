@@ -4,12 +4,13 @@
 'use client';
 
 import React from 'react';
-import { Subscription } from '@/types/strategy';
+import { StrategyInfo, StrategyParameterValue, Subscription } from '@/types/strategy';
 import { Button } from '@/components/ui/button';
 import { Settings, Trash2, Power, PowerOff } from 'lucide-react';
 
 interface SubscriptionCardProps {
   subscription: Subscription;
+  strategies?: StrategyInfo[];
   onEdit: (subscription: Subscription) => void;
   onDelete: (subscriptionId: number) => void;
   onToggle: (subscriptionId: number) => void;
@@ -17,16 +18,28 @@ interface SubscriptionCardProps {
 
 export default function SubscriptionCard({
   subscription,
+  strategies = [],
   onEdit,
   onDelete,
   onToggle,
 }: SubscriptionCardProps) {
+  const strategyInfo = strategies.find((strategy) => strategy.type === subscription.strategy_type);
+  const strategyName =
+    subscription.strategy_name || strategyInfo?.name || subscription.strategy_type;
+  const parameterLabels = new Map(
+    (strategyInfo?.parameter_schema || []).map((field) => [field.key, field.label])
+  );
+  const formatParameterValue = (value: StrategyParameterValue) => {
+    if (typeof value === 'boolean') return value ? '是' : '否';
+    return String(value);
+  };
+
   return (
     <div className={`border rounded-lg p-4 ${subscription.is_active ? 'bg-white' : 'bg-gray-50'}`}>
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-            {subscription.strategy_name}
+            {strategyName}
             {subscription.is_active ? (
               <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-700">
                 啟用中
@@ -81,7 +94,7 @@ export default function SubscriptionCard({
           <div className="flex flex-wrap gap-2">
             {Object.entries(subscription.parameters).map(([key, value]) => (
               <span key={key} className="px-2 py-1 text-xs rounded bg-blue-50 text-blue-700">
-                {key}: {String(value)}
+                {parameterLabels.get(key) || key}: {formatParameterValue(value)}
               </span>
             ))}
           </div>

@@ -4,6 +4,7 @@
  */
 import React, { Suspense, ComponentType } from 'react';
 import dynamic, { DynamicOptions } from 'next/dynamic';
+import { Button } from './button';
 
 interface LazyLoaderProps {
   fallback?: React.ComponentType;
@@ -37,12 +38,12 @@ const DefaultErrorFallback: React.FC<{ error: Error; retry: () => void }> = ({
       <h3 className="font-medium mb-2">組件載入失敗</h3>
       <p className="text-sm">{error.message}</p>
     </div>
-    <button
+    <Button
       onClick={retry}
-      className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors"
+      variant="destructive"
     >
       重新載入
-    </button>
+    </Button>
   </div>
 );
 
@@ -193,12 +194,11 @@ export const createLazyChartComponent = <T extends ComponentType<any>>(
         </svg>
         <p className="text-sm">圖表載入失敗</p>
       </div>
-      <button
+      <Button
         onClick={retry}
-        className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 transition-colors"
       >
         重新載入
-      </button>
+      </Button>
     </div>
   );
 

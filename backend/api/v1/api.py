@@ -11,6 +11,12 @@ from api.routers.v1.stock_lists import router as stock_lists_router
 from api.routers.v1.strategies import router as strategies_router
 from api.routers.v1.trading import router as trading_router
 from api.routers.v1.watchlist import router as watchlist_router
+from api.routers.v1.market_info import router as market_info_router
+from api.routers.v1.price_alerts import (
+    internal_router as internal_price_alerts_router,
+    router as price_alerts_router,
+)
+from api.routers.v1.qlib_data import router as qlib_data_router
 
 # 建立主要 API 路由器
 api_router = APIRouter()
@@ -37,6 +43,10 @@ api_router.include_router(
     stock_lists_router, prefix="/stock-lists", tags=["stock-lists"]
 )  # 股票清單路由
 api_router.include_router(watchlist_router)  # 自選股相容路由，底層使用 stock-lists
+api_router.include_router(market_info_router)
+api_router.include_router(price_alerts_router)
+api_router.include_router(internal_price_alerts_router)
+api_router.include_router(qlib_data_router)
 api_router.include_router(
     strategies_router
 )  # 策略管理路由（已包含 prefix /api/v1/strategies）

@@ -1,10 +1,11 @@
 /**
  * Error Reporting Service
  */
+import { getApiBaseUrl } from './runtimeConfig';
 
 // Configuration
 const SENTRY_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = getApiBaseUrl();
 
 // Error types
 export interface ErrorContext {

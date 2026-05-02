@@ -4,6 +4,7 @@
 'use client';
 
 import React from 'react';
+import { X } from 'lucide-react';
 import { useSignalUpdates, useSystemNotifications } from '../../hooks/useWebSocket';
 
 const RealtimeSignals: React.FC = () => {
@@ -54,7 +55,7 @@ const RealtimeSignals: React.FC = () => {
     <div className="space-y-6">
       {/* 系統通知 */}
       {notifications.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-sm font-medium text-blue-900">系統通知</h3>
             <button
@@ -78,9 +79,10 @@ const RealtimeSignals: React.FC = () => {
                 </div>
                 <button
                   onClick={() => clearNotification(notification.id)}
-                  className="text-blue-400 hover:text-blue-600 ml-2"
+                  className="ml-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-blue-400 hover:bg-blue-50 hover:text-blue-600"
+                  aria-label="清除通知"
                 >
-                  ✕
+                  <X className="h-4 w-4" />
                 </button>
               </div>
             ))}
@@ -89,25 +91,16 @@ const RealtimeSignals: React.FC = () => {
       )}
 
       {/* 即時交易信號 */}
-      <div className="bg-white shadow rounded-lg">
+      <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
         <div className="px-4 py-3 border-b border-gray-200">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-medium text-gray-900">即時交易信號</h3>
-            <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-sm text-green-600">即時更新</span>
-            </div>
-          </div>
+          <h3 className="text-sm font-semibold text-gray-900">即時交易信號</h3>
         </div>
 
         <div className="p-4">
           {signals.length === 0 ? (
-            <div className="text-center py-8">
+            <div className="text-center py-6">
               <div className="text-gray-500">
                 等待即時信號...
-              </div>
-              <div className="text-xs text-gray-400 mt-2">
-                系統會在檢測到新的交易信號時自動顯示
               </div>
             </div>
           ) : (

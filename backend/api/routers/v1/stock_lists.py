@@ -4,7 +4,9 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select
 from typing import List
+from datetime import date
 
 # 依賴注入
 from app.dependencies import get_database_session
@@ -32,6 +34,34 @@ from api.schemas.stock_list import (
 router = APIRouter()
 
 
+def _build_price_freshness(latest_price, stale_after_days: int = 1) -> dict:
+    if not latest_price:
+        return {
+            "is_stale": True,
+            "age_days": None,
+            "last_updated_at": None,
+            "source": "price_history",
+        }
+
+    price_date = (
+        latest_price.get("date")
+        if isinstance(latest_price, dict)
+        else latest_price.date
+    )
+    updated_at = (
+        latest_price.get("updated_at")
+        if isinstance(latest_price, dict)
+        else getattr(latest_price, "updated_at", None)
+    )
+    age_days = max((date.today() - price_date).days, 0) if price_date else None
+    return {
+        "is_stale": age_days is None or age_days > stale_after_days,
+        "age_days": age_days,
+        "last_updated_at": updated_at.isoformat() if updated_at else None,
+        "source": "price_history",
+    }
+
+
 # =============================================================================
 # 股票清單管理端點
 # =============================================================================
@@ -44,31 +74,47 @@ async def get_user_stock_lists(
 ):
     """獲取用戶的所有股票清單"""
     try:
-
-        def _get_lists_with_counts(session):
-            """在同步會話中獲取清單和股票數量"""
-            lists = UserStockList.get_user_lists(session, current_user.id)
-            # 預載入 list_items 關聯以便計算數量
-            result = []
-            for lst in lists:
-                # 觸發關聯載入
-                stocks_count = len(lst.list_items)
-                result.append(
-                    {
-                        "id": lst.id,
-                        "user_id": str(lst.user_id),
-                        "name": lst.name,
-                        "description": lst.description,
-                        "is_default": lst.is_default,
-                        "sort_order": lst.sort_order,
-                        "stocks_count": stocks_count,
-                        "created_at": lst.created_at,
-                        "updated_at": lst.updated_at,
-                    }
-                )
-            return result
-
-        lists_data = await db.run_sync(_get_lists_with_counts)
+        query = (
+            select(
+                UserStockList.id,
+                UserStockList.user_id,
+                UserStockList.name,
+                UserStockList.description,
+                UserStockList.is_default,
+                UserStockList.sort_order,
+                UserStockList.created_at,
+                UserStockList.updated_at,
+                func.count(UserStockListItem.id).label("stocks_count"),
+            )
+            .outerjoin(
+                UserStockListItem,
+                UserStockListItem.list_id == UserStockList.id,
+            )
+            .where(UserStockList.user_id == current_user.id)
+            .group_by(
+                UserStockList.id,
+                UserStockList.user_id,
+                UserStockList.name,
+                UserStockList.description,
+                UserStockList.is_default,
+                UserStockList.sort_order,
+                UserStockList.created_at,
+                UserStockList.updated_at,
+            )
+            .order_by(
+                UserStockList.sort_order,
+                UserStockList.is_default.desc(),
+                UserStockList.created_at,
+            )
+        )
+        result = await db.execute(query)
+        lists_data = [
+            {
+                **dict(row),
+                "user_id": str(row["user_id"]),
+            }
+            for row in result.mappings().all()
+        ]
 
         return StockListListResponse(
             items=[StockListResponse(**lst_data) for lst_data in lists_data],
@@ -307,10 +353,8 @@ async def get_list_stocks(
 ):
     """獲取清單中的所有股票（包含最新價格和完整股票信息）"""
     try:
-        from sqlalchemy import select, desc
         from sqlalchemy.orm import selectinload
         from domain.models.price_history import PriceHistory
-        from api.schemas.stocks import StockResponse, LatestPriceInfo
 
         # 驗證清單所有權
         list_query = select(UserStockList).where(
@@ -332,24 +376,48 @@ async def get_list_stocks(
         items_result = await db.execute(items_query)
         items = items_result.scalars().all()
 
-        # 為每個股票構建完整的響應（包含最新價格）
+        stock_ids = [item.stock.id for item in items if item.stock]
+        prices_by_stock = {}
+
+        if stock_ids:
+            price_rank = (
+                func.row_number()
+                .over(
+                    partition_by=PriceHistory.stock_id,
+                    order_by=PriceHistory.date.desc(),
+                )
+                .label("price_rank")
+            )
+            ranked_prices = (
+                select(
+                    PriceHistory.stock_id.label("stock_id"),
+                    PriceHistory.date.label("date"),
+                    PriceHistory.close_price.label("close_price"),
+                    PriceHistory.volume.label("volume"),
+                    PriceHistory.updated_at.label("updated_at"),
+                    price_rank,
+                )
+                .where(PriceHistory.stock_id.in_(stock_ids))
+                .subquery()
+            )
+            prices_query = (
+                select(ranked_prices)
+                .where(ranked_prices.c.price_rank <= 2)
+                .order_by(ranked_prices.c.stock_id, ranked_prices.c.date.desc())
+            )
+            prices_result = await db.execute(prices_query)
+
+            for price in prices_result.mappings().all():
+                prices_by_stock.setdefault(price["stock_id"], []).append(dict(price))
+
+        # 為每個股票構建完整的響應（包含本地最新價格）
         stock_responses = []
         for item in items:
             if not item.stock:
                 continue
 
             stock = item.stock
-
-            # 查詢最新兩個交易日的價格（用於計算漲跌）
-            price_query = (
-                select(PriceHistory)
-                .where(PriceHistory.stock_id == stock.id)
-                .order_by(desc(PriceHistory.date))
-                .limit(2)
-            )
-
-            price_result = await db.execute(price_query)
-            prices = price_result.scalars().all()
+            prices = prices_by_stock.get(stock.id, [])
 
             # 構建股票響應
             stock_data = {
@@ -368,14 +436,20 @@ async def get_list_stocks(
             # 添加最新價格信息
             if prices and len(prices) > 0:
                 latest = prices[0]
-                close_price = float(latest.close_price) if latest.close_price else None
+                close_price = (
+                    float(latest["close_price"])
+                    if latest["close_price"] is not None
+                    else None
+                )
 
                 # 計算漲跌
                 change = None
                 change_percent = None
-                if close_price and len(prices) > 1:
+                if close_price is not None and len(prices) > 1:
                     prev_close = (
-                        float(prices[1].close_price) if prices[1].close_price else None
+                        float(prices[1]["close_price"])
+                        if prices[1]["close_price"] is not None
+                        else None
                     )
                     if prev_close:
                         change = close_price - prev_close
@@ -385,8 +459,9 @@ async def get_list_stocks(
                     "close": close_price,
                     "change": change,
                     "change_percent": change_percent,
-                    "date": latest.date,
-                    "volume": latest.volume,
+                    "date": latest["date"].isoformat() if latest["date"] else None,
+                    "volume": latest["volume"],
+                    **_build_price_freshness(latest),
                 }
 
             stock_responses.append(stock_data)

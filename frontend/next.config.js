@@ -1,4 +1,27 @@
 /** @type {import('next').NextConfig} */
+const staticAssetCacheControl =
+  process.env.NODE_ENV === 'production'
+    ? 'public, max-age=31536000, immutable'
+    : 'no-store, must-revalidate';
+
+const devDocumentCacheHeaders =
+  process.env.NODE_ENV === 'production'
+    ? []
+    : [
+        {
+          key: 'Cache-Control',
+          value: 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        },
+        {
+          key: 'Pragma',
+          value: 'no-cache',
+        },
+        {
+          key: 'Expires',
+          value: '0',
+        },
+      ];
+
 const nextConfig = {
   // Enable static optimization
   output: 'standalone',
@@ -52,12 +75,20 @@ const nextConfig = {
           },
         ],
       },
+      ...(devDocumentCacheHeaders.length > 0
+        ? [
+            {
+              source: '/:path((?!_next/static|static).*)',
+              headers: devDocumentCacheHeaders,
+            },
+          ]
+        : []),
       {
         source: '/static/(.*)',
         headers: [
           {
             key: 'Cache-Control',
-            value: 'public, max-age=31536000, immutable',
+            value: staticAssetCacheControl,
           },
         ],
       },
@@ -66,7 +97,7 @@ const nextConfig = {
         headers: [
           {
             key: 'Cache-Control',
-            value: 'public, max-age=31536000, immutable',
+            value: staticAssetCacheControl,
           },
         ],
       },

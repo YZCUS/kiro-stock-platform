@@ -119,6 +119,18 @@ class Stock(BaseModel, TimestampMixin):
         cascade="all, delete-orphan",
         lazy="dynamic",
     )
+    symbol_mappings = relationship(
+        "StockSymbolMapping",
+        back_populates="stock",
+        cascade="all, delete-orphan",
+        lazy="dynamic",
+    )
+    price_alerts = relationship(
+        "PriceAlert",
+        back_populates="stock",
+        cascade="all, delete-orphan",
+        lazy="dynamic",
+    )
 
     @classmethod
     def validate_symbol(cls, symbol: str, market: str) -> bool:

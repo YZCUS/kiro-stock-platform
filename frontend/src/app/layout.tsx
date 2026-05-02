@@ -20,23 +20,19 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-TW">
-      <body className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      <body className="min-h-screen bg-white text-gray-950">
         <ErrorBoundary>
           <Providers>
             <AuthInit />
             <Navigation />
 
-            {/* Main Content */}
-            <main className="min-h-[calc(100vh-8rem)]">
+            <main className="min-h-[calc(100vh-7rem)] bg-gray-50/60">
               {children}
             </main>
 
-            {/* Footer */}
-            <footer className="bg-white/80 backdrop-blur-md border-t border-gray-200 mt-12">
-              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                <div className="text-center text-gray-600">
-                  <p>&copy; 2025 股票分析平台. 版權所有.</p>
-                </div>
+            <footer className="border-t border-gray-200 bg-white">
+              <div className="mx-auto max-w-7xl px-4 py-4 text-center text-sm text-gray-500 sm:px-6 lg:px-8">
+                股票分析平台
               </div>
             </footer>
 

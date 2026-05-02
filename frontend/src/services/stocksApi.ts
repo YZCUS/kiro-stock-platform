@@ -2,11 +2,32 @@
  * 股票 API 服務
  */
 import { ApiService, API_ENDPOINTS } from '../lib/api';
-import { Stock, StockFilter, StockCreateForm, PaginatedResponse } from '../types';
+import { Stock, StockFilter, StockCreateForm, PaginatedResponse, PriceData, PriceFreshnessInfo } from '../types';
+
+const stockDetailInFlight = new Map<string, Promise<Stock>>();
+const stockPricesInFlight = new Map<string, Promise<PriceData[]>>();
+
+const dedupeInFlight = <T>(
+  requests: Map<string, Promise<T>>,
+  key: string,
+  requestFactory: () => Promise<T>
+): Promise<T> => {
+  const existingRequest = requests.get(key);
+  if (existingRequest) {
+    return existingRequest;
+  }
+
+  const request = requestFactory().finally(() => {
+    requests.delete(key);
+  });
+  requests.set(key, request);
+  return request;
+};
 
 export interface StockListParams {
   page?: number;
   pageSize?: number;
+  search?: string;
   filters?: StockFilter;
 }
 
@@ -25,7 +46,7 @@ export class StocksApiService {
   /**
    * 獲取股票列表
    */
-  static async getStocks(params: StockListParams & { search?: string } = {}): Promise<PaginatedResponse<Stock>> {
+  static async getStocks(params: StockListParams = {}): Promise<PaginatedResponse<Stock>> {
     const queryParams = new URLSearchParams();
 
     if (params.page) {
@@ -41,7 +62,7 @@ export class StocksApiService {
       queryParams.append('is_active', params.filters.active_only.toString());
     }
     // Support both params.search and params.filters.search
-    const searchTerm = (params as any).search || params.filters?.search;
+    const searchTerm = params.search || params.filters?.search;
     if (searchTerm) {
       queryParams.append('search', searchTerm);
     }
@@ -54,7 +75,9 @@ export class StocksApiService {
    * 獲取單一股票詳情
    */
   static async getStock(id: number): Promise<Stock> {
-    return ApiService.get<Stock>(API_ENDPOINTS.STOCKS.DETAIL(id));
+    return dedupeInFlight(stockDetailInFlight, String(id), () =>
+      ApiService.get<Stock>(API_ENDPOINTS.STOCKS.DETAIL(id))
+    );
   }
 
   /**
@@ -125,6 +148,7 @@ export class StocksApiService {
       volume: number;
       adjusted_close?: number;
     }>;
+    freshness?: PriceFreshnessInfo;
   }> {
     const queryParams = new URLSearchParams();
     if (params.start_date) {
@@ -142,6 +166,35 @@ export class StocksApiService {
   }
 
   /**
+   * 獲取股票價格數據（圖表輕量格式）
+   */
+  static async getStockPrices(
+    stockId: number,
+    params: {
+      start_date?: string;
+      end_date?: string;
+      limit?: number;
+    } = {}
+  ): Promise<PriceData[]> {
+    const queryParams = new URLSearchParams();
+    if (params.start_date) {
+      queryParams.append('start_date', params.start_date);
+    }
+    if (params.end_date) {
+      queryParams.append('end_date', params.end_date);
+    }
+    if (params.limit) {
+      queryParams.append('limit', params.limit.toString());
+    }
+
+    const queryString = queryParams.toString();
+    const url = `${API_ENDPOINTS.PRICES.LIST(stockId)}${queryString ? `?${queryString}` : ''}`;
+    return dedupeInFlight(stockPricesInFlight, url, () =>
+      ApiService.get<PriceData[]>(url)
+    );
+  }
+
+  /**
    * 獲取股票最新價格
    */
   static async getStockLatestPrice(stockId: number): Promise<{
@@ -151,8 +204,44 @@ export class StocksApiService {
     change_percent: number;
     volume: number;
     timestamp: string;
+    freshness?: PriceFreshnessInfo;
   }> {
     return ApiService.get(API_ENDPOINTS.PRICES.LATEST(stockId));
+  }
+
+  /**
+   * 預抓本地股票價格快取
+   */
+  static async prefetchStockPrices(params: {
+    stock_ids?: number[];
+    market?: 'TW' | 'US';
+    days?: number;
+    limit?: number;
+    stale_after_days?: number;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    total_stocks: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    total_records: number;
+    errors: string[];
+    results: Array<{
+      stock_id: number;
+      symbol: string;
+      name?: string;
+      success: boolean;
+      skipped: boolean;
+      stale: boolean;
+      data_points: number;
+      latest_date?: string | null;
+      message: string;
+      errors?: string[];
+      warnings?: string[];
+    }>;
+  }> {
+    return ApiService.post(API_ENDPOINTS.PRICES.PREFETCH, params);
   }
 
   /**
@@ -172,7 +261,7 @@ export class StocksApiService {
     symbol: string;
     records_processed: number;
     records_saved: number;
-    date_range: any;
+    date_range: unknown;
     timestamp: string;
   }> {
     return ApiService.post(API_ENDPOINTS.PRICES.BACKFILL(stockId), params);

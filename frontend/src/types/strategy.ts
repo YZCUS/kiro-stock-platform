@@ -1,9 +1,24 @@
 // ==================== 策略類型 ====================
+export type StrategyParameterType = 'number' | 'text' | 'boolean';
+export type StrategyParameterValue = string | number | boolean | null;
+export type StrategyParameterMap = Record<string, StrategyParameterValue>;
+
+export interface StrategyParameterSchema {
+  key: string;
+  label: string;
+  type: StrategyParameterType;
+  min?: number;
+  max?: number;
+  step?: number;
+  description?: string;
+}
+
 export interface StrategyInfo {
   type: string;
   name: string;
   description: string;
-  default_params: Record<string, any>;
+  default_params: StrategyParameterMap;
+  parameter_schema?: StrategyParameterSchema[];
 }
 
 export interface StrategyListResponse {
@@ -21,9 +36,9 @@ export interface Subscription {
   id: number;
   user_id: string;
   strategy_type: string;
-  strategy_name: string;
+  strategy_name?: string;
   is_active: boolean;
-  parameters: Record<string, any>;
+  parameters?: StrategyParameterMap | null;
   monitor_all_lists: boolean;
   monitor_portfolio: boolean;
   selected_list_ids: number[];
@@ -34,14 +49,14 @@ export interface Subscription {
 
 export interface SubscriptionCreateRequest {
   strategy_type: string;
-  parameters?: Record<string, any>;
+  parameters?: StrategyParameterMap;
   monitor_all_lists?: boolean;
   monitor_portfolio?: boolean;
   selected_list_ids?: number[];
 }
 
 export interface SubscriptionUpdateRequest {
-  parameters?: Record<string, any>;
+  parameters?: StrategyParameterMap;
   monitor_all_lists?: boolean;
   monitor_portfolio?: boolean;
   selected_list_ids?: number[];
@@ -73,7 +88,7 @@ export interface TradingSignal {
   signal_date: string;
   valid_until: string;
   reason: string;
-  extra_data?: Record<string, any>;
+  extra_data?: Record<string, unknown>;
   created_at: string;
 }
 

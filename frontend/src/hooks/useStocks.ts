@@ -28,7 +28,7 @@ export const STOCKS_QUERY_KEYS = {
  */
 export function useStocks(
   params: StockListParams = {},
-  options?: UseQueryOptions<PaginatedResponse<Stock>, Error>
+  options?: Omit<UseQueryOptions<PaginatedResponse<Stock>, Error>, 'queryKey' | 'queryFn'>
 ) {
   return useQuery({
     queryKey: STOCKS_QUERY_KEYS.list(params),

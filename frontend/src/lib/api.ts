@@ -2,9 +2,10 @@
  * API Service Layer
  */
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import { getApiBaseUrl } from './runtimeConfig';
 
 // Configuration
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = getApiBaseUrl();
 const API_TIMEOUT = 10000;
 
 // API Endpoints
@@ -13,18 +14,20 @@ export const API_ENDPOINTS = {
   STOCKS: {
     LIST: '/api/v1/stocks/',
     CREATE: '/api/v1/stocks/',
-    DETAIL: (id: number) => `/api/v1/stocks/${id}/`,
-    UPDATE: (id: number) => `/api/v1/stocks/${id}/`,
-    DELETE: (id: number) => `/api/v1/stocks/${id}/`,
-    BATCH_CREATE: '/api/v1/stocks/batch/',
-    REFRESH_DATA: (id: number) => `/api/v1/stocks/${id}/refresh/`,
+    DETAIL: (id: number) => `/api/v1/stocks/${id}`,
+    UPDATE: (id: number) => `/api/v1/stocks/${id}`,
+    DELETE: (id: number) => `/api/v1/stocks/${id}`,
+    BATCH_CREATE: '/api/v1/stocks/batch',
+    REFRESH_DATA: (id: number) => `/api/v1/stocks/${id}/refresh`,
   },
 
   // Price endpoints
   PRICES: {
+    LIST: (stockId: number) => `/api/v1/stocks/${stockId}/prices`,
     HISTORY: (stockId: number) => `/api/v1/stocks/${stockId}/price-history/`,
-    LATEST: (stockId: number) => `/api/v1/stocks/${stockId}/price/latest/`,
-    BACKFILL: (stockId: number) => `/api/v1/stocks/${stockId}/price/backfill/`,
+    LATEST: (stockId: number) => `/api/v1/stocks/${stockId}/price/latest`,
+    BACKFILL: (stockId: number) => `/api/v1/stocks/${stockId}/price/backfill`,
+    PREFETCH: '/api/v1/stocks/prefetch-prices',
   },
 
   // Indicator endpoints
@@ -95,6 +98,25 @@ export const API_ENDPOINTS = {
     CHECK: (stockId: number) => `/api/v1/watchlist/check/${stockId}`,
     POPULAR: '/api/v1/watchlist/popular',
     STATS: '/api/v1/watchlist/stats',
+  },
+
+  MARKET: {
+    SEARCH: '/api/v1/market/search',
+    PROFILE: (market: string, symbol: string) => `/api/v1/market/stocks/${market}/${symbol}/profile`,
+    QUOTE: (market: string, symbol: string) => `/api/v1/market/stocks/${market}/${symbol}/quote`,
+    NEWS: '/api/v1/market/news',
+    STOCK_NEWS: (market: string, symbol: string) => `/api/v1/market/stocks/${market}/${symbol}/news`,
+    WATCHLIST_NEWS: '/api/v1/market/watchlist/news',
+  },
+
+  PRICE_ALERTS: {
+    LIST: '/api/v1/price-alerts/',
+    CREATE: '/api/v1/price-alerts/',
+    DETAIL: (id: number) => `/api/v1/price-alerts/${id}`,
+  },
+
+  QLIB: {
+    READINESS: '/api/v1/qlib/readiness',
   },
 
   // System endpoints

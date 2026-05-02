@@ -20,6 +20,9 @@ from domain.repositories.market_data_bar_repository_interface import (
 from domain.services.market_data_ingestion_service import MarketDataIngestionService
 from infrastructure.cache.redis_cache_service import ICacheService
 
+DEFAULT_PRICE_PREFETCH_DAYS = 365 * 3
+MIN_PRICE_PREFETCH_COVERAGE_RATIO = 0.75
+
 
 class DataCollectionStatus(str, Enum):
     """數據收集狀態"""
@@ -291,6 +294,167 @@ class DataCollectionService:
             collection_date=datetime.now(),
             results=results,
         )
+
+    async def prefetch_price_cache(
+        self,
+        db: AsyncSession,
+        market: Optional[str] = None,
+        stock_ids: Optional[List[int]] = None,
+        days: int = DEFAULT_PRICE_PREFETCH_DAYS,
+        limit: int = 100,
+        stale_after_days: int = 1,
+    ) -> Dict[str, Any]:
+        """
+        預抓本地價格快取。
+
+        使用場景：
+        1. 每日收盤後排程更新 demo universe
+        2. 前端針對清單/持倉手動刷新
+        3. 避免使用者查詢時等待外部行情 API
+        """
+        start_time = datetime.now()
+        end_date = date.today()
+        default_start_date = end_date - timedelta(days=days)
+
+        if stock_ids:
+            stocks = []
+            for stock_id in stock_ids:
+                stock = await self.stock_repo.get(db, stock_id)
+                if stock and (market is None or stock.market == market):
+                    stocks.append(stock)
+        else:
+            stocks = await self.stock_repo.get_active_stocks(
+                db, market=market, limit=limit
+            )
+
+        results = []
+        updated_count = 0
+        skipped_count = 0
+        failed_count = 0
+        total_records = 0
+        errors: List[str] = []
+
+        for stock in stocks:
+            latest_price = await self.price_repo.get_latest_price(db, stock.id)
+            latest_date = latest_price.date if latest_price else None
+            age_days = (end_date - latest_date).days if latest_date else None
+            existing_prices = await self.price_repo.get_by_stock_and_date_range(
+                db,
+                stock.id,
+                default_start_date,
+                end_date,
+                limit=max(days, 1000),
+            )
+            expected_trading_days = max(int(days * 5 / 7), 1)
+            minimum_coverage = int(
+                expected_trading_days * MIN_PRICE_PREFETCH_COVERAGE_RATIO
+            )
+            has_requested_history = len(existing_prices) >= minimum_coverage
+
+            if (
+                age_days is not None
+                and age_days <= stale_after_days
+                and has_requested_history
+            ):
+                skipped_count += 1
+                results.append(
+                    {
+                        "stock_id": stock.id,
+                        "symbol": stock.symbol,
+                        "name": stock.name,
+                        "success": True,
+                        "skipped": True,
+                        "stale": False,
+                        "data_points": len(existing_prices),
+                        "latest_date": latest_date.isoformat(),
+                        "message": "本地價格資料仍在新鮮範圍內",
+                    }
+                )
+                continue
+
+            start_date = default_start_date
+            if latest_date and has_requested_history:
+                overlap_start = latest_date - timedelta(days=3)
+                start_date = max(default_start_date, overlap_start)
+
+            try:
+                collect_result = await self.collect_stock_data(
+                    db=db,
+                    stock_id=stock.id,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                success = collect_result.status in {
+                    DataCollectionStatus.SUCCESS,
+                    DataCollectionStatus.NO_DATA,
+                }
+                if collect_result.status == DataCollectionStatus.SUCCESS:
+                    updated_count += 1
+                    total_records += collect_result.records_collected
+                elif collect_result.status == DataCollectionStatus.NO_DATA:
+                    skipped_count += 1
+                else:
+                    failed_count += 1
+                    errors.extend(collect_result.errors)
+
+                results.append(
+                    {
+                        "stock_id": stock.id,
+                        "symbol": stock.symbol,
+                        "name": stock.name,
+                        "success": success,
+                        "skipped": False,
+                        "stale": True,
+                        "data_points": collect_result.records_collected,
+                        "latest_date": latest_date.isoformat()
+                        if latest_date
+                        else None,
+                        "message": collect_result.status.value,
+                        "errors": collect_result.errors,
+                        "warnings": collect_result.warnings,
+                    }
+                )
+            except Exception as exc:
+                failed_count += 1
+                error = f"{stock.symbol}: {exc}"
+                errors.append(error)
+                results.append(
+                    {
+                        "stock_id": stock.id,
+                        "symbol": stock.symbol,
+                        "name": stock.name,
+                        "success": False,
+                        "skipped": False,
+                        "stale": True,
+                        "data_points": 0,
+                        "latest_date": latest_date.isoformat()
+                        if latest_date
+                        else None,
+                        "message": str(exc),
+                        "errors": [str(exc)],
+                    }
+                )
+
+        execution_time = (datetime.now() - start_time).total_seconds()
+        total_stocks = len(stocks)
+        return {
+            "success": failed_count == 0,
+            "message": (
+                f"預抓完成，處理 {total_stocks} 支股票："
+                f"更新 {updated_count}、跳過 {skipped_count}、失敗 {failed_count}"
+            ),
+            "mode": "prefetch",
+            "market": market,
+            "total_stocks": total_stocks,
+            "updated": updated_count,
+            "skipped": skipped_count,
+            "failed": failed_count,
+            "total_records": total_records,
+            "stale_after_days": stale_after_days,
+            "execution_time": execution_time,
+            "errors": errors[:50],
+            "results": results,
+        }
 
     async def collect_batch_stocks_data(
         self,
@@ -572,10 +736,49 @@ class DataCollectionService:
 
     async def _check_overall_data_freshness(self, db: AsyncSession) -> Dict[str, Any]:
         """檢查整體數據新鮮度"""
+        active_stocks = await self.stock_repo.get_active_stocks(db, limit=1000)
+        if not active_stocks:
+            return {
+                "latest_collection": None,
+                "coverage_percentage": 0.0,
+                "stale_stocks_count": 0,
+                "no_data_stocks_count": 0,
+                "total_stocks": 0,
+            }
+
+        today = date.today()
+        with_data_count = 0
+        stale_count = 0
+        no_data_count = 0
+        latest_collection = None
+
+        for stock in active_stocks:
+            latest_price = await self.price_repo.get_latest_price(db, stock.id)
+            if not latest_price:
+                no_data_count += 1
+                continue
+
+            with_data_count += 1
+            if (today - latest_price.date).days > 1:
+                stale_count += 1
+
+            updated_at = getattr(latest_price, "updated_at", None)
+            if updated_at and (
+                latest_collection is None or updated_at > latest_collection
+            ):
+                latest_collection = updated_at
+
         return {
-            "latest_collection": datetime.now().isoformat(),
-            "coverage_percentage": 95.0,
-            "stale_stocks_count": 2,
+            "latest_collection": latest_collection.isoformat()
+            if latest_collection
+            else None,
+            "coverage_percentage": round(
+                (with_data_count / len(active_stocks)) * 100,
+                2,
+            ),
+            "stale_stocks_count": stale_count,
+            "no_data_stocks_count": no_data_count,
+            "total_stocks": len(active_stocks),
         }
 
     async def _calculate_collection_rate(self) -> Dict[str, float]:

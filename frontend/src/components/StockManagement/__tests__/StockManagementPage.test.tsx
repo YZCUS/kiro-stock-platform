@@ -14,6 +14,7 @@ import signalsReducer from '../../../store/slices/signalsSlice';
 import authReducer from '../../../store/slices/authSlice';
 import stockListReducer from '../../../store/slices/stockListSlice';
 import * as stockListApi from '../../../services/stockListApi';
+import StocksApiService from '../../../services/stocksApi';
 
 const mockRouterPush = jest.fn();
 
@@ -42,6 +43,15 @@ jest.mock('../../../services/stockListApi', () => ({
   removeStockFromList: jest.fn(),
   reorderStockLists: jest.fn(),
   reorderListStocks: jest.fn(),
+}));
+
+jest.mock('../../../services/stocksApi', () => ({
+  __esModule: true,
+  default: {
+    getStocks: jest.fn(),
+    backfillStockData: jest.fn(),
+    prefetchStockPrices: jest.fn(),
+  },
 }));
 
 // Mock the useStocks and useDeleteStock hooks
@@ -224,6 +234,29 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
     (stockListApi.addStockToList as jest.Mock).mockResolvedValue({});
     (stockListApi.reorderListStocks as jest.Mock).mockResolvedValue({ message: 'ok', updated_count: 0 });
     (stockListApi.reorderStockLists as jest.Mock).mockResolvedValue({ message: 'ok', updated_count: 0 });
+    (StocksApiService.getStocks as jest.Mock).mockResolvedValue({
+      items: [],
+      page: 1,
+      per_page: 20,
+      total: 0,
+      total_pages: 0,
+    });
+    (StocksApiService.backfillStockData as jest.Mock).mockResolvedValue({
+      success: true,
+      message: 'success',
+      data_points: 700,
+    });
+    (StocksApiService.prefetchStockPrices as jest.Mock).mockResolvedValue({
+      success: true,
+      message: 'success',
+      total_stocks: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      total_records: 0,
+      errors: [],
+      results: [],
+    });
   });
 
   it('應該使用 React Query 獲取股票數據而不是 Redux', () => {
@@ -341,6 +374,62 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
     render(<StockManagementPage />, { wrapper: createWrapper(store) });
 
     expect(screen.getByText('此清單還沒有股票')).toBeInTheDocument();
+  });
+
+  it('價格不存在時應該顯示更新中狀態', () => {
+    const store = createTestStore({
+      currentListStocks: [
+        {
+          ...mockStocksData.items[0],
+          latest_price: null,
+        } as any,
+      ],
+    });
+
+    render(<StockManagementPage />, { wrapper: createWrapper(store) });
+
+    expect(screen.getByText('價格更新中')).toBeInTheDocument();
+    expect(screen.getByText('待更新')).toBeInTheDocument();
+  });
+
+  it('新增既有股票到清單後應該背景回填價格', async () => {
+    (StocksApiService.getStocks as jest.Mock).mockResolvedValueOnce({
+      items: [
+        {
+          id: 9,
+          symbol: 'TSLA',
+          name: 'Tesla, Inc.',
+          market: 'US',
+          is_active: true,
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+        },
+      ],
+      page: 1,
+      per_page: 20,
+      total: 1,
+      total_pages: 1,
+    });
+
+    render(<StockManagementPage />, { wrapper: createWrapper() });
+
+    fireEvent.click(screen.getByRole('button', { name: '新增股票' }));
+    fireEvent.change(screen.getByPlaceholderText('台股輸入數字（如 2330）或美股英文（如 AAPL）'), {
+      target: { value: 'TSLA' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '確認新增' }));
+
+    await waitFor(() => {
+      expect(stockListApi.addStockToList).toHaveBeenCalledWith(1, { stock_id: 9 });
+    });
+
+    expect(StocksApiService.backfillStockData).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({
+        start_date: expect.any(String),
+        end_date: expect.any(String),
+      })
+    );
   });
 
   it('應該顯示搜尋無結果狀態', () => {

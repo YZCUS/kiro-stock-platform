@@ -16,18 +16,24 @@ import {
   selectSubscriptions,
   selectSubscriptionsLoading,
 } from '@/store/slices/strategySlice';
+import { fetchStockLists } from '@/store/slices/stockListSlice';
 import { addToast } from '@/store/slices/uiSlice';
 import { Button } from '@/components/ui/button';
 import { Plus, RefreshCw } from 'lucide-react';
 import SubscriptionCard from './SubscriptionCard';
 import SubscriptionModal from './SubscriptionModal';
-import { Subscription, SubscriptionCreateRequest, SubscriptionUpdateRequest } from '@/types/strategy';
+import {
+  Subscription,
+  SubscriptionCreateRequest,
+  SubscriptionUpdateRequest,
+} from '@/types/strategy';
 
 export default function SubscriptionManager() {
   const dispatch = useAppDispatch();
   const availableStrategies = useAppSelector(selectAvailableStrategies);
   const subscriptions = useAppSelector(selectSubscriptions);
   const loading = useAppSelector(selectSubscriptionsLoading);
+  const stockLists = useAppSelector((state) => state.stockList.lists);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
@@ -36,6 +42,7 @@ export default function SubscriptionManager() {
   useEffect(() => {
     dispatch(fetchAvailableStrategies());
     dispatch(fetchSubscriptions(false));
+    dispatch(fetchStockLists());
   }, [dispatch]);
 
   // 刷新訂閱列表
@@ -180,6 +187,7 @@ export default function SubscriptionManager() {
             <SubscriptionCard
               key={subscription.id}
               subscription={subscription}
+              strategies={availableStrategies}
               onEdit={handleOpenEdit}
               onDelete={handleDelete}
               onToggle={handleToggle}
@@ -193,6 +201,7 @@ export default function SubscriptionManager() {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         strategies={availableStrategies}
+        stockLists={stockLists}
         subscription={editingSubscription}
         onSubmit={handleSubmit}
       />

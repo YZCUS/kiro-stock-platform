@@ -146,7 +146,7 @@ class StrategyRegistry:
         """
         獲取所有策略的資訊（用於 API 響應）
 
-        返回策略的基本資訊，包括類型、名稱、描述和預設參數。
+        返回策略的基本資訊，包括類型、名稱、描述、預設參數和 UI 參數 schema。
 
         Returns:
             List[Dict]: 策略資訊列表，每個元素包含：
@@ -154,6 +154,7 @@ class StrategyRegistry:
                 - name: 策略名稱
                 - description: 策略描述
                 - default_params: 預設參數
+                - parameter_schema: 參數 UI schema
 
         Example:
             >>> info = registry.get_strategies_info()
@@ -162,7 +163,8 @@ class StrategyRegistry:
             >>> #         "type": "golden_cross",
             >>> #         "name": "黃金交叉策略",
             >>> #         "description": "...",
-            >>> #         "default_params": {"short_period": 5, "long_period": 20}
+            >>> #         "default_params": {"short_period": 5, "long_period": 20},
+            >>> #         "parameter_schema": [{"key": "short_period", "label": "短期均線週期"}]
             >>> #     }
             >>> # ]
         """
@@ -172,6 +174,7 @@ class StrategyRegistry:
                 "name": strategy.name,
                 "description": strategy.description,
                 "default_params": strategy.get_default_params(),
+                "parameter_schema": strategy.get_parameter_schema(),
             }
             for strategy in self._strategies.values()
         ]

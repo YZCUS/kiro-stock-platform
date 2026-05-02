@@ -61,6 +61,9 @@ class User(BaseModel, TimestampMixin):
     order_intents = relationship(
         "OrderIntent", back_populates="user", cascade="all, delete-orphan"
     )
+    price_alerts = relationship(
+        "PriceAlert", back_populates="user", cascade="all, delete-orphan"
+    )
 
     __table_args__ = {"comment": "用戶表"}
 

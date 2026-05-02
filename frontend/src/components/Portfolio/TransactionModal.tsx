@@ -344,7 +344,8 @@ export default function TransactionModal({
             <Button
               type="submit"
               disabled={isSubmitting || (transactionType === 'SELL' && availableQuantity === 0)}
-              className={`flex-1 ${transactionType === 'BUY' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
+              variant={transactionType === 'BUY' ? 'success' : 'destructive'}
+              className="flex-1"
             >
               {isSubmitting ? '處理中...' : `確認${transactionType === 'BUY' ? '買入' : '賣出'}`}
             </Button>

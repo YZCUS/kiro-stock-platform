@@ -33,6 +33,38 @@ def run_market_data_pipeline_tw(**context):
     return result
 
 
+def _prefetch_price_cache_with_market(context, market, market_name):
+    """Prefetch local daily price cache for a market after close."""
+    from plugins.operators.api_operator import APICallOperator
+
+    print(f"啟動{market_name}本地價格快取預抓...")
+    operator = APICallOperator(
+        task_id=f"prefetch_{market.lower()}_price_cache_api",
+        endpoint="/stocks/prefetch-prices",
+        method="POST",
+        payload={
+            "market": market,
+            "days": 30,
+            "limit": 100,
+            "stale_after_days": 1,
+        },
+        timeout=900,
+    )
+    result = operator.execute(context)
+    print(f"{market_name}價格快取預抓完成: {result}")
+    return result
+
+
+def prefetch_price_cache_tw(**context):
+    """Prefetch TW daily price cache for demo and user query paths."""
+    return _prefetch_price_cache_with_market(context, "TW", "台股")
+
+
+def prefetch_price_cache_us(**context):
+    """Prefetch US daily price cache for demo and user query paths."""
+    return _prefetch_price_cache_with_market(context, "US", "美股")
+
+
 def _get_market_from_context(context):
     """從 context 中獲取市場類型"""
     ti = context.get('task_instance') or context.get('ti')

@@ -8,16 +8,34 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAppDispatch, useAppSelector } from '../../store';
 import { addToast } from '../../store/slices/uiSlice';
-import { fetchStockLists, fetchListStocks, addStockToList, removeStockFromList } from '../../store/slices/stockListSlice';
+import { fetchListStocks, addStockToList, removeStockFromList } from '../../store/slices/stockListSlice';
 import { useStocks, useDeleteStock, useCreateStock } from '../../hooks/useStocks';
-import { useStockValidation } from '../../hooks/useStockValidation';
 import StocksApiService from '../../services/stocksApi';
+import { detectMarket, formatStockSymbol } from '../../services/stockValidationApi';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import TransactionModal from '../Portfolio/TransactionModal';
 import StockReorderModal from './StockReorderModal';
-import { ShoppingCart, TrendingDown, BarChart3, Trash2, ArrowUpDown, Plus } from 'lucide-react';
+import { Button } from '../ui/button';
+import { MetricCard, PageHeader, PageShell, ToolbarPanel } from '../ui/page';
+import { ShoppingCart, TrendingDown, BarChart3, Trash2, ArrowUpDown, Plus, Bell, RefreshCw } from 'lucide-react';
 import UnifiedStockSelector from './UnifiedStockSelector';
 import * as stockListApi from '../../services/stockListApi';
+import PriceAlertModal from './PriceAlertModal';
+
+const PRICE_BACKFILL_YEARS = 3;
+
+const formatDateInput = (date: Date): string => date.toISOString().slice(0, 10);
+
+const getPriceBackfillRange = () => {
+  const endDate = new Date();
+  const startDate = new Date(endDate);
+  startDate.setFullYear(startDate.getFullYear() - PRICE_BACKFILL_YEARS);
+
+  return {
+    start_date: formatDateInput(startDate),
+    end_date: formatDateInput(endDate),
+  };
+};
 
 const StockManagementPage: React.FC = () => {
   const router = useRouter();
@@ -27,6 +45,7 @@ const StockManagementPage: React.FC = () => {
   const [pageSize] = useState(20);
   const [showAddModal, setShowAddModal] = useState(false);
   const [isBackfilling, setIsBackfilling] = useState(false);
+  const [isAddingStock, setIsAddingStock] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{
     isOpen: boolean;
     stockId: number | null;
@@ -47,6 +66,13 @@ const StockManagementPage: React.FC = () => {
     stock: null,
     type: 'BUY'
   });
+  const [priceAlertModal, setPriceAlertModal] = useState<{
+    isOpen: boolean;
+    stock: any | null;
+  }>({
+    isOpen: false,
+    stock: null,
+  });
   const [isReorderModalOpen, setIsReorderModalOpen] = useState(false);
 
   // 從 Redux 獲取清單股票和清單列表
@@ -54,24 +80,16 @@ const StockManagementPage: React.FC = () => {
 
   // 使用 Redux 的 currentList.id 作為當前清單 ID
   const currentListId = currentList?.id || null;
-  const { isAuthenticated } = useAppSelector((state) => state.auth);
-
-  // 股號驗證 Hook
-  const { validationError, validate, reset: resetValidation } = useStockValidation();
+  const auth = useAppSelector((state) => state.auth);
+  const { isAuthenticated } = auth;
+  const authInitialized = auth.initialized ?? true;
 
   // 檢查登入狀態，未登入則重定向到登入頁面
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.push('/login?redirect=/stocks');
+    if (authInitialized && !isAuthenticated) {
+      router.replace('/login?redirect=/stocks');
     }
-  }, [isAuthenticated, router]);
-
-  // 載入清單列表（如果尚未載入）
-  useEffect(() => {
-    if (isAuthenticated && lists.length === 0) {
-      dispatch(fetchStockLists());
-    }
-  }, [isAuthenticated, lists.length, dispatch]);
+  }, [authInitialized, isAuthenticated, router]);
 
   // 當清單改變時，載入清單中的股票
   useEffect(() => {
@@ -88,6 +106,7 @@ const StockManagementPage: React.FC = () => {
     }
     return params;
   }, [page, pageSize, searchTerm]);
+  const shouldFetchGlobalStocks = isAuthenticated && viewMode === 'portfolio';
 
   // 使用 React Query 獲取股票數據
   const {
@@ -95,7 +114,35 @@ const StockManagementPage: React.FC = () => {
     isLoading,
     error: queryError,
     refetch
-  } = useStocks(queryParams);
+  } = useStocks(queryParams, {
+    enabled: shouldFetchGlobalStocks,
+    staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
+  const startBackgroundPriceBackfill = (
+    stockId: number,
+    symbol: string,
+    listId: number | null = currentListId
+  ) => {
+    void StocksApiService.backfillStockData(stockId, getPriceBackfillRange())
+      .then(() => {
+        if (listId) {
+          dispatch(fetchListStocks(listId));
+        } else {
+          void refetch();
+        }
+      })
+      .catch((backfillError) => {
+        console.warn('背景價格回填失敗:', backfillError);
+        dispatch(addToast({
+          type: 'warning',
+          title: '價格資料更新中',
+          message: `${symbol} 已加入清單，但價格資料暫時無法完成回填，稍後可重新載入。`,
+        }));
+      });
+  };
 
   // 使用 React Query 刪除 mutation
   const deleteStockMutation = useDeleteStock({
@@ -120,12 +167,6 @@ const StockManagementPage: React.FC = () => {
   // 使用 React Query 新增 mutation
   const createStockMutation = useCreateStock({
     onSuccess: async (newStock) => {
-      dispatch(addToast({
-        type: 'success',
-        title: '成功',
-        message: '已成功新增股票',
-      }));
-
       // 如果有選中的清單，自動添加到清單並重新獲取清單股票（包含最新價格）
       if (currentListId && newStock?.id) {
         try {
@@ -137,17 +178,32 @@ const StockManagementPage: React.FC = () => {
           // 重新獲取清單股票（包含最新價格）
           await dispatch(fetchListStocks(currentListId));
 
+          startBackgroundPriceBackfill(newStock.id, newStock.symbol, currentListId);
+
           dispatch(addToast({
             type: 'success',
             title: '成功',
-            message: '已添加到清單',
+            message: `已將 ${newStock.symbol} 添加到清單，價格資料正在背景更新`,
           }));
         } catch (error) {
           console.error('添加股票到清單失敗:', error);
+          dispatch(addToast({
+            type: 'error',
+            title: '錯誤',
+            message: '已新增股票，但添加到清單失敗',
+          }));
         }
       } else {
         // 如果不在清單視圖，刷新所有股票列表
         await refetch();
+        if (newStock?.id) {
+          startBackgroundPriceBackfill(newStock.id, newStock.symbol, null);
+        }
+        dispatch(addToast({
+          type: 'success',
+          title: '成功',
+          message: '已新增股票，價格資料正在背景更新',
+        }));
       }
     },
     onError: (error: any) => {
@@ -202,8 +258,9 @@ const StockManagementPage: React.FC = () => {
       totalPages: stocksResponse?.total_pages || 0,
     };
   }, [viewMode, currentListId, stocks.length, stocksResponse]);
-  const loading = isLoading || deleteStockMutation.isPending;
-  const error = queryError?.message || null;
+  const loading = (shouldFetchGlobalStocks && isLoading) || deleteStockMutation.isPending;
+  const addStockPending = isAddingStock || createStockMutation.isPending;
+  const error = shouldFetchGlobalStocks ? queryError?.message || null : null;
 
   // 打開刪除確認對話框
   const handleDeleteStock = (stockId: number, stockName: string) => {
@@ -290,22 +347,22 @@ const StockManagementPage: React.FC = () => {
         return;
       }
 
-      // 提取股票代號列表
-      const stockSymbols = currentStocks.map(s => s.symbol);
+      const stockIds = currentStocks.map(s => s.id);
 
-      // 刷新當前視圖中的股票價格數據
-      const refreshResult = await StocksApiService.refreshAllStockPrices();
+      // 只預抓當前視圖中的股票，避免刷新全部活躍股票造成等待時間過長
+      const refreshResult = await StocksApiService.prefetchStockPrices({
+        stock_ids: stockIds,
+        days: 30,
+        stale_after_days: 0,
+      });
 
-      if (!refreshResult || !refreshResult.success) {
+      if (!refreshResult) {
         throw new Error('刷新結果無效');
       }
 
-      // 過濾出當前視圖中的股票刷新結果
-      const relevantResults = refreshResult.results.filter(r =>
-        stockSymbols.includes(r.symbol)
-      );
-      const successCount = relevantResults.filter(r => r.success).length;
-      const failedResults = relevantResults.filter(r => !r.success);
+      const successCount = refreshResult.results.filter(r => r.success && !r.skipped).length;
+      const skippedCount = refreshResult.results.filter(r => r.skipped).length;
+      const failedResults = refreshResult.results.filter(r => !r.success);
 
       // 顯示刷新成功訊息
       if (successCount > 0) {
@@ -314,6 +371,12 @@ const StockManagementPage: React.FC = () => {
           type: 'success',
           title: '刷新完成',
           message: `成功刷新 ${viewName} 中 ${successCount} 支股票的價格數據`,
+        }));
+      } else if (skippedCount > 0 && failedResults.length === 0) {
+        dispatch(addToast({
+          type: 'info',
+          title: '資料已是最新',
+          message: `${skippedCount} 支股票使用本地快取`,
         }));
       } else {
         dispatch(addToast({
@@ -362,17 +425,6 @@ const StockManagementPage: React.FC = () => {
     }
   };
 
-  // 自動識別市場：數字為台股，英文為美股
-  const detectMarket = (symbol: string): 'TW' | 'US' => {
-    const trimmedSymbol = symbol.trim().toUpperCase();
-    // 如果全部是數字，判定為台股
-    if (/^\d+$/.test(trimmedSymbol)) {
-      return 'TW';
-    }
-    // 如果包含英文字母，判定為美股
-    return 'US';
-  };
-
   // 處理新增股票
   const handleAddStock = async () => {
     const trimmedSymbol = stockSymbol.trim();
@@ -397,21 +449,10 @@ const StockManagementPage: React.FC = () => {
     }
 
     try {
-      // 使用驗證 API 驗證股票代號
-      const validationResult = await validate(trimmedSymbol);
+      setIsAddingStock(true);
 
-      if (!validationResult) {
-        // 驗證失敗
-        dispatch(addToast({
-          type: 'error',
-          title: '驗證失敗',
-          message: validationError || '無效的股票代號',
-        }));
-        return;
-      }
-
-      // 驗證成功，使用驗證結果
-      const { symbol: formattedSymbol, market, name } = validationResult;
+      const market = detectMarket(trimmedSymbol);
+      const formattedSymbol = formatStockSymbol(trimmedSymbol, market);
 
       // 先檢查股票是否已經存在於資料庫中
       const existingStocksResponse = await StocksApiService.getStocks({
@@ -432,6 +473,17 @@ const StockManagementPage: React.FC = () => {
       if (stockToAdd) {
         // 股票已存在，直接添加到清單
         if (currentListId) {
+          if (currentListStocks.some((stock) => stock.id === stockToAdd.id)) {
+            dispatch(addToast({
+              type: 'warning',
+              title: '提示',
+              message: `${formattedSymbol} 已在此清單中`,
+            }));
+            setStockSymbol('');
+            setShowAddModal(false);
+            return;
+          }
+
           try {
             await dispatch(addStockToList({
               listId: currentListId,
@@ -441,11 +493,12 @@ const StockManagementPage: React.FC = () => {
             dispatch(addToast({
               type: 'success',
               title: '成功',
-              message: `已將 ${name} (${formattedSymbol}) 添加到清單`,
+              message: `已將 ${stockToAdd.name || formattedSymbol} (${formattedSymbol}) 添加到清單，價格資料正在背景更新`,
             }));
 
             // 刷新清單
             dispatch(fetchListStocks(currentListId));
+            startBackgroundPriceBackfill(stockToAdd.id, formattedSymbol, currentListId);
           } catch (error: any) {
             // 檢查是否是重複添加的錯誤
             const errorMsg = error?.message || error?.toString() || '';
@@ -480,7 +533,6 @@ const StockManagementPage: React.FC = () => {
 
       // 清空輸入並關閉 modal
       setStockSymbol('');
-      resetValidation();
       setShowAddModal(false);
     } catch (error) {
       console.error('添加股票失敗:', error);
@@ -489,6 +541,8 @@ const StockManagementPage: React.FC = () => {
         title: '錯誤',
         message: '添加股票失敗，請稍後再試',
       }));
+    } finally {
+      setIsAddingStock(false);
     }
   };
 
@@ -525,21 +579,33 @@ const StockManagementPage: React.FC = () => {
     }
   };
 
+  if (!authInitialized) {
+    return (
+      <PageShell>
+        <div className="text-sm text-gray-500">正在確認登入狀態...</div>
+      </PageShell>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <PageShell>
+        <div className="text-sm text-gray-500">正在前往登入頁...</div>
+      </PageShell>
+    );
+  }
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-4">
-          股票管理
-        </h1>
-        <p className="text-gray-600">
-          管理監控的股票列表，新增或移除股票追蹤
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="股票管理"
+        description="管理監控的股票列表，新增或移除股票追蹤。"
+      />
 
       {/* 搜尋和新增區域 */}
-      <div className="bg-white shadow rounded-lg p-6 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-4">
+      <ToolbarPanel>
+        <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <h2 className="text-lg font-medium text-gray-900">股票列表</h2>
             {/* 統一選擇器 - 整合清單和視圖模式 */}
             <UnifiedStockSelector
@@ -547,42 +613,36 @@ const StockManagementPage: React.FC = () => {
               onViewModeChange={setViewMode}
             />
           </div>
-          <div className="flex gap-2">
-            <button
+          <div className="flex flex-wrap gap-2">
+            <Button
               onClick={handleRefreshWithBackfill}
               disabled={isBackfilling}
-              className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2"
+              variant="success"
+              size="sm"
             >
-              {isBackfilling ? (
-                <>
-                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  抓取中...
-                </>
-              ) : (
-                <>🔄 重新載入</>
-              )}
-            </button>
+              <RefreshCw className={isBackfilling ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+              {isBackfilling ? '抓取中...' : '重新載入'}
+            </Button>
             {/* 只在清單視圖顯示新增股票和排序按鈕，持倉視圖不允許直接新增 */}
             {viewMode === 'all' && currentListId && stocks.length > 1 && (
-              <button
+              <Button
                 onClick={() => setIsReorderModalOpen(true)}
-                className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2"
+                variant="secondary"
+                size="sm"
                 title="調整股票順序"
               >
                 <ArrowUpDown className="w-4 h-4" />
                 排序
-              </button>
+              </Button>
             )}
             {viewMode === 'all' && (
-              <button
+              <Button
                 onClick={() => setShowAddModal(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                size="sm"
               >
+                <Plus className="h-4 w-4" />
                 新增股票
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -641,10 +701,12 @@ const StockManagementPage: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {stock.latest_price?.close ? (
+                    {typeof stock.latest_price?.close === 'number' ? (
                       <span className="font-semibold">{stock.market === 'TW' ? 'NT$' : '$'}{stock.latest_price.close.toFixed(2)}</span>
                     ) : (
-                      <span className="text-gray-400">---</span>
+                      <span className="inline-flex rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">
+                        價格更新中
+                      </span>
                     )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -653,7 +715,7 @@ const StockManagementPage: React.FC = () => {
                         {stock.latest_price.change_percent >= 0 ? '+' : ''}{stock.latest_price.change_percent.toFixed(2)}%
                       </span>
                     ) : (
-                      <span className="text-gray-400">---</span>
+                      <span className="text-gray-400">待更新</span>
                     )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
@@ -681,6 +743,14 @@ const StockManagementPage: React.FC = () => {
                       <BarChart3 className="w-3.5 h-3.5" />
                       圖表
                     </Link>
+                    <button
+                      onClick={() => setPriceAlertModal({ isOpen: true, stock })}
+                      className="text-indigo-600 hover:text-indigo-800 font-medium inline-flex items-center gap-1"
+                      title="價格提醒"
+                    >
+                      <Bell className="w-3.5 h-3.5" />
+                      提醒
+                    </button>
                     <button
                       onClick={() => handleDeleteStock(stock.id, stock.name)}
                       className="text-red-600 hover:text-red-800 font-medium inline-flex items-center gap-1"
@@ -838,43 +908,24 @@ const StockManagementPage: React.FC = () => {
             </div>
           </div>
         )}
-      </div>
+      </ToolbarPanel>
 
       {/* 統計區域 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white shadow rounded-lg p-6">
-          <div className="flex items-center">
-            <div className="flex-1">
-              <p className="text-sm font-medium text-gray-600">
-                {viewMode === 'all' && currentListId ? '當前清單股票數' :
-                 viewMode === 'portfolio' ? '持倉股票數' : '追蹤股票總數'}
-              </p>
-              <p className="text-2xl font-bold text-gray-900">{stocks.length}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white shadow rounded-lg p-6">
-          <div className="flex items-center">
-            <div className="flex-1">
-              <p className="text-sm font-medium text-gray-600">台股數量</p>
-              <p className="text-2xl font-bold text-green-600">
-                {stocks.filter(s => s.market === 'TW').length}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white shadow rounded-lg p-6">
-          <div className="flex items-center">
-            <div className="flex-1">
-              <p className="text-sm font-medium text-gray-600">美股數量</p>
-              <p className="text-2xl font-bold text-blue-600">
-                {stocks.filter(s => s.market === 'US').length}
-              </p>
-            </div>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <MetricCard
+          label={viewMode === 'all' && currentListId ? '當前清單股票數' : viewMode === 'portfolio' ? '持倉股票數' : '追蹤股票總數'}
+          value={stocks.length}
+        />
+        <MetricCard
+          label="台股數量"
+          value={stocks.filter(s => s.market === 'TW').length}
+          tone="green"
+        />
+        <MetricCard
+          label="美股數量"
+          value={stocks.filter(s => s.market === 'US').length}
+          tone="blue"
+        />
       </div>
 
       {/* 新增股票 Modal */}
@@ -911,7 +962,7 @@ const StockManagementPage: React.FC = () => {
                   onChange={(e) => setStockSymbol(e.target.value.toUpperCase())}
                   placeholder="台股輸入數字（如 2330）或美股英文（如 AAPL）"
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  disabled={createStockMutation.isPending}
+                  disabled={addStockPending}
                   autoFocus
                   onKeyPress={(e) => {
                     if (e.key === 'Enter') {
@@ -941,16 +992,16 @@ const StockManagementPage: React.FC = () => {
                     setStockSymbol('');
                   }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  disabled={createStockMutation.isPending}
+                  disabled={addStockPending}
                 >
                   取消
                 </button>
                 <button
                   onClick={handleAddStock}
                   className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  disabled={createStockMutation.isPending || !stockSymbol.trim()}
+                  disabled={addStockPending || !stockSymbol.trim()}
                 >
-                  {createStockMutation.isPending ? (
+                  {addStockPending ? (
                     <>
                       <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
@@ -994,6 +1045,19 @@ const StockManagementPage: React.FC = () => {
         }}
       />
 
+      <PriceAlertModal
+        isOpen={priceAlertModal.isOpen}
+        stock={priceAlertModal.stock}
+        onClose={() => setPriceAlertModal({ isOpen: false, stock: null })}
+        onSuccess={() => {
+          dispatch(addToast({
+            type: 'success',
+            title: '成功',
+            message: '價格提醒已建立',
+          }));
+        }}
+      />
+
       {/* 股票排序 Modal */}
       <StockReorderModal
         isOpen={isReorderModalOpen}
@@ -1001,7 +1065,7 @@ const StockManagementPage: React.FC = () => {
         stocks={stocks}
         onSave={handleSaveStockReorder}
       />
-    </div>
+    </PageShell>
   );
 };
 

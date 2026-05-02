@@ -23,8 +23,8 @@ from domain.services.market_data_access_service import (
     MarketDataAccessService,
     MarketDataRequirement,
 )
+from domain.strategies import strategy_registry
 from domain.strategies.strategy_interface import StrategyType
-from domain.strategies.strategy_registry import strategy_registry
 from domain.workers import StreamTaskCommand
 
 logger = logging.getLogger(__name__)

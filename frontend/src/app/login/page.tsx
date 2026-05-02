@@ -45,8 +45,9 @@ export default function LoginPage() {
         token: response.access_token,
       }));
       router.push(redirectPath);
-    } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || '登入失敗，請檢查您的帳號密碼';
+    } catch (err: unknown) {
+      const apiError = err as { response?: { data?: { detail?: string } } };
+      const errorMsg = apiError.response?.data?.detail || '登入失敗，請檢查您的帳號密碼';
       setError(errorMsg);
       dispatch(setAuthError(errorMsg));
     } finally {
@@ -56,8 +57,8 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-purple-50 p-4">
-      <Card className="w-full max-w-md">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50/60 p-4">
+      <Card className="w-full max-w-md rounded-lg shadow-sm">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold">登入</CardTitle>
           <CardDescription>

@@ -2,13 +2,15 @@
 
 import { useEffect } from 'react';
 import { useAppDispatch } from '@/store';
-import { restoreAuth } from '@/store/slices/authSlice';
+import { authInitialized, restoreAuth } from '@/store/slices/authSlice';
 
 export default function AuthInit() {
   const dispatch = useAppDispatch();
 
   useEffect(() => {
     // Restore auth state from localStorage on mount
+    let restored = false;
+
     if (typeof window !== 'undefined') {
       const token = localStorage.getItem('token');
       const userStr = localStorage.getItem('user');
@@ -17,12 +19,17 @@ export default function AuthInit() {
         try {
           const user = JSON.parse(userStr);
           dispatch(restoreAuth({ user, token }));
-        } catch (err) {
+          restored = true;
+        } catch {
           // Clear invalid data
           localStorage.removeItem('token');
           localStorage.removeItem('user');
         }
       }
+    }
+
+    if (!restored) {
+      dispatch(authInitialized());
     }
   }, [dispatch]);
 

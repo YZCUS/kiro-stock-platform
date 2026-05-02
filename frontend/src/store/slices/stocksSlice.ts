@@ -2,7 +2,15 @@
  * 股票管理 Redux Slice
  */
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { Stock, StockFilter, ApiResponse, PaginatedResponse } from '../../types';
+import { Stock, StockFilter } from '../../types';
+
+interface StockListPayload {
+  items?: Stock[];
+  page?: number;
+  per_page?: number;
+  total?: number;
+  total_pages?: number;
+}
 
 // 異步操作
 export const fetchStocks = createAsyncThunk(
@@ -40,9 +48,8 @@ export const deleteStock = createAsyncThunk(
 export const refreshStockData = createAsyncThunk(
   'stocks/refreshStockData',
   async (stockId: number) => {
-    // 模擬 API 調用
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
+    const { default: StocksApiService } = await import('../../services/stocksApi');
+    await StocksApiService.refreshStockData(stockId);
     return { stockId, refreshedAt: new Date().toISOString() };
   }
 );
@@ -113,10 +120,10 @@ const stocksSlice = createSlice({
       .addCase(fetchStocks.fulfilled, (state, action) => {
         state.loading = false;
         if (Array.isArray(action.payload)) {
-          state.stocks = action.payload as any;
+          state.stocks = action.payload as Stock[];
         } else {
-          const payload = action.payload as any;
-          state.stocks = payload.items || action.payload as any;
+          const payload = action.payload as StockListPayload;
+          state.stocks = payload.items || [];
           if (payload.page !== undefined) {
             state.pagination = {
               page: payload.page || 1,
@@ -139,7 +146,7 @@ const stocksSlice = createSlice({
       })
       .addCase(createStock.fulfilled, (state, action) => {
         state.loading = false;
-        state.stocks.unshift(action.payload as any);
+        state.stocks.unshift(action.payload as Stock);
         state.pagination.total += 1;
       })
       .addCase(createStock.rejected, (state, action) => {

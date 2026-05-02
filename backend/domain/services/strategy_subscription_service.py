@@ -16,7 +16,7 @@ from domain.models.user_strategy_stock_list import UserStrategyStockList
 from domain.models.user_portfolio import UserPortfolio
 from domain.models.user_stock_list import UserStockList, UserStockListItem
 from domain.models.stock import Stock
-from domain.strategies.strategy_registry import strategy_registry
+from domain.strategies import strategy_registry
 
 
 class StrategySubscriptionService:

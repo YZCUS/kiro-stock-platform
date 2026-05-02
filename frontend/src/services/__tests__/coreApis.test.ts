@@ -364,7 +364,7 @@ describe('strategyApi', () => {
       '/api/v1/strategies/subscriptions',
       {
         strategy_type: 'golden_cross',
-        parameters: {},
+        params: {},
         monitor_all_lists: true,
         monitor_portfolio: false,
         selected_list_ids: [],

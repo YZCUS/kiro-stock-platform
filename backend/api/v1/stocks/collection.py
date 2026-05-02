@@ -3,7 +3,7 @@
 負責: /refresh, /collect, /collect-all, /collect-batch
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Any
 from datetime import date, timedelta
@@ -22,6 +22,7 @@ from api.schemas.stocks import (
     DataCollectionRequest,
     DataCollectionResponse,
     BatchCollectionRequest,
+    DailyPrefetchRequest,
 )
 
 router = APIRouter()
@@ -187,6 +188,35 @@ async def collect_batch_stocks_data(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"批次收集失敗: {str(e)}")
+
+
+@router.post("/prefetch-prices", response_model=Dict[str, Any])
+async def prefetch_stock_price_cache(
+    request: DailyPrefetchRequest = Body(...),
+    db: AsyncSession = Depends(get_database_session),
+    data_collection_service: DataCollectionService = Depends(
+        get_data_collection_service_clean
+    ),
+):
+    """
+    預抓本地價格快取。
+
+    這個端點是每日排程和前端手動刷新共用的 cache-first 入口：
+    - 指定 stock_ids 時，只處理該股票集合
+    - 未指定 stock_ids 時，處理指定市場的活躍股票 universe
+    - 本地資料未過期時直接跳過，不打外部行情 API
+    """
+    try:
+        return await data_collection_service.prefetch_price_cache(
+            db=db,
+            market=request.market,
+            stock_ids=request.stock_ids,
+            days=request.days,
+            limit=request.limit,
+            stale_after_days=request.stale_after_days,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"價格快取預抓失敗: {str(e)}")
 
 
 @router.post("/{stock_id}/backfill-full", response_model=Dict[str, Any])

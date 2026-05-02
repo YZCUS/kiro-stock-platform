@@ -69,6 +69,13 @@ class ExternalAPISettings(BaseSettings):
     yahoo_finance_timeout: int = Field(30, env="YAHOO_FINANCE_TIMEOUT")
     yahoo_finance_retries: int = Field(3, env="YAHOO_FINANCE_RETRIES")
 
+    # Finnhub market info 配置（搜尋、profile、quote、news）
+    finnhub_api_key: Optional[str] = Field(None, env="FINNHUB_API_KEY")
+    finnhub_base_url: str = Field(
+        "https://finnhub.io/api/v1", env="FINNHUB_BASE_URL"
+    )
+    finnhub_timeout_seconds: int = Field(10, env="FINNHUB_TIMEOUT_SECONDS")
+
     # API 限流配置
     rate_limit_requests: int = Field(100, env="RATE_LIMIT_REQUESTS")
     rate_limit_period: int = Field(60, env="RATE_LIMIT_PERIOD")
@@ -237,6 +244,13 @@ class Settings(BaseSettings):
     YAHOO_FINANCE_RETRY_COUNT: Optional[int] = Field(
         None, alias="YAHOO_FINANCE_RETRY_COUNT"
     )
+    FINNHUB_API_KEY: Optional[str] = Field(None, alias="FINNHUB_API_KEY")
+    FINNHUB_BASE_URL: Optional[str] = Field(None, alias="FINNHUB_BASE_URL")
+    FINNHUB_TIMEOUT_SECONDS: Optional[int] = Field(
+        None, alias="FINNHUB_TIMEOUT_SECONDS"
+    )
+    INTERNAL_API_TOKEN: Optional[str] = Field(None, alias="INTERNAL_API_TOKEN")
+    QLIB_INTERNAL_TOKEN: Optional[str] = Field(None, alias="QLIB_INTERNAL_TOKEN")
 
     BROKER_PROVIDER: Optional[str] = Field(None, alias="BROKER_PROVIDER")
     BROKER_MODE: Optional[str] = Field(None, alias="BROKER_MODE")
@@ -370,6 +384,14 @@ class Settings(BaseSettings):
         if settings.YAHOO_FINANCE_RETRY_COUNT is not None:
             settings.external_api.yahoo_finance_retries = (
                 settings.YAHOO_FINANCE_RETRY_COUNT
+            )
+        if settings.FINNHUB_API_KEY:
+            settings.external_api.finnhub_api_key = settings.FINNHUB_API_KEY
+        if settings.FINNHUB_BASE_URL:
+            settings.external_api.finnhub_base_url = settings.FINNHUB_BASE_URL
+        if settings.FINNHUB_TIMEOUT_SECONDS is not None:
+            settings.external_api.finnhub_timeout_seconds = (
+                settings.FINNHUB_TIMEOUT_SECONDS
             )
 
         if settings.BROKER_PROVIDER:

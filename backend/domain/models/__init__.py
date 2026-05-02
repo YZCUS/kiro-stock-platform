@@ -17,6 +17,9 @@ from .user_stock_list import UserStockList, UserStockListItem
 from .user_strategy_subscription import UserStrategySubscription
 from .user_strategy_stock_list import UserStrategyStockList
 from .strategy_signal import StrategySignal
+from .qlib_prediction import QlibBacktestResult, QlibModelRun, QlibPrediction
+from .stock_symbol_mapping import StockSymbolMapping
+from .price_alert import PriceAlert
 from .broker import (
     BrokerAccount,
     BrokerCashBalance,
@@ -43,6 +46,11 @@ __all__ = [
     "UserStrategySubscription",
     "UserStrategyStockList",
     "StrategySignal",
+    "QlibBacktestResult",
+    "QlibModelRun",
+    "QlibPrediction",
+    "StockSymbolMapping",
+    "PriceAlert",
     "BrokerAccount",
     "BrokerCashBalance",
     "BrokerConnection",

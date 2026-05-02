@@ -30,6 +30,13 @@ from domain.models.user_stock_list import UserStockList, UserStockListItem
 from domain.models.user_strategy_subscription import UserStrategySubscription
 from domain.models.user_strategy_stock_list import UserStrategyStockList
 from domain.models.strategy_signal import StrategySignal
+from domain.models.qlib_prediction import (
+    QlibBacktestResult,
+    QlibModelRun,
+    QlibPrediction,
+)
+from domain.models.stock_symbol_mapping import StockSymbolMapping
+from domain.models.price_alert import PriceAlert
 from domain.models.broker import (
     BrokerAccount,
     BrokerCashBalance,

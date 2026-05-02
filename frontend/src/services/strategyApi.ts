@@ -4,6 +4,7 @@
 import { get, post, put, del } from '@/lib/api';
 import { API_ENDPOINTS } from '@/lib/api';
 import type {
+  StrategyParameterMap,
   StrategyListResponse,
   Subscription,
   SubscriptionCreateRequest,
@@ -15,6 +16,13 @@ import type {
   UpdateSignalStatusRequest,
   SignalQueryParams,
 } from '@/types/strategy';
+
+const toSubscriptionPayload = <T extends { parameters?: StrategyParameterMap }>(
+  data: T
+) => {
+  const { parameters, ...rest } = data;
+  return parameters === undefined ? rest : { ...rest, params: parameters };
+};
 
 // ==================== 策略查詢 ====================
 
@@ -47,7 +55,7 @@ export const createSubscription = async (
 ): Promise<Subscription> => {
   return post<Subscription>(
     API_ENDPOINTS.STRATEGIES.SUBSCRIPTIONS.CREATE,
-    data
+    toSubscriptionPayload(data)
   );
 };
 
@@ -60,7 +68,7 @@ export const updateSubscription = async (
 ): Promise<Subscription> => {
   return put<Subscription>(
     API_ENDPOINTS.STRATEGIES.SUBSCRIPTIONS.UPDATE(subscriptionId),
-    data
+    toSubscriptionPayload(data)
   );
 };
 
@@ -111,7 +119,7 @@ export const getSignalStatistics = async (
   dateFrom?: string,
   dateTo?: string
 ): Promise<SignalStatistics> => {
-  const params: any = {};
+  const params: Record<string, string> = {};
   if (dateFrom) params.date_from = dateFrom;
   if (dateTo) params.date_to = dateTo;
 

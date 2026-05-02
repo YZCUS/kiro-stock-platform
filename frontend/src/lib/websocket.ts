@@ -1,6 +1,7 @@
 /**
  * WebSocket Manager for Real-time Stock Data
  */
+import { getWebSocketUrl } from './runtimeConfig';
 
 export enum WebSocketEventType {
   CONNECTED = 'connected',
@@ -18,11 +19,11 @@ export enum WebSocketEventType {
   WELCOME = 'welcome'
 }
 
-export type WebSocketCallback = (data?: any) => void;
+export type WebSocketCallback<T = unknown> = (data?: T) => void;
 
 interface WebSocketSubscription {
   eventType: WebSocketEventType;
-  callback: WebSocketCallback;
+  callback: WebSocketCallback<unknown>;
 }
 
 class WebSocketManager {
@@ -40,16 +41,16 @@ class WebSocketManager {
   }
 
   // Event listener compatibility methods for hooks
-  on(eventType: string, callback: WebSocketCallback): void {
+  on<T = unknown>(eventType: string, callback: WebSocketCallback<T>): void {
     this.subscribe(eventType as WebSocketEventType, callback);
   }
 
-  off(eventType: string, callback: WebSocketCallback): void {
+  off<T = unknown>(eventType: string, callback: WebSocketCallback<T>): void {
     const key = eventType.toString();
     const subscriptions = this.subscriptions.get(key);
 
     if (subscriptions) {
-      const index = subscriptions.findIndex(sub => sub.callback === callback);
+      const index = subscriptions.findIndex(sub => sub.callback === callback as WebSocketCallback<unknown>);
       if (index > -1) {
         subscriptions.splice(index, 1);
       }
@@ -187,7 +188,7 @@ class WebSocketManager {
     this.reconnectAttempts = 0;
   }
 
-  send(data: any): void {
+  send(data: unknown): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       const jsonString = JSON.stringify(data);
       console.log('[WebSocket] 發送原始 JSON:', jsonString);
@@ -198,14 +199,17 @@ class WebSocketManager {
     }
   }
 
-  subscribe(eventType: WebSocketEventType, callback: WebSocketCallback): () => void {
+  subscribe<T = unknown>(eventType: WebSocketEventType, callback: WebSocketCallback<T>): () => void {
     const key = eventType.toString();
 
     if (!this.subscriptions.has(key)) {
       this.subscriptions.set(key, []);
     }
 
-    const subscription: WebSocketSubscription = { eventType, callback };
+    const subscription: WebSocketSubscription = {
+      eventType,
+      callback: callback as WebSocketCallback<unknown>,
+    };
     this.subscriptions.get(key)!.push(subscription);
 
     // Return unsubscribe function
@@ -220,7 +224,7 @@ class WebSocketManager {
     };
   }
 
-  private emit(eventType: WebSocketEventType | string, data?: any): void {
+  private emit(eventType: WebSocketEventType | string, data?: unknown): void {
     const key = eventType.toString();
     const subscriptions = this.subscriptions.get(key);
 
@@ -235,12 +239,20 @@ class WebSocketManager {
     }
   }
 
-  private handleMessage(data: any): void {
+  private handleMessage(data: unknown): void {
     this.emit(WebSocketEventType.MESSAGE, data);
+    const message = data && typeof data === 'object'
+      ? data as {
+        type?: string;
+        message?: string;
+        payload?: unknown;
+        data?: { stock?: { symbol?: string } };
+      }
+      : {};
 
     // Handle specific message types
-    if (data.type) {
-      switch (data.type) {
+    if (message.type) {
+      switch (message.type) {
         case 'welcome':
           console.log('[WebSocket] Received welcome message from server');
           this.emit(WebSocketEventType.WELCOME, data);
@@ -248,14 +260,14 @@ class WebSocketManager {
           break;
         case 'initial_data':
           // 接收到初始股票數據（訂閱後的首次數據推送）
-          console.log('[WebSocket] Received initial data for stock:', data.data?.stock?.symbol);
+          console.log('[WebSocket] Received initial data for stock:', message.data?.stock?.symbol);
           this.emit('initial_data', data);
           break;
         case 'stock_update':
-          this.emit(WebSocketEventType.STOCK_UPDATE, data.payload);
+          this.emit(WebSocketEventType.STOCK_UPDATE, message.payload);
           break;
         case 'trading_signal':
-          this.emit(WebSocketEventType.TRADING_SIGNAL, data.payload);
+          this.emit(WebSocketEventType.TRADING_SIGNAL, message.payload);
           break;
         case 'price_update':
           this.emit('price_update', data);
@@ -273,11 +285,11 @@ class WebSocketManager {
           this.emit('system_notification', data);
           break;
         case 'error':
-          console.warn('[WebSocket] Server error:', data.message || data.payload);
+          console.warn('[WebSocket] Server error:', message.message || message.payload);
           this.emit('error', data);
           break;
         default:
-          console.log('[WebSocket] Unknown message type:', data.type);
+          console.log('[WebSocket] Unknown message type:', message.type);
       }
     }
   }
@@ -323,16 +335,8 @@ export function getWebSocketManager(url?: string): WebSocketManager {
     if (url) {
       wsUrl = url;
     } else {
-      // Auto-detect WebSocket URL based on current location
-      if (typeof window !== 'undefined') {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.hostname;
-        const port = '8000';
-        wsUrl = `${protocol}//${host}:${port}/ws`;
-        console.log('[WebSocket] Auto-detected URL:', wsUrl);
-      } else {
-        wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
-      }
+      wsUrl = getWebSocketUrl();
+      console.log('[WebSocket] Resolved URL:', wsUrl);
     }
     webSocketManager = new WebSocketManager(wsUrl);
   }

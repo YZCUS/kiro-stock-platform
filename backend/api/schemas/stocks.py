@@ -7,6 +7,8 @@ from typing import List, Optional, Dict, Any
 from datetime import date, datetime
 from .common import PaginatedResponse
 
+DEFAULT_PRICE_PREFETCH_DAYS = 365 * 3
+
 
 # 價格資訊模型
 class LatestPriceInfo(BaseModel):
@@ -17,6 +19,10 @@ class LatestPriceInfo(BaseModel):
     change_percent: Optional[float] = None  # 漲跌幅度 (%)
     date: Optional[str] = None  # ISO format date string
     volume: Optional[int] = None
+    is_stale: Optional[bool] = None
+    age_days: Optional[int] = None
+    last_updated_at: Optional[str] = None
+    source: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -102,6 +108,25 @@ class BatchCollectionRequest(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     use_stock_list: Optional[bool] = True
+
+
+class DailyPrefetchRequest(BaseModel):
+    """每日預抓價格資料請求"""
+
+    stock_ids: Optional[List[int]] = Field(
+        None, description="指定股票 ID 清單；未提供時使用活躍股票 universe"
+    )
+    market: Optional[str] = Field(None, pattern="^(TW|US)$", description="市場代碼")
+    days: int = Field(
+        DEFAULT_PRICE_PREFETCH_DAYS,
+        ge=1,
+        le=3650,
+        description="最多回補天數",
+    )
+    limit: int = Field(100, ge=1, le=1000, description="活躍股票 universe 上限")
+    stale_after_days: int = Field(
+        1, ge=0, le=30, description="最新資料超過幾天視為過期"
+    )
 
 
 class DataCollectionResponse(BaseModel):

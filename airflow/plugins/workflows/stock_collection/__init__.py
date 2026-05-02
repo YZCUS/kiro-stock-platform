@@ -18,6 +18,8 @@ from plugins.workflows.stock_collection.collection_workflows import (
     execute_fallback_collection,
     execute_fallback_collection_tw,
     execute_fallback_collection_us,
+    prefetch_price_cache_tw,
+    prefetch_price_cache_us,
     run_market_data_pipeline_tw,
 )
 from plugins.workflows.stock_collection.notifications import send_completion_notification
@@ -40,6 +42,8 @@ __all__ = [
     'execute_fallback_collection',
     'execute_fallback_collection_tw',
     'execute_fallback_collection_us',
+    'prefetch_price_cache_tw',
+    'prefetch_price_cache_us',
     'run_market_data_pipeline_tw',
     'send_completion_notification',
     'cleanup_external_storage',

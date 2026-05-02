@@ -4,6 +4,7 @@
 'use client';
 
 import React, { Component, ReactNode } from 'react';
+import { Button } from './ui/button';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -27,7 +28,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     };
   }
 
-  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
+  static getDerivedStateFromError(_error: Error): Partial<ErrorBoundaryState> {
     // 更新 state 以便下一次渲染能夠顯示降級後的 UI
     return { hasError: true };
   }
@@ -130,18 +131,19 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             )}
 
             <div className="flex space-x-3">
-              <button
+              <Button
                 onClick={this.handleRetry}
-                className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors"
+                className="flex-1"
               >
                 重試
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => window.location.href = '/'}
-                className="flex-1 bg-gray-600 text-white py-2 px-4 rounded-md hover:bg-gray-700 transition-colors"
+                className="flex-1"
               >
                 返回首頁
-              </button>
+              </Button>
             </div>
           </div>
         </div>

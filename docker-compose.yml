@@ -10,6 +10,9 @@ x-backend-worker-common: &backend-worker-common
   environment:
     - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/stock_analysis}
     - REDIS_URL=redis://redis:6379
+    - FINNHUB_API_KEY=${FINNHUB_API_KEY:-}
+    - FINNHUB_BASE_URL=${FINNHUB_BASE_URL:-https://finnhub.io/api/v1}
+    - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:-dev-internal-token}
     - PYTHONPATH=/app
   depends_on:
     - postgres
@@ -63,6 +66,9 @@ services:
       # Application data DB. Uses root .env DATABASE_URL when present; falls back to local Postgres.
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/stock_analysis}
       - REDIS_URL=redis://redis:6379
+      - FINNHUB_API_KEY=${FINNHUB_API_KEY:-}
+      - FINNHUB_BASE_URL=${FINNHUB_BASE_URL:-https://finnhub.io/api/v1}
+      - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:-dev-internal-token}
       - PYTHONPATH=/app
     depends_on:
       - postgres
@@ -118,6 +124,27 @@ services:
     container_name: stock_analysis_notification_worker
     command: python -m scripts.run_worker notification
 
+  qlib-prediction-service:
+    build:
+      context: ./qlib_service
+    container_name: stock_analysis_qlib_prediction_service
+    ports:
+      - "8090:8090"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/stock_analysis}
+      - QLIB_INTERNAL_TOKEN=${QLIB_INTERNAL_TOKEN:-dev-qlib-token}
+      - QLIB_ARTIFACT_ROOT=/app/artifacts
+      - QLIB_PROVIDER_URI=/app/artifacts/provider
+    depends_on:
+      - postgres
+    volumes:
+      - ./qlib_service/app:/app/app
+      - qlib_artifacts:/app/artifacts
+    networks:
+      - stock_network
+    profiles:
+      - qlib
+
   # React 前端應用
   frontend:
     build:
@@ -158,6 +185,9 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/stock_analysis}
       - REDIS_URL=redis://redis:6379
       - BACKEND_API_URL=http://backend:8000/api/v1
+      - QLIB_PREDICTION_URL=http://qlib-prediction-service:8090
+      - QLIB_INTERNAL_TOKEN=${QLIB_INTERNAL_TOKEN:-dev-qlib-token}
+      - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:-dev-internal-token}
       - PYTHONPATH=/opt/airflow/dags:/opt/airflow:/opt/airflow/backend
     ports:
       - "8080:8080"
@@ -199,6 +229,9 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/stock_analysis}
       - REDIS_URL=redis://redis:6379
       - BACKEND_API_URL=http://backend:8000/api/v1
+      - QLIB_PREDICTION_URL=http://qlib-prediction-service:8090
+      - QLIB_INTERNAL_TOKEN=${QLIB_INTERNAL_TOKEN:-dev-qlib-token}
+      - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:-dev-internal-token}
       - PYTHONPATH=/opt/airflow/dags:/opt/airflow:/opt/airflow/backend
     volumes:
       - ./airflow/dags:/opt/airflow/dags
@@ -221,6 +254,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  qlib_artifacts:
 
 networks:
   stock_network:

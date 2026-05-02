@@ -4,6 +4,7 @@
 'use client';
 
 import React from 'react';
+import { Button } from './button';
 
 export interface ConfirmDialogProps {
   isOpen: boolean;
@@ -34,11 +35,11 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     info: 'text-blue-600',
   }[type];
 
-  const buttonColor = {
-    danger: 'bg-red-600 hover:bg-red-700 focus:ring-red-500',
-    warning: 'bg-yellow-600 hover:bg-yellow-700 focus:ring-yellow-500',
-    info: 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500',
-  }[type];
+  const confirmVariant = {
+    danger: 'destructive',
+    warning: 'warning',
+    info: 'default',
+  }[type] as 'destructive' | 'warning' | 'default';
 
   return (
     <div className="fixed inset-0 z-[10000] overflow-y-auto">
@@ -110,18 +111,20 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
           {/* 按鈕 */}
           <div className="flex gap-3">
-            <button
+            <Button
+              variant="outline"
               onClick={onCancel}
-              className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
+              className="flex-1"
             >
               {cancelText}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant={confirmVariant}
               onClick={onConfirm}
-              className={`flex-1 px-4 py-2 text-white rounded-md focus:outline-none focus:ring-2 transition-colors ${buttonColor}`}
+              className="flex-1"
             >
               {confirmText}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
