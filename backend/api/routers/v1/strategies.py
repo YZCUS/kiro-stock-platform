@@ -424,6 +424,9 @@ async def toggle_subscription(
 async def get_user_signals(
     strategy_type: Optional[str] = Query(None, description="策略類型過濾"),
     status: Optional[str] = Query(None, description="狀態過濾"),
+    direction: Optional[str] = Query(
+        None, description="方向過濾（LONG/SHORT/NEUTRAL）"
+    ),
     stock_id: Optional[int] = Query(None, description="股票 ID 過濾"),
     date_from: Optional[date] = Query(None, description="開始日期"),
     date_to: Optional[date] = Query(None, description="結束日期"),
@@ -442,6 +445,7 @@ async def get_user_signals(
     Args:
         strategy_type: 策略類型過濾
         status: 狀態過濾（active/triggered/expired/cancelled）
+        direction: 方向過濾（LONG/SHORT/NEUTRAL）
         stock_id: 股票 ID 過濾
         date_from: 開始日期
         date_to: 結束日期
@@ -460,6 +464,7 @@ async def get_user_signals(
         user_id=current_user.id,
         strategy_type=strategy_type,
         status=status,
+        direction=direction,
         stock_id=stock_id,
         date_from=date_from,
         date_to=date_to,

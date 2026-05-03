@@ -132,6 +132,7 @@ export interface UpdateSignalStatusRequest {
 export interface SignalQueryParams {
   strategy_type?: string;
   status?: SignalStatus;
+  direction?: SignalDirection;
   stock_id?: number;
   date_from?: string;
   date_to?: string;

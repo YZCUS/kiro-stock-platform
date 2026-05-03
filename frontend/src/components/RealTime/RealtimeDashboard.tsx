@@ -16,7 +16,6 @@ import TransactionModal from '../Portfolio/TransactionModal';
 import { getPortfolioList } from '@/services/portfolioApi';
 import type { LatestPriceInfo, Portfolio, Stock } from '@/types';
 import MarketNewsPanel from '@/components/Market/MarketNewsPanel';
-import QlibReadinessPanel from '@/components/Market/QlibReadinessPanel';
 import { PageHeader, PageShell } from '@/components/ui/page';
 import { cn } from '@/lib/utils';
 
@@ -749,7 +748,8 @@ const RealtimeDashboard: React.FC = () => {
                   stock={{
                     id: selectedStockDisplay.id,
                     symbol: selectedStockDisplay.symbol,
-                    name: selectedStockDisplay.name
+                    name: selectedStockDisplay.name,
+                    market: selectedStockDisplay.market,
                   }}
                   height={440}
                 />
@@ -962,11 +962,12 @@ const RealtimeDashboard: React.FC = () => {
             </div>
           </div>
 
-          {selectedStockDisplay?.market && (
-            <QlibReadinessPanel market={selectedStockDisplay.market as 'US' | 'TW'} />
-          )}
-
-          <RealtimeSignals />
+          <RealtimeSignals
+            stockId={selectedStockDisplay?.id ?? null}
+            symbol={selectedStockDisplay?.symbol}
+            market={selectedStockDisplay?.market}
+            enabled={isAuthenticated}
+          />
 
           {selectedStockDisplay && (
             <MarketNewsPanel

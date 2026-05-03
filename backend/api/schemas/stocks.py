@@ -3,7 +3,7 @@
 """
 
 from pydantic import BaseModel, Field, field_validator
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from datetime import date, datetime
 from .common import PaginatedResponse
 
@@ -71,7 +71,7 @@ class StockListResponse(BaseModel):
 
 # 價格相關模型
 class PriceDataResponse(BaseModel):
-    date: date
+    date: Union[datetime, date]
     open: float
     high: float
     low: float

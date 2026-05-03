@@ -25,6 +25,25 @@ import type {
   StrategyReliabilityScore,
 } from '@/types/strategy';
 
+const formatPercent = (value: number) => `${(value * 100).toFixed(1)}%`;
+
+const formatCompositeScore = (value: number) => {
+  const score = value * 100;
+  return `${score > 0 ? '+' : ''}${score.toFixed(1)}`;
+};
+
+const directionLabels: Record<StockCompositeScore['direction'], string> = {
+  bullish: '看多',
+  neutral: '中性',
+  bearish: '看空',
+};
+
+const directionClasses: Record<StockCompositeScore['direction'], string> = {
+  bullish: 'text-emerald-700 bg-emerald-50',
+  neutral: 'text-gray-700 bg-gray-100',
+  bearish: 'text-red-700 bg-red-50',
+};
+
 export default function StrategiesPage() {
   const router = useRouter();
   const dispatch = useAppDispatch();
@@ -54,7 +73,7 @@ export default function StrategiesPage() {
     setEvaluationLoading(true);
     Promise.all([
       getStrategyReliabilityScores(),
-      getStockCompositeScores(12),
+      getStockCompositeScores(50),
     ])
       .then(([reliability, composite]) => {
         setReliabilityScores(reliability.items);
@@ -157,40 +176,64 @@ export default function StrategiesPage() {
       </Card>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">策略可信度</CardTitle>
+        <Card className="min-w-0">
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle className="text-lg">策略可信度</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  回測可靠度，按策略與週期拆分
+                </p>
+              </div>
+              {!evaluationLoading && reliabilityScores.length > 0 && (
+                <span className="shrink-0 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600">
+                  {reliabilityScores.length} 組
+                </span>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             {evaluationLoading ? (
-              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-80 w-full" />
             ) : reliabilityScores.length === 0 ? (
               <p className="text-sm text-muted-foreground">尚未完成策略回測。</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-left text-muted-foreground">
+              <div className="max-h-[420px] overflow-auto rounded-md border">
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead className="sticky top-0 z-10 bg-card text-left text-muted-foreground shadow-sm">
                     <tr>
-                      <th className="pb-2 font-medium">策略</th>
-                      <th className="pb-2 font-medium">週期</th>
-                      <th className="pb-2 font-medium">可信度</th>
-                      <th className="pb-2 font-medium">樣本</th>
-                      <th className="pb-2 font-medium">狀態</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-medium">策略</th>
+                      <th className="whitespace-nowrap px-3 py-3 font-medium">週期</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-right font-medium">
+                        可信度
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-3 text-right font-medium">
+                        樣本
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-3 font-medium">狀態</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {reliabilityScores.slice(0, 10).map((score) => (
+                  <tbody className="divide-y">
+                    {reliabilityScores.map((score) => (
                       <tr
                         key={`${score.strategy_type}-${score.horizon}`}
-                        className="border-t"
+                        className="hover:bg-gray-50"
                       >
-                        <td className="py-2 font-medium">{score.strategy_type}</td>
-                        <td className="py-2">{score.horizon}</td>
-                        <td className="py-2">
-                          {(score.reliability_score * 100).toFixed(1)}%
+                        <td className="max-w-[220px] truncate px-4 py-3 font-medium">
+                          {score.strategy_type}
                         </td>
-                        <td className="py-2">{score.sample_size}</td>
-                        <td className="py-2 text-muted-foreground">
+                        <td className="whitespace-nowrap px-3 py-3">
+                          <span className="rounded-md bg-gray-100 px-2 py-1 text-xs font-medium">
+                            {score.horizon}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-medium tabular-nums">
+                          {formatPercent(score.reliability_score)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-muted-foreground">
+                          {score.sample_size.toLocaleString()}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
                           {score.validation_status}
                         </td>
                       </tr>
@@ -202,36 +245,66 @@ export default function StrategiesPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">股票綜合走勢</CardTitle>
+        <Card className="min-w-0">
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle className="text-lg">股票綜合走勢</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  多策略加權後的方向與一致性
+                </p>
+              </div>
+              {!evaluationLoading && compositeScores.length > 0 && (
+                <span className="shrink-0 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600">
+                  前 {compositeScores.length} 支
+                </span>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             {evaluationLoading ? (
-              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-80 w-full" />
             ) : compositeScores.length === 0 ? (
               <p className="text-sm text-muted-foreground">尚未產生綜合評分。</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-left text-muted-foreground">
+              <div className="max-h-[420px] overflow-auto rounded-md border">
+                <table className="w-full min-w-[600px] text-sm">
+                  <thead className="sticky top-0 z-10 bg-card text-left text-muted-foreground shadow-sm">
                     <tr>
-                      <th className="pb-2 font-medium">股票</th>
-                      <th className="pb-2 font-medium">方向</th>
-                      <th className="pb-2 font-medium">分數</th>
-                      <th className="pb-2 font-medium">可信度</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-medium">股票</th>
+                      <th className="whitespace-nowrap px-3 py-3 font-medium">方向</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-right font-medium">
+                        分數
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-3 text-right font-medium">
+                        一致性
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-3 text-right font-medium">
+                        訊號
+                      </th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y">
                     {compositeScores.map((score) => (
-                      <tr key={score.stock_id} className="border-t">
-                        <td className="py-2 font-medium">{score.symbol}</td>
-                        <td className="py-2">{score.direction}</td>
-                        <td className="py-2">
-                          {(score.composite_score * 100).toFixed(1)}
+                      <tr key={score.stock_id} className="hover:bg-gray-50">
+                        <td className="whitespace-nowrap px-4 py-3 font-medium">
+                          {score.symbol}
                         </td>
-                        <td className="py-2">
-                          {(score.confidence * 100).toFixed(1)}%
+                        <td className="whitespace-nowrap px-3 py-3">
+                          <span
+                            className={`rounded-md px-2 py-1 text-xs font-medium ${directionClasses[score.direction]}`}
+                          >
+                            {directionLabels[score.direction]}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-medium tabular-nums">
+                          {formatCompositeScore(score.composite_score)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">
+                          {formatPercent(score.confidence)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right text-muted-foreground tabular-nums">
+                          {score.positive_count}/{score.negative_count}
                         </td>
                       </tr>
                     ))}

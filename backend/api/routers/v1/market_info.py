@@ -10,6 +10,7 @@ from api.schemas.market_info import (
     NewsArticleResponse,
     QuoteResponse,
     StockProfileResponse,
+    StockValuationMetricsResponse,
     WatchlistNewsResponse,
 )
 from app.dependencies import get_database_session, get_market_info_service
@@ -46,6 +47,23 @@ async def get_stock_profile(
     service: MarketInfoService = Depends(get_market_info_service),
 ):
     return await service.get_profile(db, symbol=symbol.upper(), market=market.upper())
+
+
+@router.get(
+    "/stocks/{market}/{symbol}/valuation",
+    response_model=StockValuationMetricsResponse,
+)
+async def get_stock_valuation_metrics(
+    market: str,
+    symbol: str,
+    db: AsyncSession = Depends(get_database_session),
+    service: MarketInfoService = Depends(get_market_info_service),
+):
+    return await service.get_valuation_metrics(
+        db,
+        symbol=symbol.upper(),
+        market=market.upper(),
+    )
 
 
 @router.get("/stocks/{market}/{symbol}/quote", response_model=QuoteResponse)

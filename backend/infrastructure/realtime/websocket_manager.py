@@ -144,10 +144,10 @@ class RedisBackedWebSocketManager(IWebSocketManager):
         await websocket.send_json(message)
 
     async def broadcast_stock_update(self, stock_id: int, message: dict) -> None:
-        await self.redis_broadcaster.publish_stock_update(stock_id, message)
+        await self.redis_broadcaster.publish_message(f"stock_updates:{stock_id}", message)
 
     async def broadcast_global_update(self, message: dict) -> None:
-        await self.redis_broadcaster.publish_global_update(message)
+        await self.redis_broadcaster.publish_message("global_updates", message)
 
     async def subscribe_to_stock(self, websocket: WebSocket, stock_id: int) -> None:
         if websocket not in self.active_connections:

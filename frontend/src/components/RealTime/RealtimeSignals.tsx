@@ -3,16 +3,39 @@
  */
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import { useSignalUpdates, useSystemNotifications } from '../../hooks/useWebSocket';
+import { useSystemNotifications } from '../../hooks/useWebSocket';
+import { useMarketStream } from '../../hooks/useMarketStream';
+import { getSignals } from '@/services/strategyApi';
+import type { TradingSignal } from '@/types/strategy';
 
-const RealtimeSignals: React.FC = () => {
-  const { signals } = useSignalUpdates();
+interface RealtimeSignalsProps {
+  stockId?: number | null;
+  symbol?: string;
+  market?: string;
+  enabled?: boolean;
+}
+
+const RealtimeSignals: React.FC<RealtimeSignalsProps> = ({
+  stockId,
+  symbol,
+  market,
+  enabled = true,
+}) => {
   const { notifications, clearNotification } = useSystemNotifications();
+  const { signal: intradaySignal, status: streamStatus } = useMarketStream(
+    market,
+    symbol,
+    enabled && Boolean(market && symbol)
+  );
+  const [signals, setSignals] = useState<TradingSignal[]>([]);
+  const [intradaySignals, setIntradaySignals] = useState<TradingSignal[]>([]);
+  const [loading, setLoading] = useState(false);
 
   // 格式化時間
-  const formatTime = (dateString: string | Date) => {
+  const formatTime = (dateString: string | Date | null | undefined) => {
+    if (!dateString) return '-';
     const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
     return date.toLocaleTimeString('zh-TW', {
       hour: '2-digit',
@@ -21,35 +44,84 @@ const RealtimeSignals: React.FC = () => {
     });
   };
 
-  // 獲取信號類型顏色
-  const getSignalColor = (signalType: string) => {
-    switch (signalType) {
-      case 'BUY':
-        return 'text-green-600 bg-green-50 border-green-200';
-      case 'SELL':
-        return 'text-red-600 bg-red-50 border-red-200';
-      case 'GOLDEN_CROSS':
-        return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-      case 'DEATH_CROSS':
-        return 'text-purple-600 bg-purple-50 border-purple-200';
+  const formatDate = (dateString?: string | null) => {
+    if (!dateString) return '-';
+    return new Date(dateString).toLocaleDateString('zh-TW');
+  };
+
+  const formatPrice = (value?: number | null) =>
+    typeof value === 'number' && Number.isFinite(value)
+      ? `$${value.toFixed(2)}`
+      : '-';
+
+  const formatConfidence = (value: number) => {
+    const percent = value <= 1 ? value * 100 : value;
+    return `${percent.toFixed(1)}%`;
+  };
+
+  // 獲取方向顏色
+  const getDirectionColor = (direction: TradingSignal['direction']) => {
+    switch (direction) {
+      case 'LONG':
+        return 'text-green-700 bg-green-50 border-green-200';
+      case 'SHORT':
+        return 'text-red-700 bg-red-50 border-red-200';
       default:
-        return 'text-blue-600 bg-blue-50 border-blue-200';
+        return 'text-gray-700 bg-gray-50 border-gray-200';
     }
   };
 
-  // 獲取強度顏色
-  const getStrengthColor = (strength: string) => {
-    switch (strength) {
-      case 'STRONG':
-        return 'text-green-700';
-      case 'MODERATE':
-        return 'text-yellow-700';
-      case 'WEAK':
-        return 'text-gray-700';
+  const getDirectionText = (direction: TradingSignal['direction']) => {
+    switch (direction) {
+      case 'LONG':
+        return '看多';
+      case 'SHORT':
+        return '看空';
       default:
-        return 'text-gray-700';
+        return '中性';
     }
   };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!enabled || !stockId) {
+      setSignals([]);
+      return;
+    }
+
+    setLoading(true);
+    getSignals({
+      status: 'active',
+      stock_id: stockId,
+      sort_by: 'signal_date',
+      sort_order: 'desc',
+      limit: 5,
+    })
+      .then((response) => {
+        if (!cancelled) setSignals(response.signals);
+      })
+      .catch(() => {
+        if (!cancelled) setSignals([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, stockId]);
+
+  useEffect(() => {
+    if (!intradaySignal || !stockId) return;
+    setIntradaySignals((current) => {
+      if (current.some((signal) => signal.id === intradaySignal.id)) {
+        return current;
+      }
+      return [intradaySignal, ...current].slice(0, 5);
+    });
+  }, [intradaySignal, stockId]);
 
   return (
     <div className="space-y-6">
@@ -90,79 +162,97 @@ const RealtimeSignals: React.FC = () => {
         </div>
       )}
 
-      {/* 即時交易信號 */}
+      {/* 日內即時信號 */}
       <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h3 className="text-sm font-semibold text-gray-900">即時交易信號</h3>
+        <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">日內即時信號</h3>
+            <p className="mt-1 text-xs text-gray-500">
+              由 5m K 即時串流產生，偏向短線觀察
+            </p>
+          </div>
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+            {streamStatus === 'connected' ? '串流中' : '等待'}
+          </span>
         </div>
 
         <div className="p-4">
-          {signals.length === 0 ? (
-            <div className="text-center py-6">
-              <div className="text-gray-500">
-                等待即時信號...
-              </div>
+          {!enabled ? (
+            <div className="py-5 text-center text-gray-500">
+              登入後顯示日內信號
+            </div>
+          ) : !stockId ? (
+            <div className="py-5 text-center text-gray-500">
+              選擇股票後顯示日內信號
+            </div>
+          ) : intradaySignals.length === 0 ? (
+            <div className="py-5 text-center text-gray-500">
+              等待 5m 即時信號...
             </div>
           ) : (
-            <div className="space-y-3">
-              {signals.slice(0, 10).map((signal, index) => (
-                <div
-                  key={`${signal.id}-${index}`}
-                  className={`p-3 rounded-lg border ${getSignalColor(signal.signal_type)} transition-all duration-300`}
-                  style={{
-                    animation: index === 0 ? 'fadeInDown 0.5s ease-out' : undefined
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <span className="font-bold text-gray-900">
-                            {signal.symbol}
-                          </span>
-                          <span className={`px-2 py-1 text-xs font-medium rounded ${getSignalColor(signal.signal_type)}`}>
-                            {signal.signal_type}
-                          </span>
-                          <span className={`text-xs font-medium ${getStrengthColor(signal.strength)}`}>
-                            {signal.strength}
-                          </span>
-                        </div>
-                        <div className="text-sm text-gray-600 mt-1">
-                          {signal.description}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-medium text-gray-900">
-                        ${signal.price.toFixed(2)}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        信心度: {(signal.confidence * 100).toFixed(1)}%
-                      </div>
-                      <div className="text-xs text-gray-400">
-                        {formatTime(signal.date)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 技術指標詳情 */}
-                  {Object.keys(signal.indicators).length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-gray-200">
-                      <div className="flex flex-wrap gap-2">
-                        {Object.entries(signal.indicators).map(([key, value]) => (
-                          <span
-                            key={key}
-                            className="text-xs bg-white bg-opacity-50 rounded px-2 py-1"
-                          >
-                            {key}: {typeof value === 'number' ? value.toFixed(2) : value}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+            <div className="space-y-2">
+              {intradaySignals.map((signal) => (
+                <SignalCard
+                  key={signal.id}
+                  signal={signal}
+                  getDirectionColor={getDirectionColor}
+                  getDirectionText={getDirectionText}
+                  formatConfidence={formatConfidence}
+                  formatDate={formatDate}
+                  formatPrice={formatPrice}
+                />
               ))}
             </div>
+          )}
+        </div>
+      </div>
+
+      {/* 策略交易信號 */}
+      <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="px-4 py-3 border-b border-gray-200">
+          <h3 className="text-sm font-semibold text-gray-900">策略交易信號</h3>
+          <p className="mt-1 text-xs text-gray-500">
+            {symbol ? `${symbol} 的活躍策略信號` : '隨訂閱策略與排程更新'}
+          </p>
+        </div>
+
+        <div className="p-4">
+          {!enabled ? (
+            <div className="py-6 text-center text-gray-500">
+              登入後顯示策略信號
+            </div>
+          ) : !stockId ? (
+            <div className="text-center py-6">
+              <div className="text-gray-500">選擇股票後顯示策略信號</div>
+            </div>
+          ) : loading ? (
+            <div className="py-6 text-center text-gray-500">
+              載入策略信號...
+            </div>
+          ) : signals.length === 0 ? (
+            <div className="py-6 text-center text-gray-500">
+              目前沒有活躍策略信號
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {signals.map((signal) => (
+                <SignalCard
+                  key={signal.id}
+                  signal={signal}
+                  getDirectionColor={getDirectionColor}
+                  getDirectionText={getDirectionText}
+                  formatConfidence={formatConfidence}
+                  formatDate={formatDate}
+                  formatPrice={formatPrice}
+                />
+              ))}
+            </div>
+          )}
+
+          {enabled && stockId && signals.length > 0 && (
+            <p className="mt-3 text-xs text-gray-500">
+              信號由策略訂閱、手動刷新或排程產生，不是每筆報價 tick 即時計算。
+            </p>
           )}
         </div>
       </div>
@@ -183,5 +273,75 @@ const RealtimeSignals: React.FC = () => {
     </div>
   );
 };
+
+interface SignalCardProps {
+  signal: TradingSignal;
+  getDirectionColor: (direction: TradingSignal['direction']) => string;
+  getDirectionText: (direction: TradingSignal['direction']) => string;
+  formatConfidence: (value: number) => string;
+  formatDate: (dateString?: string | null) => string;
+  formatPrice: (value?: number | null) => string;
+}
+
+const SignalCard: React.FC<SignalCardProps> = ({
+  signal,
+  getDirectionColor,
+  getDirectionText,
+  formatConfidence,
+  formatDate,
+  formatPrice,
+}) => (
+  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`rounded-md border px-2 py-0.5 text-xs font-medium ${getDirectionColor(signal.direction)}`}
+          >
+            {getDirectionText(signal.direction)}
+          </span>
+          {signal.signal_horizon && (
+            <span className="rounded-md bg-white px-2 py-0.5 text-xs font-medium text-gray-600">
+              {signal.signal_horizon}
+            </span>
+          )}
+        </div>
+        <p className="mt-2 truncate text-sm font-semibold text-gray-950">
+          {signal.strategy_name || signal.strategy_type}
+        </p>
+        <p className="mt-1 text-xs text-gray-500">
+          {formatDate(signal.signal_date)} 至 {formatDate(signal.valid_until)}
+        </p>
+      </div>
+      <div className="shrink-0 text-right">
+        <p className="text-xs text-gray-500">強度</p>
+        <p className="font-semibold tabular-nums text-gray-950">
+          {formatConfidence(signal.confidence)}
+        </p>
+      </div>
+    </div>
+
+    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div>
+        <p className="text-gray-500">進場</p>
+        <p className="font-medium text-gray-900">
+          {formatPrice(signal.entry_zone?.min ?? signal.entry_min)}
+        </p>
+      </div>
+      <div>
+        <p className="text-gray-500">停損</p>
+        <p className="font-medium text-red-600">
+          {formatPrice(signal.stop_loss)}
+        </p>
+      </div>
+    </div>
+
+    {signal.reason && (
+      <p className="mt-3 border-t border-gray-200 pt-2 text-xs leading-5 text-gray-600">
+        {signal.reason}
+      </p>
+    )}
+  </div>
+);
 
 export default RealtimeSignals;

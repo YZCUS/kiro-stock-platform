@@ -33,6 +33,26 @@ class StockProfileResponse(BaseModel):
     tradingview_symbol: Optional[str] = None
 
 
+class StockValuationMetricsResponse(BaseModel):
+    symbol: str
+    market: str
+    name: Optional[str] = None
+    currency: Optional[str] = None
+    provider: str
+    stock_id: Optional[int] = None
+    market_cap: Optional[float] = None
+    market_cap_unit: str = "million"
+    pe_ttm: Optional[float] = None
+    pb: Optional[float] = None
+    ps_ttm: Optional[float] = None
+    ev_to_ebitda: Optional[float] = None
+    dividend_yield: Optional[float] = None
+    beta: Optional[float] = None
+    eps_ttm: Optional[float] = None
+    week_52_high: Optional[float] = None
+    week_52_low: Optional[float] = None
+
+
 class QuoteResponse(BaseModel):
     symbol: str
     market: str

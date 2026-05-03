@@ -4,7 +4,7 @@
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import date
+from datetime import date, datetime, time, timedelta, timezone
 import logging
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -81,6 +81,7 @@ async def get_stock_prices(
     stock_id: int,
     start_date: Optional[date] = Query(None, description="開始日期"),
     end_date: Optional[date] = Query(None, description="結束日期"),
+    timeframe: str = Query("1d", description="時間框架：1d 或 5m"),
     limit: int = Query(100, description="返回數量限制"),
     db: AsyncSession = Depends(get_database_session),
     stock_service: StockService = Depends(get_stock_service),
@@ -107,6 +108,52 @@ async def get_stock_prices(
     - 如需前端兼容格式：使用 `/price-history`
     """
     try:
+        if timeframe != "1d":
+            if timeframe != "5m":
+                raise HTTPException(status_code=400, detail="目前僅支援 1d 與 5m")
+
+            start_at = (
+                datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+                if start_date
+                else None
+            )
+            end_at = (
+                datetime.combine(
+                    end_date + timedelta(days=1),
+                    time.min,
+                    tzinfo=timezone.utc,
+                )
+                if end_date
+                else None
+            )
+            query = (
+                select(MarketDataBar)
+                .where(
+                    MarketDataBar.stock_id == stock_id,
+                    MarketDataBar.timeframe == timeframe,
+                )
+                .order_by(MarketDataBar.timestamp.desc())
+                .limit(limit)
+            )
+            if start_at is not None:
+                query = query.where(MarketDataBar.timestamp >= start_at)
+            if end_at is not None:
+                query = query.where(MarketDataBar.timestamp < end_at)
+
+            result = await db.execute(query)
+            bars = list(reversed(result.scalars().all()))
+            return [
+                PriceDataResponse(
+                    date=bar.timestamp,
+                    open=float(bar.open_price),
+                    high=float(bar.high_price),
+                    low=float(bar.low_price),
+                    close=float(bar.close_price),
+                    volume=int(bar.volume),
+                )
+                for bar in bars
+            ]
+
         prices = await stock_service.get_stock_prices(
             db=db,
             stock_id=stock_id,

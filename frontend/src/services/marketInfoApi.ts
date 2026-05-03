@@ -55,6 +55,26 @@ export interface StockProfile {
   tradingview_symbol?: string | null;
 }
 
+export interface StockValuationMetrics {
+  symbol: string;
+  market: string;
+  name?: string | null;
+  currency?: string | null;
+  provider: string;
+  stock_id?: number | null;
+  market_cap?: number | null;
+  market_cap_unit?: 'million' | string;
+  pe_ttm?: number | null;
+  pb?: number | null;
+  ps_ttm?: number | null;
+  ev_to_ebitda?: number | null;
+  dividend_yield?: number | null;
+  beta?: number | null;
+  eps_ttm?: number | null;
+  week_52_high?: number | null;
+  week_52_low?: number | null;
+}
+
 export interface MarketQuote {
   symbol: string;
   market: string;
@@ -80,6 +100,15 @@ export async function getStockProfile(
   symbol: string
 ): Promise<StockProfile> {
   return ApiService.get(API_ENDPOINTS.MARKET.PROFILE(market, symbol));
+}
+
+export async function getStockValuationMetrics(
+  market: string,
+  symbol: string
+): Promise<StockValuationMetrics> {
+  return dedupeInFlight(`valuation:${market}:${symbol}`, () =>
+    ApiService.get(API_ENDPOINTS.MARKET.VALUATION(market, symbol))
+  );
 }
 
 export async function getStockQuote(

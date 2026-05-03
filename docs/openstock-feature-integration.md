@@ -23,14 +23,16 @@ AGPL-licensed implementation or changing the core platform architecture.
 
 ## Data sources
 
-The platform still treats local `market_data_bars` and `price_history` as the
-canonical OHLCV source. Finnhub is only used for product metadata and fallback
-market information:
+The platform treats local `market_data_bars` as the canonical OHLCV source.
+Finnhub is used for product metadata, quote snapshots, valuation metrics, news,
+and the optional realtime stream path:
 
 - symbol search
 - quote fallback
 - company profile
+- valuation metrics
 - market and company news
+- realtime trade stream for 5-minute bar aggregation
 
 Provider interfaces are intentionally split by responsibility:
 
@@ -38,16 +40,20 @@ Provider interfaces are intentionally split by responsibility:
 - `IQuoteDataSource`: near-real-time quote snapshots for interactive UI and
   alerts.
 - `IMarketInfoProvider`: symbol search, company profile, and news metadata.
+- `MarketStreamProvider`: WebSocket trade stream used by `/ws/market`.
 
-Finnhub currently implements `IQuoteDataSource` and `IMarketInfoProvider`.
-Yahoo Finance remains the default `IPriceDataSource`.
+Finnhub currently implements `IQuoteDataSource`, `IMarketInfoProvider`, and the
+market stream provider. Yahoo Finance remains the default historical
+`IPriceDataSource`.
 
 Configure it with:
 
 ```env
 FINNHUB_API_KEY=...
 FINNHUB_BASE_URL=https://finnhub.io/api/v1
+FINNHUB_WS_URL=wss://ws.finnhub.io
 INTERNAL_API_TOKEN=...
+NEXT_PUBLIC_MARKET_WS_URL=ws://localhost:8000/ws/market
 ```
 
 ## Qlib data readiness

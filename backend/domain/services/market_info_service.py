@@ -165,6 +165,77 @@ class MarketInfoService:
             "tradingview_symbol": mapping.tradingview_symbol,
         }
 
+    async def get_valuation_metrics(
+        self,
+        db: AsyncSession,
+        symbol: str,
+        market: str,
+    ) -> dict[str, Any]:
+        stock = await self._find_stock(db, symbol, market)
+        mapping = self.symbol_mapping.build_mapping(symbol, market)
+        provider = "local"
+        profile: dict[str, Any] = {}
+        metric_payload: dict[str, Any] = {}
+
+        if self.market_info_provider.is_available():
+            try:
+                profile = await self.market_info_provider.get_company_profile(
+                    mapping.finnhub_symbol
+                )
+                get_metrics = getattr(
+                    self.market_info_provider,
+                    "get_company_metrics",
+                    None,
+                )
+                if get_metrics:
+                    metric_payload = await get_metrics(mapping.finnhub_symbol, "all")
+                provider = self.market_info_provider.get_source_name()
+            except Exception:
+                profile = {}
+                metric_payload = {}
+
+        metrics = metric_payload.get("metric") or {}
+        return {
+            "symbol": stock.symbol if stock else mapping.internal_symbol,
+            "market": market,
+            "name": profile.get("name") or (stock.name if stock else None),
+            "currency": profile.get("currency"),
+            "provider": provider,
+            "stock_id": stock.id if stock else None,
+            "market_cap": self._metric_number(
+                metrics,
+                "marketCapitalization",
+                fallback=profile.get("marketCapitalization"),
+            ),
+            "market_cap_unit": "million",
+            "pe_ttm": self._metric_number(
+                metrics,
+                "peBasicExclExtraTTM",
+                "peNormalizedAnnual",
+                "peTTM",
+            ),
+            "pb": self._metric_number(metrics, "pbAnnual", "pbQuarterly"),
+            "ps_ttm": self._metric_number(metrics, "psTTM", "psAnnual"),
+            "ev_to_ebitda": self._metric_number(
+                metrics,
+                "evToEbitdaTTM",
+                "evToEbitdaAnnual",
+            ),
+            "dividend_yield": self._metric_number(
+                metrics,
+                "dividendYieldIndicatedAnnual",
+                "dividendYieldTTM",
+            ),
+            "beta": self._metric_number(metrics, "beta"),
+            "eps_ttm": self._metric_number(
+                metrics,
+                "epsBasicExclExtraItemsTTM",
+                "epsNormalizedAnnual",
+            ),
+            "week_52_high": self._metric_number(metrics, "52WeekHigh"),
+            "week_52_low": self._metric_number(metrics, "52WeekLow"),
+        }
+
     async def get_quote(
         self,
         db: AsyncSession,
@@ -365,6 +436,29 @@ class MarketInfoService:
             re.fullmatch(r"\d{4,6}(\.(TW|TWO))?", upper)
             or re.fullmatch(r"[A-Z]{1,5}([.-][A-Z])?", upper)
         )
+
+    def _metric_number(
+        self,
+        metrics: dict[str, Any],
+        *keys: str,
+        fallback: Any = None,
+    ) -> Optional[float]:
+        for key in keys:
+            value = metrics.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+
+        if fallback is not None:
+            try:
+                return float(fallback)
+            except (TypeError, ValueError):
+                return None
+
+        return None
 
     def _float_or_none(self, value: Any) -> Optional[float]:
         try:

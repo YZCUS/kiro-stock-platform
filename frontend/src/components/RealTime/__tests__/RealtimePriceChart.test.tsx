@@ -4,13 +4,15 @@
  * 測試 RealtimePriceChart 組件的 props 重構和核心功能
  */
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { configureStore } from '@reduxjs/toolkit';
 import { createChart } from 'lightweight-charts';
 import RealtimePriceChart from '../RealtimePriceChart';
-import { usePriceUpdates, useIndicatorUpdates } from '../../../hooks/useWebSocket';
+import { useIndicatorUpdates } from '../../../hooks/useWebSocket';
+import { useMarketStream } from '../../../hooks/useMarketStream';
 import StocksApiService from '../../../services/stocksApi';
+import { getStockValuationMetrics } from '../../../services/marketInfoApi';
 import uiReducer from '../../../store/slices/uiSlice';
 import signalsReducer from '../../../store/slices/signalsSlice';
 
@@ -49,8 +51,24 @@ jest.mock('lightweight-charts', () => ({
   createChart: jest.fn(() => mockChartApi),
 }));
 
-// Mock WebSocket hooks
+// Mock market stream hook
+const mockStreamBar = {
+  market: 'US',
+  symbol: 'AAPL',
+  interval: '5m' as const,
+  bucket_start: '2024-01-01T10:00:00Z',
+  open: 490,
+  high: 505,
+  low: 485,
+  close: 500,
+  volume: 1000000,
+  source: 'mock_stream',
+  is_final: false,
+};
+
 const mockPriceData = {
+  market: 'US',
+  symbol: 'AAPL',
   price: 500,
   change: 10,
   change_percent: 2.0,
@@ -75,8 +93,11 @@ const mockIndicators = {
 };
 
 jest.mock('../../../hooks/useWebSocket', () => ({
-  usePriceUpdates: jest.fn(),
   useIndicatorUpdates: jest.fn(),
+}));
+
+jest.mock('../../../hooks/useMarketStream', () => ({
+  useMarketStream: jest.fn(),
 }));
 
 jest.mock('../../../services/stocksApi', () => ({
@@ -87,7 +108,11 @@ jest.mock('../../../services/stocksApi', () => ({
   },
 }));
 
-const mockUsePriceUpdates = usePriceUpdates as jest.MockedFunction<typeof usePriceUpdates>;
+jest.mock('../../../services/marketInfoApi', () => ({
+  getStockValuationMetrics: jest.fn(),
+}));
+
+const mockUseMarketStream = useMarketStream as jest.MockedFunction<typeof useMarketStream>;
 const mockUseIndicatorUpdates = useIndicatorUpdates as jest.MockedFunction<
   typeof useIndicatorUpdates
 >;
@@ -98,12 +123,16 @@ const mockGetStockPrices = StocksApiService.getStockPrices as jest.MockedFunctio
 const mockBackfillStockData = StocksApiService.backfillStockData as jest.MockedFunction<
   typeof StocksApiService.backfillStockData
 >;
+const mockGetStockValuationMetrics =
+  getStockValuationMetrics as jest.MockedFunction<typeof getStockValuationMetrics>;
 
 const setupWebSocketHookMocks = () => {
-  mockUsePriceUpdates.mockReturnValue({
-    priceData: mockPriceData,
-    lastUpdate: new Date('2024-01-01T10:00:00Z'),
-    isSubscribed: true,
+  mockUseMarketStream.mockReturnValue({
+    quote: mockPriceData,
+    bar: mockStreamBar,
+    signal: null,
+    status: 'connected',
+    error: null,
   });
   mockUseIndicatorUpdates.mockReturnValue({
     indicators: mockIndicators,
@@ -121,6 +150,7 @@ const setupResizeObserverMock = () => {
   global.fetch = jest.fn(() => new Promise(() => {})) as jest.Mock;
   mockGetStockPrices.mockImplementation(() => new Promise(() => {}));
   mockBackfillStockData.mockImplementation(() => new Promise(() => {}));
+  mockGetStockValuationMetrics.mockImplementation(() => new Promise(() => {}));
 };
 
 const createHistoricalPrices = (length: number) => {
@@ -191,7 +221,7 @@ describe('RealtimePriceChart - Props 重構測試', () => {
     );
 
     expect(screen.queryByText('2330.TW (台積電) 即時價格圖表')).not.toBeInTheDocument();
-    expect(mockUsePriceUpdates).toHaveBeenCalledWith(1);
+    expect(mockUseMarketStream).toHaveBeenCalledWith('TW', '2330.TW', true);
     expect(mockUseIndicatorUpdates).toHaveBeenCalledWith(1);
     await waitFor(() => {
       expect(mockGetStockPrices).toHaveBeenCalledWith(
@@ -199,7 +229,72 @@ describe('RealtimePriceChart - Props 重構測試', () => {
         expect.objectContaining({
           start_date: expect.any(String),
           end_date: expect.any(String),
+          timeframe: '1d',
           limit: 756,
+        })
+      );
+    });
+  });
+
+  it('5m 沒有資料時應該回退載入日線資料', async () => {
+    mockGetStockPrices
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(createHistoricalPrices(130));
+
+    render(
+      <RealtimePriceChart
+        stock={mockStock}
+        timeframe="5m"
+      />,
+      { wrapper: createWrapper() }
+    );
+
+    await waitFor(() => {
+      expect(mockGetStockPrices).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          timeframe: '5m',
+          limit: 390,
+        })
+      );
+      expect(mockGetStockPrices).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          timeframe: '1d',
+          limit: 756,
+        })
+      );
+    });
+
+    expect(screen.getByText('5分K暫無資料，已顯示日線')).toBeInTheDocument();
+  });
+
+  it('應該提供日線與 5分K 切換', async () => {
+    render(
+      <RealtimePriceChart
+        stock={mockStock}
+      />,
+      { wrapper: createWrapper() }
+    );
+
+    expect(screen.getByRole('button', { name: '日線' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '5分K' }));
+
+    expect(screen.getByRole('button', { name: '5分K' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+
+    await waitFor(() => {
+      expect(mockGetStockPrices).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          timeframe: '5m',
+          limit: 390,
         })
       );
     });
@@ -262,6 +357,7 @@ describe('RealtimePriceChart - Props 重構測試', () => {
     render(
       <RealtimePriceChart
         stock={mockStock}
+        timeframe="5m"
       />,
       { wrapper: createWrapper() }
     );
@@ -283,6 +379,7 @@ describe('RealtimePriceChart - 功能測試', () => {
     render(
       <RealtimePriceChart
         stock={mockStock}
+        timeframe="5m"
       />,
       { wrapper: createWrapper() }
     );
@@ -361,15 +458,52 @@ describe('RealtimePriceChart - 功能測試', () => {
     expect(screen.getByText('均線與扣抵價')).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText('5K')).toBeInTheDocument();
+      expect(screen.getByText('227.00')).toBeInTheDocument();
     });
 
     expect(screen.queryByText(/已載入 .* 根 K 棒/)).not.toBeInTheDocument();
     expect(screen.getByText('20K')).toBeInTheDocument();
     expect(screen.getByText('60K')).toBeInTheDocument();
     expect(screen.getByText('120K')).toBeInTheDocument();
-    expect(screen.getByText('227.00')).toBeInTheDocument();
     expect(screen.getByText(/225\.00/)).toBeInTheDocument();
+  });
+
+  it('應該在均線摘要下方顯示估值指標', async () => {
+    mockGetStockValuationMetrics.mockResolvedValueOnce({
+      symbol: '2330.TW',
+      market: 'TW',
+      provider: 'finnhub',
+      market_cap: 100000,
+      market_cap_unit: 'million',
+      pe_ttm: 20,
+      pb: 5,
+      ps_ttm: 8,
+      ev_to_ebitda: 14,
+      dividend_yield: 1.5,
+      beta: 1.1,
+      eps_ttm: 10,
+      week_52_high: 700,
+      week_52_low: 500,
+    });
+
+    render(
+      <RealtimePriceChart
+        stock={mockStock}
+      />,
+      { wrapper: createWrapper() }
+    );
+
+    expect(screen.getByText('估值指標')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText('來源 finnhub')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('P/E')).toBeInTheDocument();
+    expect(screen.getByText('20.00')).toBeInTheDocument();
+    expect(screen.getByText('殖利率')).toBeInTheDocument();
+    expect(screen.getByText('1.50%')).toBeInTheDocument();
+    expect(screen.getByText('52 週區間')).toBeInTheDocument();
   });
 
   it('資料不足時不應顯示所需 K 棒數', async () => {
@@ -407,10 +541,12 @@ describe('RealtimePriceChart - 錯誤處理測試', () => {
 
   it('應該處理無效的價格數據', async () => {
     // Mock 返回無效數據的 hook
-    mockUsePriceUpdates.mockReturnValue({
-      priceData: null,
-      lastUpdate: null,
-      isSubscribed: false,
+    mockUseMarketStream.mockReturnValue({
+      quote: null,
+      bar: null,
+      signal: null,
+      status: 'idle',
+      error: null,
     });
 
     render(
@@ -440,7 +576,7 @@ describe('RealtimePriceChart - 錯誤處理測試', () => {
     );
 
     expect(screen.queryByText('2330.TW 即時價格圖表')).not.toBeInTheDocument();
-    expect(mockUsePriceUpdates).toHaveBeenCalledWith(1);
+    expect(mockUseMarketStream).toHaveBeenCalledWith('TW', '2330.TW', true);
   });
 });
 
@@ -548,6 +684,7 @@ describe('RealtimePriceChart - Chart integration tests', () => {
     render(
       <RealtimePriceChart
         stock={mockStock}
+        timeframe="5m"
       />,
       { wrapper: createWrapper() }
     );
@@ -588,7 +725,7 @@ describe('RealtimePriceChart - WebSocket 集成測試', () => {
     );
 
     // 驗證 hooks 被正確的 stockId 調用
-    expect(mockUsePriceUpdates).toHaveBeenCalledWith(1);
+    expect(mockUseMarketStream).toHaveBeenCalledWith('TW', '2330.TW', true);
     expect(mockUseIndicatorUpdates).toHaveBeenCalledWith(1);
   });
 
@@ -603,7 +740,7 @@ describe('RealtimePriceChart - WebSocket 集成測試', () => {
     );
 
     // 清除初始調用
-    mockUsePriceUpdates.mockClear();
+    mockUseMarketStream.mockClear();
     mockUseIndicatorUpdates.mockClear();
 
     // 重新渲染使用不同的股票
@@ -615,7 +752,7 @@ describe('RealtimePriceChart - WebSocket 集成測試', () => {
     );
 
     // 驗證使用新的 stockId
-    expect(mockUsePriceUpdates).toHaveBeenCalledWith(2);
+    expect(mockUseMarketStream).toHaveBeenCalledWith('TW', '2317.TW', true);
     expect(mockUseIndicatorUpdates).toHaveBeenCalledWith(2);
   });
 });

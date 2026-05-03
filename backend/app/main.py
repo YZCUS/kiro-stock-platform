@@ -18,6 +18,12 @@ from api.v1.websocket import (
     health_check_websocket_service,
     websocket_service_state,
 )
+from api.v1.market_websocket import (
+    initialize_market_stream_service,
+    shutdown_market_stream_service,
+    market_stream_stats,
+    market_websocket_endpoint,
+)
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +52,12 @@ async def lifespan(app: FastAPI):
         # 對於嚴重錯誤，停止應用程式啟動
         raise RuntimeError(f"WebSocket服務初始化失敗: {e}") from e
 
+    try:
+        await initialize_market_stream_service()
+        logger.info("Market stream服務初始化完成")
+    except Exception as e:
+        logger.warning("Market stream服務初始化失敗，將在首次連線時重試: %s", e)
+
     logger.info("股票分析平台啟動完成")
 
     yield
@@ -55,6 +67,7 @@ async def lifespan(app: FastAPI):
 
     # 關閉 WebSocket 管理器
     try:
+        await shutdown_market_stream_service()
         await shutdown_websocket_manager()
         logger.info("WebSocket管理器已關閉")
     except Exception as e:
@@ -105,6 +118,7 @@ async def health_check():
         "service": "stock-analysis-platform",
         "components": {
             "websocket": websocket_health,
+            "market_stream": await market_stream_stats(),
             "database": {"status": "healthy"},  # 可以添加更詳細的資料庫檢查
         },
         "timestamp": websocket_health["timestamp"],
@@ -145,6 +159,12 @@ async def websocket_stock(
         )
         return
     await websocket_endpoint(websocket, stock_id, client_id)
+
+
+@app.websocket("/ws/market")
+async def websocket_market(websocket: WebSocket, client_id: Optional[str] = None):
+    """Market quote and 5m bar stream endpoint."""
+    await market_websocket_endpoint(websocket, client_id)
 
 
 if __name__ == "__main__":

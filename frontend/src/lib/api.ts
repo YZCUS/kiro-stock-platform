@@ -105,6 +105,8 @@ export const API_ENDPOINTS = {
   MARKET: {
     SEARCH: '/api/v1/market/search',
     PROFILE: (market: string, symbol: string) => `/api/v1/market/stocks/${market}/${symbol}/profile`,
+    VALUATION: (market: string, symbol: string) =>
+      `/api/v1/market/stocks/${market}/${symbol}/valuation`,
     QUOTE: (market: string, symbol: string) => `/api/v1/market/stocks/${market}/${symbol}/quote`,
     NEWS: '/api/v1/market/news',
     STOCK_NEWS: (market: string, symbol: string) => `/api/v1/market/stocks/${market}/${symbol}/news`,

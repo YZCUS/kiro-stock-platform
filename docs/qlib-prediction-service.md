@@ -196,6 +196,25 @@ Supported signal horizons are `1d`, `5d`, `20d`, and `60d`.
 period for each generated signal. Composite scoring matches active signals to
 weights by `(strategy_type, signal_horizon)`.
 
+The evaluation run now records a strategy research pipeline version and data
+coverage on `strategy_backtest_runs.parameters`. Each result also stores
+research diagnostics in `strategy_backtest_results.metrics`:
+
+- `data_coverage`: stock count, estimated trading-day coverage, and bars per
+  stock.
+- `walk_forward`: chronological fold pass rate and fold return dispersion.
+- `precision_at_10`, `precision_at_20`, `precision_at_50`: top-confidence hit
+  rate.
+- `confidence_return_rank_ic`: rank correlation between signal confidence and
+  realized forward return.
+- `research_status`: gate such as `low_sample`, `unstable_walk_forward`,
+  `research_ready`, or `production_candidate`.
+
+Reliability scoring uses these research metrics conservatively. Poor
+walk-forward stability, weak top-rank precision, low sample count, or incomplete
+data coverage caps the target score even when headline backtest metrics look
+good.
+
 `stock_composite_scores` is a cache. User-facing pages should read this table
 instead of recomputing all strategy votes during page load.
 

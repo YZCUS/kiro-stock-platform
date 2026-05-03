@@ -17,13 +17,21 @@ import {
   SeriesMarker,
   UTCTimestamp,
 } from 'lightweight-charts';
-import { usePriceUpdates, useIndicatorUpdates } from '../../hooks/useWebSocket';
+import { useIndicatorUpdates } from '../../hooks/useWebSocket';
+import { useMarketStream } from '../../hooks/useMarketStream';
 import StocksApiService from '../../services/stocksApi';
+import {
+  getStockValuationMetrics,
+  type StockValuationMetrics,
+} from '../../services/marketInfoApi';
 import { PriceData, Stock } from '../../types';
 
+type ChartTimeframe = '1d' | '5m';
+
 export interface RealtimePriceChartProps {
-  stock: Pick<Stock, 'id' | 'symbol'> & { name?: string };
+  stock: Pick<Stock, 'id' | 'symbol'> & { name?: string; market?: string };
   height?: number;
+  timeframe?: ChartTimeframe;
 }
 
 interface ChartCandle {
@@ -66,18 +74,33 @@ const MOVING_AVERAGE_CONFIGS: Array<{
   { period: 120, label: '120K', color: '#ea580c' },
 ];
 
+const CHART_TIMEFRAME_OPTIONS: Array<{
+  value: ChartTimeframe;
+  label: string;
+}> = [
+  { value: '1d', label: '日線' },
+  { value: '5m', label: '5分K' },
+];
+
 const TRADING_DAYS_PER_YEAR = 252;
 const DEFAULT_HISTORICAL_K_BARS = TRADING_DAYS_PER_YEAR * 3;
+const DEFAULT_INTRADAY_K_BARS = 390;
 const PRICE_HISTORY_LOOKBACK_YEARS = 3;
+const INTRADAY_LOOKBACK_DAYS = 7;
 const VOLUME_UP_COLOR = 'rgba(38, 166, 154, 0.35)';
 const VOLUME_DOWN_COLOR = 'rgba(239, 83, 80, 0.35)';
 
 const formatDateInput = (date: Date): string => date.toISOString().slice(0, 10);
 
-const getHistoricalPriceRange = () => {
+const getHistoricalPriceRange = (timeframe: ChartTimeframe) => {
   const endDate = new Date();
   const startDate = new Date(endDate);
-  startDate.setFullYear(startDate.getFullYear() - PRICE_HISTORY_LOOKBACK_YEARS);
+
+  if (timeframe === '5m') {
+    startDate.setDate(startDate.getDate() - INTRADAY_LOOKBACK_DAYS);
+  } else {
+    startDate.setFullYear(startDate.getFullYear() - PRICE_HISTORY_LOOKBACK_YEARS);
+  }
 
   return {
     start_date: formatDateInput(startDate),
@@ -236,6 +259,38 @@ const formatPriceValue = (value: number | null) => {
   return value === null ? '資料不足' : value.toFixed(2);
 };
 
+const formatMetricValue = (
+  value: number | null | undefined,
+  suffix = '',
+  digits = 2
+) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return '--';
+  }
+  return `${value.toFixed(digits)}${suffix}`;
+};
+
+const formatMarketCap = (
+  value: number | null | undefined,
+  unit?: string | null
+) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return '--';
+  }
+
+  const normalizedValue = unit === 'million' ? value * 1_000_000 : value;
+  if (normalizedValue >= 1_000_000_000_000) {
+    return `${(normalizedValue / 1_000_000_000_000).toFixed(2)}T`;
+  }
+  if (normalizedValue >= 1_000_000_000) {
+    return `${(normalizedValue / 1_000_000_000).toFixed(2)}B`;
+  }
+  if (normalizedValue >= 1_000_000) {
+    return `${(normalizedValue / 1_000_000).toFixed(2)}M`;
+  }
+  return normalizedValue.toLocaleString();
+};
+
 const formatChartDate = (time: UTCTimestamp | null) => {
   if (time === null) {
     return '';
@@ -249,9 +304,12 @@ const formatChartDate = (time: UTCTimestamp | null) => {
 
 const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
   stock,
-  height = 400
+  height = 400,
+  timeframe = '1d',
 }) => {
   const { id: stockId, symbol } = stock;
+  const market =
+    stock.market ?? (symbol.endsWith('.TW') || /^\d+$/.test(symbol) ? 'TW' : 'US');
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -262,17 +320,59 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
   const backfillRequestedStockIdsRef = useRef<Set<number>>(new Set());
   const [historicalData, setHistoricalData] = useState<PriceData[]>([]);
   const [chartData, setChartData] = useState<ChartCandleData[]>([]);
+  const [chartReadyRevision, setChartReadyRevision] = useState(0);
+  const [selectedTimeframe, setSelectedTimeframe] =
+    useState<ChartTimeframe>(timeframe);
+  const [displayedTimeframe, setDisplayedTimeframe] =
+    useState<ChartTimeframe>(timeframe);
+  const [valuationMetrics, setValuationMetrics] =
+    useState<StockValuationMetrics | null>(null);
+  const [valuationLoading, setValuationLoading] = useState(false);
 
   // 驗證 stockId 有效性 - 必須是有效的數字
   const validStockId =
     stockId && typeof stockId === 'number' && stockId > 0 ? stockId : null;
 
-  // 使用 WebSocket hooks - 只有在 stockId 有效時才訂閱
-  const { priceData } = usePriceUpdates(validStockId);
+  useEffect(() => {
+    setSelectedTimeframe(timeframe);
+    setDisplayedTimeframe(timeframe);
+  }, [timeframe]);
+
+  const { quote: streamQuote, bar: streamBar } = useMarketStream(
+    market,
+    symbol,
+    Boolean(symbol && market)
+  );
   const { indicators } = useIndicatorUpdates(validStockId);
   const movingAverageSummary = useMemo(
     () => createMovingAverageSummary(chartData),
     [chartData]
+  );
+
+  const valuationRows = useMemo(
+    () => [
+      {
+        label: '市值',
+        value: formatMarketCap(
+          valuationMetrics?.market_cap,
+          valuationMetrics?.market_cap_unit
+        ),
+      },
+      { label: 'P/E', value: formatMetricValue(valuationMetrics?.pe_ttm) },
+      { label: 'P/B', value: formatMetricValue(valuationMetrics?.pb) },
+      { label: 'P/S', value: formatMetricValue(valuationMetrics?.ps_ttm) },
+      {
+        label: 'EV/EBITDA',
+        value: formatMetricValue(valuationMetrics?.ev_to_ebitda),
+      },
+      {
+        label: '殖利率',
+        value: formatMetricValue(valuationMetrics?.dividend_yield, '%'),
+      },
+      { label: 'Beta', value: formatMetricValue(valuationMetrics?.beta) },
+      { label: 'EPS TTM', value: formatMetricValue(valuationMetrics?.eps_ttm) },
+    ],
+    [valuationMetrics]
   );
 
   // 載入歷史價格數據
@@ -281,42 +381,70 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
     if (!validStockId) {
       setHistoricalData([]);
       setChartData([]);
+      setDisplayedTimeframe(selectedTimeframe);
       return;
     }
 
     let cancelled = false;
     setHistoricalData([]);
     setChartData([]);
+    setDisplayedTimeframe(selectedTimeframe);
 
     const loadHistoricalData = async () => {
-      const priceRange = getHistoricalPriceRange();
-
-      try {
+      const fetchPrices = async (requestedTimeframe: ChartTimeframe) => {
+        const priceRange = getHistoricalPriceRange(requestedTimeframe);
+        const limit =
+          requestedTimeframe === '5m'
+            ? DEFAULT_INTRADAY_K_BARS
+            : DEFAULT_HISTORICAL_K_BARS;
         const data = await StocksApiService.getStockPrices(validStockId, {
           ...priceRange,
-          limit: DEFAULT_HISTORICAL_K_BARS,
+          timeframe: requestedTimeframe,
+          limit,
         });
 
+        return {
+          data,
+          limit,
+          priceRange,
+          timeframe: requestedTimeframe,
+        };
+      };
+
+      try {
+        let result = await fetchPrices(selectedTimeframe);
+
+        if (
+          selectedTimeframe === '5m' &&
+          Array.isArray(result.data) &&
+          result.data.length === 0
+        ) {
+          result = await fetchPrices('1d');
+        }
+
         // 驗證返回的數據是陣列
-        if (Array.isArray(data)) {
+        if (Array.isArray(result.data)) {
           if (cancelled) {
             return;
           }
-          setHistoricalData(data);
+          setDisplayedTimeframe(result.timeframe);
+          setHistoricalData(result.data);
 
           if (
-            shouldBackfillHistoricalData(data, priceRange.start_date) &&
+            result.timeframe === '1d' &&
+            shouldBackfillHistoricalData(result.data, result.priceRange.start_date) &&
             !backfillRequestedStockIdsRef.current.has(validStockId)
           ) {
             backfillRequestedStockIdsRef.current.add(validStockId);
 
-            void StocksApiService.backfillStockData(validStockId, priceRange)
+            void StocksApiService.backfillStockData(validStockId, result.priceRange)
               .then(async () => {
                 const refreshedData = await StocksApiService.getStockPrices(
                   validStockId,
                   {
-                    ...priceRange,
-                    limit: DEFAULT_HISTORICAL_K_BARS,
+                    ...result.priceRange,
+                    timeframe: result.timeframe,
+                    limit: result.limit,
                   }
                 );
 
@@ -329,10 +457,22 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
               });
           }
         } else {
-          console.error('Historical data is not an array:', data);
+          console.error('Historical data is not an array:', result.data);
           setHistoricalData([]);
         }
       } catch (error) {
+        if (selectedTimeframe === '5m') {
+          try {
+            const fallback = await fetchPrices('1d');
+            if (!cancelled && Array.isArray(fallback.data)) {
+              setDisplayedTimeframe('1d');
+              setHistoricalData(fallback.data);
+              return;
+            }
+          } catch (fallbackError) {
+            console.error('Failed to load daily fallback data:', fallbackError);
+          }
+        }
         console.error('Failed to load historical data:', error);
         setHistoricalData([]);
         setChartData([]);
@@ -344,7 +484,40 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [validStockId]);
+  }, [selectedTimeframe, validStockId]);
+
+  useEffect(() => {
+    if (!validStockId || !symbol || !market) {
+      setValuationMetrics(null);
+      return;
+    }
+
+    let cancelled = false;
+    setValuationLoading(true);
+    setValuationMetrics(null);
+
+    getStockValuationMetrics(market, symbol)
+      .then((metrics) => {
+        if (!cancelled) {
+          setValuationMetrics(metrics);
+        }
+      })
+      .catch((error) => {
+        console.warn('Failed to load valuation metrics:', error);
+        if (!cancelled) {
+          setValuationMetrics(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setValuationLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [market, symbol, validStockId]);
 
   // 初始化圖表
   useEffect(() => {
@@ -434,6 +607,7 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
     seriesRef.current = candlestickSeries;
     volumeSeriesRef.current = volumeSeries;
     movingAverageSeriesRefs.current = movingAverageSeries;
+    setChartReadyRevision((revision) => revision + 1);
 
     // 處理視窗大小變化
     const handleResize = () => {
@@ -485,13 +659,17 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
 
   // 載入歷史數據到圖表
   useEffect(() => {
-    // 嚴格檢查 historicalData 是否為有效陣列
-    if (!Array.isArray(historicalData) || historicalData.length === 0) {
+    // 等待圖表初始化完成並確保所有 ref 都存在
+    if (!seriesRef.current || !chartRef.current) {
       return;
     }
 
-    // 等待圖表初始化完成並確保所有 ref 都存在
-    if (!seriesRef.current || !chartRef.current) {
+    // 嚴格檢查 historicalData 是否為有效陣列
+    if (!Array.isArray(historicalData) || historicalData.length === 0) {
+      seriesRef.current.setData([]);
+      volumeSeriesRef.current?.setData([]);
+      applyMovingAverageOverlays([]);
+      setChartData([]);
       return;
     }
 
@@ -510,33 +688,56 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
     } catch (error) {
       console.error('Failed to set chart data:', error);
     }
-  }, [applyMovingAverageOverlays, historicalData]);
+  }, [applyMovingAverageOverlays, chartReadyRevision, historicalData]);
 
-  // 處理即時價格更新
+  // 處理即時串流更新：優先使用 5m bar，quote 只補最後價格。
   useEffect(() => {
-    if (!priceData || !seriesRef.current || !chartRef.current) return;
+    if (displayedTimeframe !== '5m') {
+      return;
+    }
+
+    const streamUpdate = streamBar
+      ? {
+        timestamp: streamBar.bucket_start,
+        volume: streamBar.volume,
+        ohlc: {
+          open: streamBar.open,
+          high: streamBar.high,
+          low: streamBar.low,
+          close: streamBar.close,
+        },
+      }
+      : streamQuote
+        ? {
+          timestamp: streamQuote.timestamp,
+          volume: streamQuote.volume ?? 0,
+          price: streamQuote.price,
+        }
+        : null;
+
+    if (!streamUpdate || !seriesRef.current || !chartRef.current) return;
 
     try {
       // 檢查圖表是否已被清理
       if (!chartRef.current || !seriesRef.current) return;
-      const time = Math.floor(new Date(priceData.timestamp).getTime() / 1000) as UTCTimestamp;
+      const time = Math.floor(new Date(streamUpdate.timestamp).getTime() / 1000) as UTCTimestamp;
 
       // 處理真實的 OHLC 數據
       let candlestickData;
 
-      if (priceData.ohlc) {
+      if ('ohlc' in streamUpdate) {
         // 如果 WebSocket 提供完整的 OHLC 數據
         candlestickData = {
           time,
-          open: priceData.ohlc.open,
-          high: priceData.ohlc.high,
-          low: priceData.ohlc.low,
-          close: priceData.ohlc.close,
+          open: streamUpdate.ohlc.open,
+          high: streamUpdate.ohlc.high,
+          low: streamUpdate.ohlc.low,
+          close: streamUpdate.ohlc.close,
         };
       } else {
         // 如果只有當前價格，則構建簡化的蠟燭圖數據
         // 在實際應用中，建議後端提供完整的 OHLC 數據
-        const currentPrice = priceData.price;
+        const currentPrice = streamUpdate.price;
 
         // 獲取前一個數據點作為參考
         const chartData = seriesRef.current.data();
@@ -559,7 +760,7 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
       seriesRef.current.update(candlestickData);
       volumeSeriesRef.current?.update({
         time,
-        value: priceData.volume ?? 0,
+        value: streamUpdate.volume ?? 0,
         color: candlestickData.close >= candlestickData.open
           ? VOLUME_UP_COLOR
           : VOLUME_DOWN_COLOR,
@@ -573,7 +774,7 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
           symbol: symbol,
           time: new Date(time * 1000).toISOString(),
           data: candlestickData,
-          volume: priceData.volume,
+          volume: streamUpdate.volume,
         });
       }
     } catch (error) {
@@ -587,15 +788,52 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
             symbol,
             stockId,
             error: error instanceof Error ? error.message : String(error),
-            priceData,
+            streamUpdate,
           });
         });
       }
     }
-  }, [applyMovingAverageOverlays, priceData, symbol, stockId]);
+  }, [
+    applyMovingAverageOverlays,
+    displayedTimeframe,
+    streamBar,
+    streamQuote,
+    symbol,
+    stockId,
+  ]);
 
   return (
     <div className="w-full">
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="inline-flex w-fit rounded-md border border-gray-200 bg-gray-50 p-1">
+            {CHART_TIMEFRAME_OPTIONS.map((option) => {
+              const isActive = selectedTimeframe === option.value;
+
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={isActive}
+                  onClick={() => setSelectedTimeframe(option.value)}
+                  className={[
+                    'h-8 rounded px-3 text-sm font-medium transition-colors',
+                    isActive
+                      ? 'bg-white text-gray-950 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-950',
+                  ].join(' ')}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          {selectedTimeframe === '5m' && displayedTimeframe === '1d' && (
+            <div className="text-xs font-medium text-amber-700">
+              5分K暫無資料，已顯示日線
+            </div>
+          )}
+        </div>
+
         {/* 圖表容器 */}
         <div
           ref={chartContainerRef}
@@ -689,6 +927,43 @@ const RealtimePriceChart: React.FC<RealtimePriceChartProps> = ({
               );
             })}
           </div>
+        </div>
+
+        {/* 估值摘要 */}
+        <div className="mt-3 rounded-md border border-gray-200 bg-white p-3">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm font-medium text-gray-700">估值指標</div>
+            <div className="text-xs text-gray-500">
+              {valuationMetrics?.provider
+                ? `來源 ${valuationMetrics.provider}`
+                : '來源待取得'}
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+            {valuationRows.map((row) => (
+              <div
+                key={row.label}
+                className="rounded border border-gray-200 bg-gray-50 px-3 py-2"
+              >
+                <div className="text-xs text-gray-500">{row.label}</div>
+                <div className="mt-1 truncate text-sm font-semibold tabular-nums text-gray-900">
+                  {valuationLoading ? '--' : row.value}
+                </div>
+              </div>
+            ))}
+          </div>
+          {(valuationMetrics?.week_52_high || valuationMetrics?.week_52_low) && (
+            <div className="mt-3 rounded border border-gray-200 px-3 py-2">
+              <div className="mb-1 text-xs text-gray-500">52 週區間</div>
+              <div
+                className="flex items-center justify-between gap-3 text-sm font-semibold tabular-nums text-gray-900"
+              >
+                <span>{formatMetricValue(valuationMetrics.week_52_low)}</span>
+                <div className="h-1 flex-1 rounded-full bg-gray-200" />
+                <span>{formatMetricValue(valuationMetrics.week_52_high)}</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 技術指標信息 */}

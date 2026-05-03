@@ -173,6 +173,7 @@ export class StocksApiService {
     params: {
       start_date?: string;
       end_date?: string;
+      timeframe?: '1d' | '5m';
       limit?: number;
     } = {}
   ): Promise<PriceData[]> {
@@ -182,6 +183,9 @@ export class StocksApiService {
     }
     if (params.end_date) {
       queryParams.append('end_date', params.end_date);
+    }
+    if (params.timeframe) {
+      queryParams.append('timeframe', params.timeframe);
     }
     if (params.limit) {
       queryParams.append('limit', params.limit.toString());

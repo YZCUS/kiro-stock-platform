@@ -1,9 +1,9 @@
 """
-Weekly strategy backtest and reliability-weight evaluation.
+Weekly strategy research, backtest, and reliability-weight evaluation.
 
 Runs outside user request paths. The backend writes backtest metrics,
-strategy reliability scores, bounded dynamic weights, and current composite
-stock scores.
+walk-forward research metrics, strategy reliability scores, bounded dynamic
+weights, and current composite stock scores.
 """
 
 from datetime import datetime, timedelta
@@ -49,11 +49,11 @@ def run_strategy_evaluation(**context):
 
 dag = DAG(
     dag_id="strategy_weekly_evaluation",
-    description="Backtest strategies and publish bounded reliability weights",
+    description="Run strategy research metrics and publish bounded reliability weights",
     schedule_interval="0 6 * * 6",
     max_active_runs=1,
     catchup=False,
-    tags=["strategy", "backtest", "weights"],
+    tags=["strategy", "research", "backtest", "weights"],
     default_args={
         "owner": "stock-analysis-platform",
         "depends_on_past": False,

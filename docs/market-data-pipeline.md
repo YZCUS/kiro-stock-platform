@@ -9,7 +9,8 @@ daily OHLCV reads and writes should use `market_data_bars`.
 Source timeframes:
 
 - `1d`: daily bars fetched from the configured price provider.
-- `5m`: intraday bars fetched from the configured price provider.
+- `5m`: intraday bars fetched from the configured price provider or finalized
+  by the market stream service from realtime trades.
 
 Derived timeframes:
 
@@ -61,6 +62,23 @@ docker compose --profile workers up market-data-worker bar-aggregation-worker da
 Airflow calls the synchronous `orchestrate` endpoint after daily source
 collection. For production, switch the Airflow task to enqueue mode only when
 workers are always running and monitored.
+
+## Realtime 5-Minute Bars
+
+The market stream service can build current 5-minute candles from Finnhub trade
+events. In-progress candles are cache state only. Finalized 5-minute candles are
+upserted to `market_data_bars` with source `finnhub_stream` or `mock_stream`.
+
+REST remains responsible for initial chart history. The frontend can request:
+
+```text
+GET /api/v1/stocks/{stock_id}/prices?timeframe=1d
+GET /api/v1/stocks/{stock_id}/prices?timeframe=5m
+```
+
+The realtime chart defaults to `1d` and lets users switch to `5m`. When `5m`
+history is unavailable, the UI explicitly falls back to daily bars instead of
+showing an empty chart.
 
 ## Completeness Rules
 

@@ -37,6 +37,9 @@ MIN_WEIGHT = 0.05
 MAX_WEIGHT = 0.45
 SMOOTHING_FACTOR = 0.20
 MIN_TRADE_COUNT = 30
+RESEARCH_PIPELINE_VERSION = "strategy_research_v1"
+WALK_FORWARD_FOLDS = 5
+PRECISION_K_VALUES = (10, 20, 50)
 
 
 @dataclass(frozen=True)
@@ -153,6 +156,23 @@ class StrategyEvaluationService:
         end = end_date or date.today()
         start = start_date or end - timedelta(days=365 * 3)
         prices_by_stock = await self._load_daily_bars(db, market, start, end)
+        data_coverage = self._data_coverage_metrics(prices_by_stock, start, end)
+        backtest_run.parameters = {
+            **(backtest_run.parameters or {}),
+            "research_pipeline_version": RESEARCH_PIPELINE_VERSION,
+            "data_window": {
+                "start_date": start.isoformat(),
+                "end_date": end.isoformat(),
+            },
+            "data_coverage": data_coverage,
+            "evaluation": {
+                "horizons": horizons,
+                "min_trade_count": MIN_TRADE_COUNT,
+                "walk_forward_folds": WALK_FORWARD_FOLDS,
+                "precision_k_values": list(PRECISION_K_VALUES),
+            },
+        }
+        await db.flush()
         benchmark_return = self._benchmark_return(prices_by_stock)
         results: List[StrategyBacktestResult] = []
 
@@ -180,6 +200,7 @@ class StrategyEvaluationService:
                     start_date=start,
                     end_date=end,
                     benchmark_return=benchmark_return,
+                    data_coverage=data_coverage,
                 )
                 result = StrategyBacktestResult(
                     backtest_run_id=backtest_run.id,
@@ -786,12 +807,18 @@ class StrategyEvaluationService:
         start_date: date,
         end_date: date,
         benchmark_return: float,
+        data_coverage: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        returns = [self._clamp(trade.return_pct, -0.99, 9.0) for trade in trades]
+        trades_by_date = sorted(trades, key=lambda trade: trade.signal_date)
+        returns = [self._clamp(trade.return_pct, -0.99, 9.0) for trade in trades_by_date]
         wins = [value for value in returns if value > 0]
         losses = [value for value in returns if value < 0]
         days = max((end_date - start_date).days, 1)
-        avg_holding_days = mean([HORIZON_DAYS[trade.horizon] for trade in trades]) if trades else 0
+        avg_holding_days = (
+            mean([HORIZON_DAYS[trade.horizon] for trade in trades_by_date])
+            if trades_by_date
+            else 0
+        )
         return_std = pstdev(returns) if len(returns) > 1 else 0.0
         avg_return = mean(returns) if returns else 0.0
         periods_per_year = 252 / max(avg_holding_days, 1)
@@ -817,8 +844,12 @@ class StrategyEvaluationService:
         profit_factor = self._clamp(profit_factor, 0.0, 99.0)
 
         recent_returns = returns[-max(1, len(returns) // 5) :] if returns else []
-        return {
-            "trade_count": len(trades),
+        walk_forward = self._walk_forward_metrics(trades_by_date)
+        precision_metrics = self._precision_metrics(trades_by_date)
+        confidence_rank_ic = self._confidence_return_rank_ic(trades_by_date)
+        metrics = {
+            "research_pipeline_version": RESEARCH_PIPELINE_VERSION,
+            "trade_count": len(trades_by_date),
             "total_return": total_return,
             "annualized_return": annualized_return,
             "max_drawdown": max_drawdown,
@@ -833,7 +864,153 @@ class StrategyEvaluationService:
             "avg_trade_return": avg_return,
             "recent_return": mean(recent_returns) if recent_returns else 0.0,
             "return_std": return_std,
+            "walk_forward": walk_forward,
+            "confidence_return_rank_ic": confidence_rank_ic,
+            "data_coverage": data_coverage or {},
+            **precision_metrics,
         }
+        metrics["research_status"] = self._research_status(metrics)
+        return metrics
+
+    def _walk_forward_metrics(self, trades: List[Trade]) -> Dict[str, Any]:
+        if not trades:
+            return {
+                "fold_count": 0,
+                "pass_rate": 0.0,
+                "avg_return_mean": 0.0,
+                "avg_return_std": 0.0,
+                "folds": [],
+            }
+
+        fold_count = min(WALK_FORWARD_FOLDS, len(trades))
+        fold_size = max(1, len(trades) // fold_count)
+        folds = []
+        for fold_index in range(fold_count):
+            start = fold_index * fold_size
+            end = len(trades) if fold_index == fold_count - 1 else start + fold_size
+            chunk = trades[start:end]
+            if not chunk:
+                continue
+            returns = [self._clamp(trade.return_pct, -0.99, 9.0) for trade in chunk]
+            avg_return = mean(returns)
+            return_std = pstdev(returns) if len(returns) > 1 else 0.0
+            sharpe = 0.0
+            if return_std > 0:
+                avg_holding_days = mean([HORIZON_DAYS[trade.horizon] for trade in chunk])
+                sharpe = self._clamp(
+                    avg_return / return_std * sqrt(252 / max(avg_holding_days, 1)),
+                    -10.0,
+                    10.0,
+                )
+            folds.append(
+                {
+                    "index": fold_index + 1,
+                    "start_date": chunk[0].signal_date.isoformat(),
+                    "end_date": chunk[-1].signal_date.isoformat(),
+                    "trade_count": len(chunk),
+                    "avg_return": avg_return,
+                    "win_rate": len([value for value in returns if value > 0]) / len(returns),
+                    "sharpe_ratio": sharpe,
+                    "passed": avg_return > 0 and sharpe >= 0,
+                }
+            )
+
+        passed = len([fold for fold in folds if fold["passed"]])
+        avg_returns = [float(fold["avg_return"]) for fold in folds]
+        return {
+            "fold_count": len(folds),
+            "pass_rate": passed / len(folds) if folds else 0.0,
+            "avg_return_mean": mean(avg_returns) if avg_returns else 0.0,
+            "avg_return_std": pstdev(avg_returns) if len(avg_returns) > 1 else 0.0,
+            "folds": folds,
+        }
+
+    def _precision_metrics(self, trades: List[Trade]) -> Dict[str, Any]:
+        ranked = sorted(
+            trades,
+            key=lambda trade: (trade.confidence, trade.signal_date),
+            reverse=True,
+        )
+        metrics: Dict[str, Any] = {}
+        for k_value in PRECISION_K_VALUES:
+            top_trades = ranked[:k_value]
+            precision = (
+                len([trade for trade in top_trades if trade.return_pct > 0]) / len(top_trades)
+                if top_trades
+                else None
+            )
+            metrics[f"precision_at_{k_value}"] = precision
+            metrics[f"sample_at_{k_value}"] = len(top_trades)
+        return metrics
+
+    def _confidence_return_rank_ic(self, trades: List[Trade]) -> float:
+        if len(trades) < 3:
+            return 0.0
+        confidences = [float(trade.confidence) for trade in trades]
+        returns = [self._clamp(trade.return_pct, -0.99, 9.0) for trade in trades]
+        if len(set(confidences)) < 2 or len(set(returns)) < 2:
+            return 0.0
+        return self._pearson_correlation(
+            self._rank_values(confidences),
+            self._rank_values(returns),
+        )
+
+    def _rank_values(self, values: List[float]) -> List[float]:
+        sorted_pairs = sorted(enumerate(values), key=lambda item: item[1])
+        ranks = [0.0] * len(values)
+        index = 0
+        while index < len(sorted_pairs):
+            tie_end = index
+            while (
+                tie_end + 1 < len(sorted_pairs)
+                and sorted_pairs[tie_end + 1][1] == sorted_pairs[index][1]
+            ):
+                tie_end += 1
+            rank = (index + tie_end + 2) / 2
+            for pair_index in range(index, tie_end + 1):
+                original_index = sorted_pairs[pair_index][0]
+                ranks[original_index] = rank
+            index = tie_end + 1
+        return ranks
+
+    def _pearson_correlation(self, left: List[float], right: List[float]) -> float:
+        if len(left) != len(right) or len(left) < 2:
+            return 0.0
+        left_mean = mean(left)
+        right_mean = mean(right)
+        numerator = sum(
+            (left_value - left_mean) * (right_value - right_mean)
+            for left_value, right_value in zip(left, right)
+        )
+        left_denominator = sum((value - left_mean) ** 2 for value in left)
+        right_denominator = sum((value - right_mean) ** 2 for value in right)
+        denominator = sqrt(left_denominator * right_denominator)
+        if denominator == 0:
+            return 0.0
+        return self._clamp(numerator / denominator, -1.0, 1.0)
+
+    def _research_status(self, metrics: Dict[str, Any]) -> str:
+        trade_count = int(metrics["trade_count"])
+        if trade_count < 10:
+            return "insufficient_sample"
+        if trade_count < MIN_TRADE_COUNT:
+            return "low_sample"
+
+        walk_forward = metrics.get("walk_forward") or {}
+        pass_rate = float(walk_forward.get("pass_rate") or 0.0)
+        precision_at_20 = metrics.get("precision_at_20")
+        if pass_rate < 0.4:
+            return "unstable_walk_forward"
+        if precision_at_20 is not None and float(precision_at_20) < 0.45:
+            return "weak_top_rank_precision"
+        if (
+            float(metrics["sharpe_ratio"]) >= 0.5
+            and float(metrics["max_drawdown"]) <= 0.35
+            and pass_rate >= 0.6
+            and (precision_at_20 is None or float(precision_at_20) >= 0.55)
+        ):
+            return "production_candidate"
+        return "research_ready"
 
     def _aggregate_return_curve(self, trades: List[Trade]) -> List[float]:
         returns_by_date: Dict[date, List[float]] = {}
@@ -867,24 +1044,46 @@ class StrategyEvaluationService:
         )
         recent_score = (tanh(float(metrics["recent_return"]) * 10) + 1) / 2
         stability_score = 1 - min(float(metrics["return_std"]), 0.2) / 0.2
+        walk_forward = metrics.get("walk_forward") or {}
+        walk_forward_score = self._clamp(float(walk_forward.get("pass_rate") or 0.0), 0.0, 1.0)
+        precision_score = self._optional_ratio_score(metrics.get("precision_at_20"), win_score)
+        rank_ic_score = (tanh(float(metrics.get("confidence_return_rank_ic") or 0.0) * 3) + 1) / 2
+        coverage = metrics.get("data_coverage") or {}
+        coverage_score = self._clamp(float(coverage.get("coverage_ratio") or 0.0), 0.0, 1.0)
         regime_fit_score = 0.5
         target_score = (
-            0.50 * backtest_score
-            + 0.20 * recent_score
-            + 0.20 * stability_score
-            + 0.10 * regime_fit_score
+            0.35 * backtest_score
+            + 0.15 * recent_score
+            + 0.15 * stability_score
+            + 0.15 * walk_forward_score
+            + 0.10 * precision_score
+            + 0.05 * rank_ic_score
+            + 0.05 * regime_fit_score
         )
-        target_score = target_score * (0.4 + 0.6 * sample_score)
+        target_score = target_score * (0.35 + 0.55 * sample_score + 0.10 * coverage_score)
         if trade_count < 10:
             target_score = min(target_score, 0.25)
+        if walk_forward_score < 0.4:
+            target_score = min(target_score, 0.50)
+        if precision_score < 0.45:
+            target_score = min(target_score, 0.55)
         return {
             "sample_score": sample_score,
             "backtest_score": backtest_score,
             "recent_score": recent_score,
             "stability_score": stability_score,
+            "walk_forward_score": walk_forward_score,
+            "precision_score": precision_score,
+            "rank_ic_score": rank_ic_score,
+            "coverage_score": coverage_score,
             "regime_fit_score": regime_fit_score,
             "target_score": target_score,
         }
+
+    def _optional_ratio_score(self, value: Any, fallback: float) -> float:
+        if value is None:
+            return self._clamp(float(fallback), 0.0, 1.0)
+        return self._clamp(float(value), 0.0, 1.0)
 
     def _target_weights(
         self,
@@ -1162,6 +1361,27 @@ class StrategyEvaluationService:
                 continue
             returns.append(rows[-1]["close"] / rows[0]["close"] - 1)
         return mean(returns) if returns else 0.0
+
+    def _data_coverage_metrics(
+        self,
+        prices_by_stock: Dict[int, List[Dict[str, Any]]],
+        start_date: date,
+        end_date: date,
+    ) -> Dict[str, Any]:
+        counts = [len(rows) for rows in prices_by_stock.values()]
+        calendar_days = max((end_date - start_date).days + 1, 1)
+        expected_trading_days = max(int(calendar_days * 5 / 7), 1)
+        average_bars = mean(counts) if counts else 0.0
+        return {
+            "stock_count": len(counts),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "expected_trading_days_estimate": expected_trading_days,
+            "avg_bars_per_stock": average_bars,
+            "min_bars_per_stock": min(counts) if counts else 0,
+            "max_bars_per_stock": max(counts) if counts else 0,
+            "coverage_ratio": self._clamp(average_bars / expected_trading_days, 0.0, 1.0),
+        }
 
     def _max_drawdown(self, equity_curve: List[float]) -> float:
         peak = equity_curve[0] if equity_curve else 1.0

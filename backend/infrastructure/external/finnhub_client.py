@@ -55,6 +55,20 @@ class FinnhubClient(IQuoteDataSource, IMarketInfoProvider):
     async def get_company_profile(self, symbol: str) -> dict[str, Any]:
         return await self.company_profile(symbol)
 
+    async def company_basic_financials(
+        self,
+        symbol: str,
+        metric: str = "all",
+    ) -> dict[str, Any]:
+        return await self._get("/stock/metric", {"symbol": symbol, "metric": metric})
+
+    async def get_company_metrics(
+        self,
+        symbol: str,
+        metric: str = "all",
+    ) -> dict[str, Any]:
+        return await self.company_basic_financials(symbol, metric)
+
     async def market_news(self, category: str = "general") -> list[dict[str, Any]]:
         return list(await self._get("/news", {"category": category}) or [])
 

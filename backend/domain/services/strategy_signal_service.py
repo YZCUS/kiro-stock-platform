@@ -193,6 +193,7 @@ class StrategySignalService:
         user_id: uuid.UUID,
         strategy_type: Optional[str] = None,
         status: Optional[str] = None,
+        direction: Optional[str] = None,
         stock_id: Optional[int] = None,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
@@ -209,6 +210,7 @@ class StrategySignalService:
             user_id: 用戶 ID
             strategy_type: 策略類型過濾（可選）
             status: 狀態過濾（可選）
+            direction: 方向過濾（LONG/SHORT/NEUTRAL，可選）
             stock_id: 股票 ID 過濾（可選）
             date_from: 開始日期過濾（可選）
             date_to: 結束日期過濾（可選）
@@ -233,6 +235,17 @@ class StrategySignalService:
 
         if status:
             query = query.filter(StrategySignal.status == status)
+            if status == "active":
+                today = date.today()
+                query = query.filter(
+                    or_(
+                        StrategySignal.valid_until.is_(None),
+                        StrategySignal.valid_until >= today,
+                    )
+                )
+
+        if direction:
+            query = query.filter(StrategySignal.direction == direction)
 
         if stock_id:
             query = query.filter(StrategySignal.stock_id == stock_id)
@@ -292,7 +305,11 @@ class StrategySignalService:
             )
 
         # 獲取信號
-        query = select(StrategySignal).filter(StrategySignal.id == signal_id)
+        query = (
+            select(StrategySignal)
+            .filter(StrategySignal.id == signal_id)
+            .options(joinedload(StrategySignal.stock))
+        )
 
         # 如果提供了 user_id，進行權限檢查
         if user_id:
@@ -308,9 +325,13 @@ class StrategySignalService:
         signal.status = status
 
         await db.commit()
-        await db.refresh(signal)
 
-        return signal
+        result = await db.execute(query)
+        updated_signal = result.scalar_one_or_none()
+        if not updated_signal:
+            raise ValueError(f"Signal not found after update: {signal_id}")
+
+        return updated_signal
 
     async def expire_old_signals(
         self, db: AsyncSession, user_id: Optional[uuid.UUID] = None

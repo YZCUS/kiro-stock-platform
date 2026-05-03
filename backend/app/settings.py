@@ -74,6 +74,7 @@ class ExternalAPISettings(BaseSettings):
     finnhub_base_url: str = Field(
         "https://finnhub.io/api/v1", env="FINNHUB_BASE_URL"
     )
+    finnhub_ws_url: str = Field("wss://ws.finnhub.io", env="FINNHUB_WS_URL")
     finnhub_timeout_seconds: int = Field(10, env="FINNHUB_TIMEOUT_SECONDS")
 
     # API 限流配置
@@ -246,6 +247,7 @@ class Settings(BaseSettings):
     )
     FINNHUB_API_KEY: Optional[str] = Field(None, alias="FINNHUB_API_KEY")
     FINNHUB_BASE_URL: Optional[str] = Field(None, alias="FINNHUB_BASE_URL")
+    FINNHUB_WS_URL: Optional[str] = Field(None, alias="FINNHUB_WS_URL")
     FINNHUB_TIMEOUT_SECONDS: Optional[int] = Field(
         None, alias="FINNHUB_TIMEOUT_SECONDS"
     )
@@ -389,6 +391,8 @@ class Settings(BaseSettings):
             settings.external_api.finnhub_api_key = settings.FINNHUB_API_KEY
         if settings.FINNHUB_BASE_URL:
             settings.external_api.finnhub_base_url = settings.FINNHUB_BASE_URL
+        if settings.FINNHUB_WS_URL:
+            settings.external_api.finnhub_ws_url = settings.FINNHUB_WS_URL
         if settings.FINNHUB_TIMEOUT_SECONDS is not None:
             settings.external_api.finnhub_timeout_seconds = (
                 settings.FINNHUB_TIMEOUT_SECONDS

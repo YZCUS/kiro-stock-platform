@@ -7,7 +7,6 @@ import { useAppSelector, useAppDispatch } from '@/store';
 import { logout } from '@/store/slices/authSlice';
 import { Button } from '@/components/ui/button';
 import { BarChart3, Star, User, LogOut, Target, Menu, X } from 'lucide-react';
-import WebSocketStatus from './ui/WebSocketStatus';
 import MarketSearchCommand from './MarketSearchCommand';
 
 const publicLinks = [
@@ -111,10 +110,6 @@ export default function Navigation() {
                 </Button>
               </div>
             )}
-
-            <div className="ml-4 hidden border-l border-gray-200 pl-4 xl:block">
-              <WebSocketStatus />
-            </div>
           </div>
 
           <div className="flex items-center lg:hidden">
