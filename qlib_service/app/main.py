@@ -3,8 +3,21 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
+from app.jobs.model_version_job import ModelVersionJob
 from app.jobs.prediction_job import PredictionJob
-from app.schemas import DailyPredictionRequest, JobResponse
+from app.jobs.training_job import TrainingJob
+from app.qlib.run_experiment import list_model_configs
+from app.schemas import (
+    DailyPredictionRequest,
+    JobResponse,
+    ModelVersionResponse,
+    PromoteModelRequest,
+    PruneModelVersionsRequest,
+    PruneModelVersionsResponse,
+    QlibModelListResponse,
+    RollbackModelRequest,
+    TrainModelRequest,
+)
 from app.settings import Settings, get_settings
 
 
@@ -35,6 +48,79 @@ async def run_daily_prediction(
     settings: Settings = Depends(get_settings),
 ) -> JobResponse:
     return await PredictionJob(settings).run(db, request)
+
+
+@app.post(
+    "/internal/jobs/train-model",
+    response_model=JobResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def train_model(
+    request: TrainModelRequest,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> JobResponse:
+    return await TrainingJob(settings).run(db, request)
+
+
+@app.post(
+    "/internal/model-runs/{run_id}/promote",
+    response_model=ModelVersionResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def promote_model_run(
+    run_id: str,
+    request: PromoteModelRequest,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> ModelVersionResponse:
+    try:
+        return await ModelVersionJob(settings).promote_run(db, run_id, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post(
+    "/internal/model-runs/rollback",
+    response_model=ModelVersionResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def rollback_model_run(
+    request: RollbackModelRequest,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> ModelVersionResponse:
+    try:
+        return await ModelVersionJob(settings).rollback(db, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post(
+    "/internal/model-runs/prune",
+    response_model=PruneModelVersionsResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def prune_model_runs(
+    request: PruneModelVersionsRequest,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> PruneModelVersionsResponse:
+    try:
+        return await ModelVersionJob(settings).prune_versions(db, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get(
+    "/internal/models",
+    response_model=QlibModelListResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def get_models() -> QlibModelListResponse:
+    return QlibModelListResponse(
+        models=[model_config.as_dict() for model_config in list_model_configs()]
+    )
 
 
 @app.get(

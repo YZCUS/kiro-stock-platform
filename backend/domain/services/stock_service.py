@@ -8,9 +8,10 @@ from datetime import date, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.repositories.stock_repository_interface import IStockRepository
-from domain.repositories.price_history_repository_interface import (
-    IPriceHistoryRepository,
+from domain.repositories.daily_price_repository_interface import (
+    IDailyPriceRepository,
 )
+from domain.market_data.daily_prices import fetch_daily_prices
 from infrastructure.cache.redis_cache_service import ICacheService
 
 
@@ -20,7 +21,7 @@ class StockService:
     def __init__(
         self,
         stock_repository: IStockRepository,
-        price_repository: IPriceHistoryRepository,
+        price_repository: IDailyPriceRepository,
         cache_service: ICacheService,
     ):
         self.stock_repo = stock_repository
@@ -282,7 +283,7 @@ class StockService:
 
         return [self._serialize_price(price) for price in prices]
 
-    async def get_price_history(
+    async def get_daily_price_history(
         self,
         db: AsyncSession,
         stock_id: int,
@@ -290,7 +291,7 @@ class StockService:
         end_date: Optional[date] = None,
         limit: int = 1000,
     ) -> Dict[str, Any]:
-        """取得股票價格歷史資料"""
+        """取得股票日線價格資料"""
         stock = await self.get_stock_by_id(db, stock_id)
 
         prices = await self.price_repo.get_stock_price_range(
@@ -349,7 +350,7 @@ class StockService:
                 "age_days": None,
                 "stale_after_days": stale_after_days,
                 "is_stale": True,
-                "source": "price_history",
+                "source": "market_data_bars",
             }
 
         price_date = (
@@ -374,7 +375,7 @@ class StockService:
             "age_days": age_days,
             "stale_after_days": stale_after_days,
             "is_stale": age_days is None or age_days > stale_after_days,
-            "source": "price_history",
+            "source": "market_data_bars",
         }
 
     def _serialize_price(self, price) -> Dict[str, Any]:
@@ -408,21 +409,19 @@ class StockService:
 
         使用直接SQL查詢找到前一個交易日
         """
-        from sqlalchemy import select, desc
-        from domain.models.price_history import PriceHistory
-
-        # 查詢前一個交易日
-        previous_price_query = (
-            select(PriceHistory)
-            .where(
-                PriceHistory.stock_id == stock_id, PriceHistory.date < latest_price.date
-            )
-            .order_by(desc(PriceHistory.date))
-            .limit(1)
+        previous_prices = await fetch_daily_prices(
+            db,
+            stock_id=stock_id,
+            end_date=latest_price.date,
+            limit=2,
         )
-
-        result = await db.execute(previous_price_query)
-        previous_price = result.scalar_one_or_none()
+        previous_price = (
+            previous_prices[1]
+            if len(previous_prices) > 1 and previous_prices[0].date == latest_price.date
+            else previous_prices[0]
+            if previous_prices and previous_prices[0].date < latest_price.date
+            else None
+        )
 
         if previous_price:
             current_close = float(latest_price.close_price)

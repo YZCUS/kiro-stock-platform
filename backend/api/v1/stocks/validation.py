@@ -17,6 +17,7 @@ from app.dependencies import (
 )
 from domain.services.data_validation_service import DataValidationService
 from domain.services.stock_service import StockService
+from domain.market_data.daily_prices import fetch_daily_prices
 
 router = APIRouter()
 
@@ -113,21 +114,11 @@ async def ensure_stock_exists(
 
         if existing_stock:
             # 股票已存在，獲取最新價格
-            from api.schemas.stocks import StockResponse, LatestPriceInfo
-            from domain.models.price_history import PriceHistory
-            from sqlalchemy import select, desc
+            from api.schemas.stocks import StockResponse
 
             stock_data = StockResponse.model_validate(existing_stock).model_dump()
 
-            # 獲取最新兩天的價格數據用於計算漲跌
-            price_query = (
-                select(PriceHistory)
-                .where(PriceHistory.stock_id == existing_stock.id)
-                .order_by(desc(PriceHistory.date))
-                .limit(2)
-            )
-            price_result = await db.execute(price_query)
-            prices = price_result.scalars().all()
+            prices = await fetch_daily_prices(db, existing_stock.id, limit=2)
 
             if prices and len(prices) > 0:
                 latest = prices[0]
@@ -185,21 +176,11 @@ async def ensure_stock_exists(
 
         # 重新獲取股票以包含最新價格
         await db.refresh(new_stock)
-        from api.schemas.stocks import StockResponse, LatestPriceInfo
-        from domain.models.price_history import PriceHistory
-        from sqlalchemy import select, desc
+        from api.schemas.stocks import StockResponse
 
         stock_data = StockResponse.model_validate(new_stock).model_dump()
 
-        # 獲取最新兩天的價格數據用於計算漲跌
-        price_query = (
-            select(PriceHistory)
-            .where(PriceHistory.stock_id == new_stock.id)
-            .order_by(desc(PriceHistory.date))
-            .limit(2)
-        )
-        price_result = await db.execute(price_query)
-        prices = price_result.scalars().all()
+        prices = await fetch_daily_prices(db, new_stock.id, limit=2)
 
         if prices and len(prices) > 0:
             latest = prices[0]

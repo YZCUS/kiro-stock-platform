@@ -76,12 +76,12 @@ async def create_sample_stocks(session: AsyncSession):
     logger.info(f"成功建立 {len(all_stocks)} 支股票數據")
 
 
-async def create_sample_price_history(session: AsyncSession):
+async def create_sample_daily_bars(session: AsyncSession):
     """建立範例價格歷史數據"""
     from sqlalchemy import text
     import random
 
-    logger.info("建立範例價格歷史數據...")
+    logger.info("建立範例日線行情數據...")
 
     # 取得所有股票
     result = await session.execute(text("SELECT id, symbol, market FROM stocks"))
@@ -125,21 +125,34 @@ async def create_sample_price_history(session: AsyncSession):
                     await session.execute(
                         text(
                             """
-                        INSERT INTO price_history 
-                        (stock_id, date, open_price, high_price, low_price, close_price, volume, adjusted_close)
-                        VALUES (:stock_id, :date, :open_price, :high_price, :low_price, :close_price, :volume, :adjusted_close)
-                        ON CONFLICT (stock_id, date) DO NOTHING
+                        INSERT INTO market_data_bars
+                        (
+                            stock_id, symbol, market, timeframe, timestamp,
+                            open_price, high_price, low_price, close_price, volume,
+                            source, source_type, is_adjusted, generated_from_timeframe,
+                            quality_status
+                        )
+                        VALUES (
+                            :stock_id, :symbol, :market, '1d', :timestamp,
+                            :open_price, :high_price, :low_price, :close_price, :volume,
+                            'seed', 'source', false, NULL, 'complete'
+                        )
+                        ON CONFLICT (stock_id, timeframe, timestamp, source, is_adjusted) DO NOTHING
                     """
                         ),
                         {
                             "stock_id": stock_id,
-                            "date": current_date,
+                            "symbol": symbol,
+                            "market": market,
+                            "timestamp": datetime.combine(
+                                current_date,
+                                datetime.min.time(),
+                            ),
                             "open_price": round(Decimal(str(open_price)), 4),
                             "high_price": round(Decimal(str(high_price)), 4),
                             "low_price": round(Decimal(str(low_price)), 4),
                             "close_price": round(Decimal(str(close_price)), 4),
                             "volume": volume,
-                            "adjusted_close": round(Decimal(str(close_price)), 4),
                         },
                     )
 
@@ -159,13 +172,19 @@ async def create_sample_technical_indicators(session: AsyncSession):
 
     logger.info("建立範例技術指標數據...")
 
-    # 取得所有股票和最近的價格數據
+    # 取得所有股票和最近的日線數據
     result = await session.execute(
         text(
             """
-        SELECT DISTINCT ph.stock_id, ph.date 
-        FROM price_history ph 
-        ORDER BY ph.stock_id, ph.date DESC
+        SELECT DISTINCT
+            b.stock_id,
+            CASE
+              WHEN b.market = 'TW' THEN (b.timestamp AT TIME ZONE 'Asia/Taipei')::date
+              ELSE (b.timestamp AT TIME ZONE 'America/New_York')::date
+            END AS date
+        FROM market_data_bars b
+        WHERE b.timeframe = '1d'
+        ORDER BY b.stock_id, date DESC
         LIMIT 100
     """
         )
@@ -301,7 +320,7 @@ async def main():
         async with AsyncSessionLocal() as session:
             # 建立範例數據
             await create_sample_stocks(session)
-            await create_sample_price_history(session)
+            await create_sample_daily_bars(session)
             await create_sample_technical_indicators(session)
             await create_sample_trading_signals(session)
 

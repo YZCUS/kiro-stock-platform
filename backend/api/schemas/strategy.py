@@ -86,6 +86,7 @@ class SubscriptionCreateRequest(BaseModel):
     )
     monitor_all_lists: bool = Field(True, description="是否監控所有清單")
     monitor_portfolio: bool = Field(True, description="是否監控持倉")
+    monitor_all_stocks: bool = Field(False, description="是否監控資料庫全部啟用股票")
     selected_list_ids: Optional[List[int]] = Field(
         None, description="選擇的清單 ID（當 monitor_all_lists=False 時使用）"
     )
@@ -97,6 +98,7 @@ class SubscriptionCreateRequest(BaseModel):
                 "params": {"short_period": 5, "long_period": 20},
                 "monitor_all_lists": True,
                 "monitor_portfolio": True,
+                "monitor_all_stocks": False,
             }
         }
 
@@ -107,6 +109,9 @@ class SubscriptionUpdateRequest(BaseModel):
     params: Optional[Dict[str, Any]] = Field(None, description="策略參數")
     monitor_all_lists: Optional[bool] = Field(None, description="是否監控所有清單")
     monitor_portfolio: Optional[bool] = Field(None, description="是否監控持倉")
+    monitor_all_stocks: Optional[bool] = Field(
+        None, description="是否監控資料庫全部啟用股票"
+    )
     selected_list_ids: Optional[List[int]] = Field(None, description="選擇的清單 ID")
 
     class Config:
@@ -114,9 +119,18 @@ class SubscriptionUpdateRequest(BaseModel):
             "example": {
                 "params": {"short_period": 10, "long_period": 30},
                 "monitor_all_lists": False,
+                "monitor_all_stocks": False,
                 "selected_list_ids": [1, 2, 3],
             }
         }
+
+
+class SubscriptionStockListInfo(BaseModel):
+    """訂閱監控清單摘要"""
+
+    id: int = Field(..., description="清單 ID")
+    name: str = Field(..., description="清單名稱")
+    stocks_count: int = Field(0, description="清單內股票數")
 
 
 class SubscriptionResponse(BaseModel):
@@ -128,8 +142,15 @@ class SubscriptionResponse(BaseModel):
     is_active: bool = Field(..., description="是否啟用")
     monitor_all_lists: bool = Field(..., description="是否監控所有清單")
     monitor_portfolio: bool = Field(..., description="是否監控持倉")
+    monitor_all_stocks: bool = Field(..., description="是否監控資料庫全部啟用股票")
     parameters: Optional[Dict[str, Any]] = Field(None, description="策略參數")
     monitored_lists: List[int] = Field(..., description="監控的清單 ID 列表")
+    selected_list_ids: List[int] = Field(
+        default_factory=list, description="選擇的清單 ID 列表"
+    )
+    stock_lists: List[SubscriptionStockListInfo] = Field(
+        default_factory=list, description="監控清單摘要"
+    )
     created_at: str = Field(..., description="創建時間")
     updated_at: Optional[str] = Field(None, description="更新時間")
 
@@ -143,8 +164,11 @@ class SubscriptionResponse(BaseModel):
                 "is_active": True,
                 "monitor_all_lists": True,
                 "monitor_portfolio": True,
+                "monitor_all_stocks": False,
                 "parameters": {"short_period": 5, "long_period": 20},
                 "monitored_lists": [],
+                "selected_list_ids": [],
+                "stock_lists": [],
                 "created_at": "2025-10-23T10:00:00",
                 "updated_at": "2025-10-23T10:00:00",
             }
@@ -192,6 +216,7 @@ class SignalResponse(BaseModel):
     stock_symbol: Optional[str] = Field(None, description="股票代號")
     stock_name: Optional[str] = Field(None, description="股票名稱")
     strategy_type: str = Field(..., description="策略類型")
+    signal_horizon: str = Field("20d", description="信號預測/持有週期")
     direction: str = Field(..., description="信號方向（LONG/SHORT/NEUTRAL）")
     confidence: float = Field(..., description="信心度（0-100）")
     entry_zone: Dict[str, float] = Field(..., description="進場區間")
@@ -268,22 +293,58 @@ class SignalStatisticsResponse(BaseModel):
     by_direction: Dict[str, int] = Field(..., description="按方向分組的統計")
     avg_confidence: float = Field(..., description="平均信心度")
 
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "total_count": 100,
-                "active_count": 50,
-                "triggered_count": 30,
-                "expired_count": 15,
-                "cancelled_count": 5,
-                "by_strategy": {
-                    "golden_cross": {"count": 60, "avg_confidence": 75.5},
-                    "death_cross": {"count": 40, "avg_confidence": 70.2},
-                },
-                "by_direction": {"LONG": 60, "SHORT": 40},
-                "avg_confidence": 73.2,
-            }
-        }
+
+class StrategyReliabilityScoreResponse(BaseModel):
+    strategy_type: str
+    horizon: str
+    reliability_score: float
+    target_score: float
+    backtest_score: float
+    recent_score: float
+    stability_score: float
+    regime_fit_score: float
+    sample_size: int
+    validation_status: str
+    min_weight: float
+    max_weight: float
+    metrics: Optional[Dict[str, Any]] = None
+    last_evaluated_at: str
+
+
+class StrategyReliabilityScoreListResponse(BaseModel):
+    items: List[StrategyReliabilityScoreResponse]
+    total: int
+
+
+class StockCompositeScoreResponse(BaseModel):
+    stock_id: int
+    symbol: str
+    market: str
+    score_date: str
+    composite_score: float
+    direction: str
+    confidence: float
+    weight_version_id: Optional[int] = None
+    horizon_breakdown: Optional[Dict[str, Any]] = None
+    strategy_contributions: Optional[List[Dict[str, Any]]] = None
+    positive_count: int
+    negative_count: int
+    neutral_count: int
+    data_quality_weight: float
+
+
+class StockCompositeScoreListResponse(BaseModel):
+    items: List[StockCompositeScoreResponse]
+    total: int
+
+
+class StrategyEvaluationRunResponse(BaseModel):
+    run_id: str
+    status: str
+    backtest_results: int = 0
+    reliability_scores: int = 0
+    weight_version: Optional[str] = None
+    composite_scores: int = 0
 
 
 class UpdateSignalStatusRequest(BaseModel):

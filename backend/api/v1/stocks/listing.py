@@ -8,12 +8,12 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select
 
 from app.dependencies import get_database_session, get_stock_service
 from api.schemas.stocks import StockResponse, StockListResponse, LatestPriceInfo
+from domain.market_data.daily_prices import fetch_latest_daily_price_rows_by_stock
 from domain.services.stock_service import StockService
-from domain.models.price_history import PriceHistory
 
 logger = logging.getLogger(__name__)
 
@@ -50,35 +50,11 @@ async def get_stocks(
         prices_by_stock = {}
 
         if stock_ids:
-            price_rank = (
-                func.row_number()
-                .over(
-                    partition_by=PriceHistory.stock_id,
-                    order_by=PriceHistory.date.desc(),
-                )
-                .label("price_rank")
+            prices_by_stock = await fetch_latest_daily_price_rows_by_stock(
+                db,
+                stock_ids,
+                rows_per_stock=2,
             )
-            ranked_prices = (
-                select(
-                    PriceHistory.stock_id.label("stock_id"),
-                    PriceHistory.date.label("date"),
-                    PriceHistory.close_price.label("close_price"),
-                    PriceHistory.volume.label("volume"),
-                    PriceHistory.updated_at.label("updated_at"),
-                    price_rank,
-                )
-                .where(PriceHistory.stock_id.in_(stock_ids))
-                .subquery()
-            )
-            prices_query = (
-                select(ranked_prices)
-                .where(ranked_prices.c.price_rank <= 2)
-                .order_by(ranked_prices.c.stock_id, ranked_prices.c.date.desc())
-            )
-            prices_result = await db.execute(prices_query)
-
-            for price in prices_result.mappings().all():
-                prices_by_stock.setdefault(price["stock_id"], []).append(dict(price))
 
         # 為每個股票加入本地最新價格資訊
         stock_responses = []

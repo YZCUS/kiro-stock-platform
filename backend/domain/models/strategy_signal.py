@@ -42,6 +42,13 @@ class StrategySignal(BaseModel, TimestampMixin):
         comment="股票ID",
     )
     strategy_type = Column(String(50), nullable=False, index=True, comment="策略類型")
+    signal_horizon = Column(
+        String(20),
+        nullable=False,
+        default="20d",
+        index=True,
+        comment="信號預測/持有週期",
+    )
     direction = Column(
         String(20), nullable=False, comment="信號方向 (LONG/SHORT/NEUTRAL)"
     )
@@ -71,6 +78,13 @@ class StrategySignal(BaseModel, TimestampMixin):
             "ix_strategy_signals_stock_strategy_date",
             "stock_id",
             "strategy_type",
+            "signal_date",
+        ),
+        Index(
+            "ix_strategy_signals_stock_strategy_horizon_date",
+            "stock_id",
+            "strategy_type",
+            "signal_horizon",
             "signal_date",
         ),
         {"comment": "策略信號記錄表"},
@@ -210,6 +224,7 @@ class StrategySignal(BaseModel, TimestampMixin):
             "stock_symbol": self.stock.symbol if self.stock else None,
             "stock_name": self.stock.name if self.stock else None,
             "strategy_type": self.strategy_type,
+            "signal_horizon": self.signal_horizon,
             "direction": self.direction,
             "confidence": float(self.confidence) if self.confidence else None,
             "entry_zone": {

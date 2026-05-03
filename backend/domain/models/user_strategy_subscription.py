@@ -39,6 +39,12 @@ class UserStrategySubscription(BaseModel, TimestampMixin):
     monitor_portfolio = Column(
         Boolean, default=True, nullable=False, comment="是否監控持倉"
     )
+    monitor_all_stocks = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="是否監控資料庫全部啟用股票",
+    )
     parameters = Column(JSON, nullable=True, comment="策略參數（JSON格式）")
 
     # 約束條件
@@ -89,6 +95,7 @@ class UserStrategySubscription(BaseModel, TimestampMixin):
         parameters: Optional[Dict[str, Any]] = None,
         monitor_all_lists: bool = True,
         monitor_portfolio: bool = True,
+        monitor_all_stocks: bool = False,
     ) -> "UserStrategySubscription":
         """訂閱策略"""
         # 檢查是否已訂閱
@@ -100,6 +107,7 @@ class UserStrategySubscription(BaseModel, TimestampMixin):
             existing.parameters = parameters
             existing.monitor_all_lists = monitor_all_lists
             existing.monitor_portfolio = monitor_portfolio
+            existing.monitor_all_stocks = monitor_all_stocks
             return existing
 
         # 創建新訂閱
@@ -109,6 +117,7 @@ class UserStrategySubscription(BaseModel, TimestampMixin):
             parameters=parameters,
             monitor_all_lists=monitor_all_lists,
             monitor_portfolio=monitor_portfolio,
+            monitor_all_stocks=monitor_all_stocks,
         )
         session.add(subscription)
         session.flush()
@@ -140,6 +149,7 @@ class UserStrategySubscription(BaseModel, TimestampMixin):
             "is_active": self.is_active,
             "monitor_all_lists": self.monitor_all_lists,
             "monitor_portfolio": self.monitor_portfolio,
+            "monitor_all_stocks": self.monitor_all_stocks,
             "parameters": self.parameters,
             "monitored_lists": self.get_monitored_stock_list_ids(),
             "created_at": self.created_at.isoformat() if self.created_at else None,

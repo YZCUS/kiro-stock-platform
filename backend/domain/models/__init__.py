@@ -5,7 +5,6 @@ Domain Models - SQLAlchemy實體定義
 
 # 重新導出所有模型，保持向後兼容性
 from .stock import Stock
-from .price_history import PriceHistory
 from .market_data_bar import MarketDataBar
 from .technical_indicator import TechnicalIndicator
 from .trading_signal import TradingSignal
@@ -17,6 +16,14 @@ from .user_stock_list import UserStockList, UserStockListItem
 from .user_strategy_subscription import UserStrategySubscription
 from .user_strategy_stock_list import UserStrategyStockList
 from .strategy_signal import StrategySignal
+from .strategy_evaluation import (
+    StockCompositeScore,
+    StrategyBacktestResult,
+    StrategyBacktestRun,
+    StrategyReliabilityScore,
+    StrategyWeight,
+    StrategyWeightVersion,
+)
 from .qlib_prediction import QlibBacktestResult, QlibModelRun, QlibPrediction
 from .stock_symbol_mapping import StockSymbolMapping
 from .price_alert import PriceAlert
@@ -33,7 +40,6 @@ from .risk import RiskCheckResult, RiskProfile
 
 __all__ = [
     "Stock",
-    "PriceHistory",
     "MarketDataBar",
     "TechnicalIndicator",
     "TradingSignal",
@@ -46,6 +52,12 @@ __all__ = [
     "UserStrategySubscription",
     "UserStrategyStockList",
     "StrategySignal",
+    "StockCompositeScore",
+    "StrategyBacktestResult",
+    "StrategyBacktestRun",
+    "StrategyReliabilityScore",
+    "StrategyWeight",
+    "StrategyWeightVersion",
     "QlibBacktestResult",
     "QlibModelRun",
     "QlibPrediction",

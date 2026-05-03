@@ -13,11 +13,38 @@ interface SignalCardProps {
   onUpdateStatus: (signalId: number, status: 'triggered' | 'cancelled') => void;
 }
 
-export default function SignalCard({ signal, onUpdateStatus }: SignalCardProps) {
+export default function SignalCard({
+  signal,
+  onUpdateStatus,
+}: SignalCardProps) {
+  const entryMin = signal.entry_zone?.min ?? signal.entry_min;
+  const entryMax = signal.entry_zone?.max ?? signal.entry_max;
+  const takeProfitTargets =
+    signal.take_profit ?? signal.take_profit_targets ?? [];
+  const formatPrice = (value: number | undefined | null) =>
+    typeof value === 'number' && Number.isFinite(value)
+      ? `$${value.toFixed(2)}`
+      : '—';
+
   // 方向圖標
-  const DirectionIcon = signal.direction === 'LONG' ? TrendingUp : signal.direction === 'SHORT' ? TrendingDown : Minus;
-  const directionColor = signal.direction === 'LONG' ? 'text-green-600' : signal.direction === 'SHORT' ? 'text-red-600' : 'text-gray-600';
-  const directionBg = signal.direction === 'LONG' ? 'bg-green-50' : signal.direction === 'SHORT' ? 'bg-red-50' : 'bg-gray-50';
+  const DirectionIcon =
+    signal.direction === 'LONG'
+      ? TrendingUp
+      : signal.direction === 'SHORT'
+        ? TrendingDown
+        : Minus;
+  const directionColor =
+    signal.direction === 'LONG'
+      ? 'text-green-600'
+      : signal.direction === 'SHORT'
+        ? 'text-red-600'
+        : 'text-gray-600';
+  const directionBg =
+    signal.direction === 'LONG'
+      ? 'bg-green-50'
+      : signal.direction === 'SHORT'
+        ? 'bg-red-50'
+        : 'bg-gray-50';
 
   // 信心度顏色
   const getConfidenceColor = (confidence: number) => {
@@ -62,15 +89,19 @@ export default function SignalCard({ signal, onUpdateStatus }: SignalCardProps) 
           {/* 股票資訊 */}
           <div>
             <h3 className="text-lg font-semibold text-gray-900">
-              {signal.stock_symbol}
+              {signal.stock_symbol || '—'}
             </h3>
             <p className="text-sm text-gray-600">{signal.stock_name}</p>
-            <p className="text-xs text-gray-500 mt-1">{signal.strategy_name}</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {signal.strategy_name || signal.strategy_type}
+            </p>
           </div>
         </div>
 
         {/* 狀態標籤 */}
-        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusStyle(signal.status)}`}>
+        <span
+          className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusStyle(signal.status)}`}
+        >
           {statusText[signal.status as keyof typeof statusText]}
         </span>
       </div>
@@ -94,13 +125,13 @@ export default function SignalCard({ signal, onUpdateStatus }: SignalCardProps) 
         <div>
           <p className="text-gray-600">進場區間</p>
           <p className="font-semibold">
-            ${signal.entry_min.toFixed(2)} - ${signal.entry_max.toFixed(2)}
+            {formatPrice(entryMin)} - {formatPrice(entryMax)}
           </p>
         </div>
         <div>
           <p className="text-gray-600">停損</p>
           <p className="font-semibold text-red-600">
-            ${signal.stop_loss.toFixed(2)}
+            {formatPrice(signal.stop_loss)}
           </p>
         </div>
       </div>
@@ -109,11 +140,17 @@ export default function SignalCard({ signal, onUpdateStatus }: SignalCardProps) 
       <div className="mb-3">
         <p className="text-sm text-gray-600 mb-1">止盈目標</p>
         <div className="flex gap-2">
-          {signal.take_profit_targets.map((target, index) => (
-            <span key={index} className="px-2 py-1 text-xs rounded bg-green-50 text-green-700 font-medium">
-              TP{index + 1}: ${target.toFixed(2)}
+          {takeProfitTargets.map((target, index) => (
+            <span
+              key={index}
+              className="px-2 py-1 text-xs rounded bg-green-50 text-green-700 font-medium"
+            >
+              TP{index + 1}: {formatPrice(target)}
             </span>
           ))}
+          {takeProfitTargets.length === 0 && (
+            <span className="text-xs text-gray-400">—</span>
+          )}
         </div>
       </div>
 
@@ -127,8 +164,15 @@ export default function SignalCard({ signal, onUpdateStatus }: SignalCardProps) 
 
       {/* 日期資訊 */}
       <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
-        <span>信號日期: {new Date(signal.signal_date).toLocaleDateString('zh-TW')}</span>
-        <span>有效期限: {new Date(signal.valid_until).toLocaleDateString('zh-TW')}</span>
+        <span>
+          信號日期: {new Date(signal.signal_date).toLocaleDateString('zh-TW')}
+        </span>
+        <span>
+          有效期限:{' '}
+          {signal.valid_until
+            ? new Date(signal.valid_until).toLocaleDateString('zh-TW')
+            : '—'}
+        </span>
       </div>
 
       {/* 操作按鈕 */}

@@ -10,9 +10,13 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from domain.market_data.daily_prices import (
+    fetch_latest_daily_price_rows_by_stock,
+    market_local_date,
+)
 from domain.models.market_data_bar import MarketDataBar
-from domain.models.price_history import PriceHistory
 from domain.models.stock import Stock
+from domain.services.qlib_model_registry import list_qlib_model_options
 from domain.services.qlib_prediction_service import QlibPredictionService
 from domain.strategies.strategy_interface import (
     IStrategyEngine,
@@ -46,10 +50,10 @@ class MLPredictionStrategy(IStrategyEngine):
 
     def get_default_params(self) -> Dict[str, Any]:
         return {
-            "model_name": "lightgbm_alpha158",
+            "model_name": "lightgbm_alpha158_20d",
             "feature_set": "alpha158",
             "universe": "active_us",
-            "horizon": "1d",
+            "horizon": "20d",
             "long_percentile_threshold": 0.8,
             "short_percentile_threshold": 0.2,
             "min_confidence": 55,
@@ -135,6 +139,16 @@ class MLPredictionStrategy(IStrategyEngine):
         except (KeyError, TypeError, ValueError):
             return False
 
+        model_option = self._get_model_option(str(params.get("model_name", "")))
+        if model_option is None:
+            return False
+        if model_option.status != "cpu_trainable":
+            return False
+        if str(params.get("feature_set", "")) != model_option.feature_set:
+            return False
+        if str(params.get("horizon", "")) != model_option.horizon:
+            return False
+
         return (
             0 <= short_threshold < long_threshold <= 1
             and 0 <= min_confidence <= 100
@@ -143,6 +157,12 @@ class MLPredictionStrategy(IStrategyEngine):
             and 1 <= take_profit <= 50
             and 0 <= entry_buffer <= 10
         )
+
+    def _get_model_option(self, model_name: str):
+        for model_option in list_qlib_model_options():
+            if model_option.name == model_name:
+                return model_option
+        return None
 
     def get_spec(self) -> StrategySpec:
         return StrategySpec(
@@ -207,11 +227,76 @@ class MLPredictionStrategy(IStrategyEngine):
         db: AsyncSession,
         params: Optional[Dict[str, Any]] = None,
     ) -> List[TradingSignal]:
+        strategy_params = {**self.get_default_params(), **(params or {})}
+        if not self.validate_params(strategy_params):
+            raise ValueError("Invalid ML prediction strategy parameters")
+
+        if not stock_ids:
+            return []
+
+        stock_result = await db.execute(select(Stock).where(Stock.id.in_(stock_ids)))
+        stocks_by_id = {stock.id: stock for stock in stock_result.scalars().all()}
+        if not stocks_by_id:
+            return []
+
+        latest_prices_by_stock = await fetch_latest_daily_price_rows_by_stock(
+            db,
+            stocks_by_id.keys(),
+            rows_per_stock=1,
+        )
+
+        predictions_by_stock = {}
+        markets = {stock.market for stock in stocks_by_id.values()}
+        for market in markets:
+            market_stock_ids = [
+                stock.id for stock in stocks_by_id.values() if stock.market == market
+            ]
+            predictions_by_stock.update(
+                await self.prediction_service.get_latest_predictions_for_stocks(
+                    db=db,
+                    stock_ids=market_stock_ids,
+                    market=market,
+                    horizon=strategy_params["horizon"],
+                    model_name=strategy_params["model_name"],
+                    feature_set=strategy_params["feature_set"],
+                    universe=strategy_params["universe"],
+                )
+            )
+
         signals = []
         for stock_id in stock_ids:
-            signal = await self.analyze(stock_id, db, params)
-            if signal:
-                signals.append(signal)
+            stock = stocks_by_id.get(stock_id)
+            if stock is None:
+                continue
+
+            latest_rows = latest_prices_by_stock.get(stock_id, [])
+            if not latest_rows or latest_rows[0].get("close_price") is None:
+                continue
+
+            prediction = predictions_by_stock.get(stock_id)
+            if prediction is None:
+                continue
+
+            direction = self._direction_from_prediction(prediction, strategy_params)
+            if direction == SignalDirection.NEUTRAL:
+                continue
+
+            confidence = self._confidence_from_prediction(prediction, direction)
+            if confidence < float(strategy_params["min_confidence"]):
+                continue
+
+            latest_row = latest_rows[0]
+            signals.append(
+                self._build_signal(
+                    stock=stock,
+                    latest_date=latest_row["date"],
+                    current_price=float(latest_row["close_price"]),
+                    direction=direction,
+                    confidence=confidence,
+                    params=strategy_params,
+                    prediction=prediction,
+                )
+            )
         return signals
 
     async def _load_stock(self, db: AsyncSession, stock_id: int) -> Optional[Stock]:
@@ -221,21 +306,6 @@ class MLPredictionStrategy(IStrategyEngine):
     async def _load_latest_close(
         self, db: AsyncSession, stock_id: int
     ) -> Optional[tuple[date, float]]:
-        price_result = await db.execute(
-            select(PriceHistory)
-            .where(
-                and_(
-                    PriceHistory.stock_id == stock_id,
-                    PriceHistory.close_price.is_not(None),
-                )
-            )
-            .order_by(desc(PriceHistory.date))
-            .limit(1)
-        )
-        price = price_result.scalar_one_or_none()
-        if price is not None and price.close_price is not None:
-            return price.date, float(price.close_price)
-
         bar_result = await db.execute(
             select(MarketDataBar)
             .where(
@@ -251,7 +321,7 @@ class MLPredictionStrategy(IStrategyEngine):
         bar = bar_result.scalar_one_or_none()
         if bar is None or bar.close_price is None:
             return None
-        return bar.timestamp.date(), float(bar.close_price)
+        return market_local_date(bar.timestamp, bar.market), float(bar.close_price)
 
     def _direction_from_prediction(self, prediction, params: Dict[str, Any]):
         if prediction.signal_direction in {

@@ -18,7 +18,6 @@ from core.database import Base
 
 # 匯入所有模型以確保它們被註冊到 Base.metadata
 from domain.models.stock import Stock
-from domain.models.price_history import PriceHistory
 from domain.models.market_data_bar import MarketDataBar
 from domain.models.technical_indicator import TechnicalIndicator
 from domain.models.trading_signal import TradingSignal
@@ -60,6 +59,7 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 target_metadata = Base.metadata
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

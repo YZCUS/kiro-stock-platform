@@ -19,6 +19,7 @@ from app.dependencies import (
     get_cache_service,
     get_settings,
 )
+from domain.market_data.daily_prices import fetch_daily_prices
 
 # Schemas
 from api.schemas.stocks import (
@@ -56,8 +57,7 @@ async def get_stocks(
     後續版本將添加可選認證支持
     """
     try:
-        from sqlalchemy import select, desc
-        from domain.models.price_history import PriceHistory
+        from sqlalchemy import select
         from domain.models.user_portfolio import UserPortfolio
         from api.schemas.stocks import LatestPriceInfo
 
@@ -81,16 +81,7 @@ async def get_stocks(
 
         stock_responses = []
         for stock in result["items"]:
-            # 查詢最新兩個交易日的價格（用於計算漲跌）
-            price_query = (
-                select(PriceHistory)
-                .where(PriceHistory.stock_id == stock.id)
-                .order_by(desc(PriceHistory.date))
-                .limit(2)
-            )
-
-            price_result = await db.execute(price_query)
-            prices = price_result.scalars().all()
+            prices = await fetch_daily_prices(db, stock.id, limit=2)
 
             # 構建股票響應
             stock_data = StockResponse.model_validate(stock).model_dump()
@@ -290,20 +281,13 @@ async def get_stock_prices(
         if not stock:
             raise HTTPException(status_code=404, detail="股票不存在")
 
-        # 取得價格數據
-        from sqlalchemy import select, and_, desc
-        from domain.models.price_history import PriceHistory
-
-        query = select(PriceHistory).where(PriceHistory.stock_id == stock_id)
-
-        if start_date and end_date:
-            query = query.where(
-                and_(PriceHistory.date >= start_date, PriceHistory.date <= end_date)
-            )
-
-        query = query.order_by(desc(PriceHistory.date)).limit(limit)
-        result = await db.execute(query)
-        prices = result.scalars().all()
+        prices = await fetch_daily_prices(
+            db,
+            stock_id=stock_id,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
 
         # 過濾掉有 NULL 值的價格數據並轉換
         valid_prices = []

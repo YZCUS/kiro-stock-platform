@@ -6,7 +6,7 @@ preserve the old /watchlist contract by mapping it to the user's default list.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import desc, distinct, func, select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,7 +19,7 @@ from api.schemas.watchlist import (
     WatchlistResponse,
     WatchlistStockDetail,
 )
-from domain.models.price_history import PriceHistory
+from domain.market_data.daily_prices import fetch_latest_daily_price
 from domain.models.stock import Stock
 from domain.models.user import User
 from domain.models.user_stock_list import UserStockList, UserStockListItem
@@ -117,13 +117,7 @@ async def get_my_watchlist_detailed(
 
     response = []
     for item, stock in result.all():
-        price_result = await db.execute(
-            select(PriceHistory)
-            .where(PriceHistory.stock_id == stock.id)
-            .order_by(desc(PriceHistory.date))
-            .limit(1)
-        )
-        latest = price_result.scalar_one_or_none()
+        latest = await fetch_latest_daily_price(db, stock.id)
         latest_price = None
         if latest:
             latest_price = {

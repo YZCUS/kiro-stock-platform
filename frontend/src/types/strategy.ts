@@ -41,6 +41,8 @@ export interface Subscription {
   parameters?: StrategyParameterMap | null;
   monitor_all_lists: boolean;
   monitor_portfolio: boolean;
+  monitor_all_stocks: boolean;
+  monitored_lists?: number[];
   selected_list_ids: number[];
   stock_lists?: StockListInfo[];
   created_at: string;
@@ -52,6 +54,7 @@ export interface SubscriptionCreateRequest {
   parameters?: StrategyParameterMap;
   monitor_all_lists?: boolean;
   monitor_portfolio?: boolean;
+  monitor_all_stocks?: boolean;
   selected_list_ids?: number[];
 }
 
@@ -59,6 +62,7 @@ export interface SubscriptionUpdateRequest {
   parameters?: StrategyParameterMap;
   monitor_all_lists?: boolean;
   monitor_portfolio?: boolean;
+  monitor_all_stocks?: boolean;
   selected_list_ids?: number[];
 }
 
@@ -74,29 +78,36 @@ export type SignalStatus = 'active' | 'expired' | 'triggered' | 'cancelled';
 export interface TradingSignal {
   id: number;
   stock_id: number;
-  stock_symbol: string;
-  stock_name: string;
+  stock_symbol?: string | null;
+  stock_name?: string | null;
   strategy_type: string;
-  strategy_name: string;
+  strategy_name?: string;
+  signal_horizon?: string;
   direction: SignalDirection;
   confidence: number;
-  entry_min: number;
-  entry_max: number;
+  entry_zone?: {
+    min: number;
+    max: number;
+  };
+  entry_min?: number;
+  entry_max?: number;
   stop_loss: number;
-  take_profit_targets: number[];
+  take_profit?: number[];
+  take_profit_targets?: number[];
   status: SignalStatus;
   signal_date: string;
-  valid_until: string;
-  reason: string;
+  valid_until?: string | null;
+  reason?: string | null;
   extra_data?: Record<string, unknown>;
+  is_valid?: boolean;
   created_at: string;
 }
 
 export interface SignalListResponse {
   signals: TradingSignal[];
   total: number;
-  limit: number;
-  offset: number;
+  limit?: number;
+  offset?: number;
 }
 
 export interface SignalStatistics {
@@ -128,4 +139,48 @@ export interface SignalQueryParams {
   sort_order?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
+}
+
+export interface StrategyReliabilityScore {
+  strategy_type: string;
+  horizon: string;
+  reliability_score: number;
+  target_score: number;
+  backtest_score: number;
+  recent_score: number;
+  stability_score: number;
+  regime_fit_score: number;
+  sample_size: number;
+  validation_status: string;
+  min_weight: number;
+  max_weight: number;
+  metrics?: Record<string, unknown> | null;
+  last_evaluated_at: string;
+}
+
+export interface StrategyReliabilityScoreListResponse {
+  items: StrategyReliabilityScore[];
+  total: number;
+}
+
+export interface StockCompositeScore {
+  stock_id: number;
+  symbol: string;
+  market: string;
+  score_date: string;
+  composite_score: number;
+  direction: 'bullish' | 'neutral' | 'bearish';
+  confidence: number;
+  weight_version_id?: number | null;
+  horizon_breakdown?: Record<string, number> | null;
+  strategy_contributions?: Array<Record<string, unknown>> | null;
+  positive_count: number;
+  negative_count: number;
+  neutral_count: number;
+  data_quality_weight: number;
+}
+
+export interface StockCompositeScoreListResponse {
+  items: StockCompositeScore[];
+  total: number;
 }

@@ -14,12 +14,14 @@ from .price_data_source_interface import (
 from .quote_data_source_interface import IQuoteDataSource
 from .market_info_provider_interface import IMarketInfoProvider
 from .market_data_bar_repository_interface import IMarketDataBarRepository
+from .daily_price_repository_interface import IDailyPriceRepository
 
 __all__ = [
     "IPriceDataSource",
     "IQuoteDataSource",
     "IMarketInfoProvider",
     "IMarketDataBarRepository",
+    "IDailyPriceRepository",
     "PriceDataSourceError",
     "SymbolNotFoundError",
     "DataUnavailableError",

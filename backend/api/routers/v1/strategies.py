@@ -2,15 +2,20 @@
 策略管理 API 路由
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 from datetime import date
 import uuid
 
-from core.database import get_db
+from app.dependencies import get_settings
+from app.settings import Settings
+from core.database import AsyncSessionLocal, get_db
 from core.auth_dependencies import get_current_active_user
 from domain.models.user import User
+from domain.services.strategy_evaluation_service import StrategyEvaluationService
 from domain.services.strategy_subscription_service import StrategySubscriptionService
 from domain.services.strategy_signal_service import StrategySignalService
 from domain.strategies import strategy_registry
@@ -24,15 +29,128 @@ from api.schemas.strategy import (
     SignalResponse,
     SignalListResponse,
     SignalStatisticsResponse,
+    StockCompositeScoreListResponse,
+    StockCompositeScoreResponse,
+    StrategyEvaluationRunResponse,
+    StrategyReliabilityScoreListResponse,
+    StrategyReliabilityScoreResponse,
     UpdateSignalStatusRequest,
 )
 
 
 router = APIRouter(prefix="/strategies", tags=["strategies"])
+internal_router = APIRouter(prefix="/internal/strategies", tags=["internal"])
+logger = logging.getLogger(__name__)
 
 # 初始化服務
 subscription_service = StrategySubscriptionService()
 signal_service = StrategySignalService()
+evaluation_service = StrategyEvaluationService()
+
+
+async def _generate_signals_for_subscription(subscription_id: int) -> None:
+    if AsyncSessionLocal is None:
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await signal_service.generate_signals_for_subscription(
+                db=db,
+                subscription_id=subscription_id,
+            )
+    except Exception:
+        logger.exception(
+            "Failed to generate strategy signals for subscription %s",
+            subscription_id,
+        )
+
+
+def require_internal_token(
+    x_internal_token: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    expected = (
+        settings.INTERNAL_API_TOKEN
+        or settings.QLIB_INTERNAL_TOKEN
+        or "dev-internal-token"
+    )
+    if x_internal_token != expected:
+        raise HTTPException(status_code=401, detail="invalid internal token")
+
+
+def build_subscription_response(subscription) -> SubscriptionResponse:
+    """Serialize subscription with frontend-friendly list metadata."""
+    selected_list_ids = subscription.get_monitored_stock_list_ids()
+    stock_lists = []
+    for link in subscription.stock_lists or []:
+        stock_list = getattr(link, "stock_list", None)
+        if not stock_list:
+            continue
+        stock_lists.append(
+            {
+                "id": stock_list.id,
+                "name": stock_list.name,
+                "stocks_count": stock_list.get_stocks_count(),
+            }
+        )
+
+    return SubscriptionResponse(
+        id=subscription.id,
+        user_id=str(subscription.user_id),
+        strategy_type=subscription.strategy_type,
+        is_active=subscription.is_active,
+        monitor_all_lists=subscription.monitor_all_lists,
+        monitor_portfolio=subscription.monitor_portfolio,
+        monitor_all_stocks=subscription.monitor_all_stocks,
+        parameters=subscription.parameters,
+        monitored_lists=selected_list_ids,
+        selected_list_ids=selected_list_ids,
+        stock_lists=stock_lists,
+        created_at=(
+            subscription.created_at.isoformat() if subscription.created_at else None
+        ),
+        updated_at=(
+            subscription.updated_at.isoformat() if subscription.updated_at else None
+        ),
+    )
+
+
+def build_reliability_response(score) -> StrategyReliabilityScoreResponse:
+    return StrategyReliabilityScoreResponse(
+        strategy_type=score.strategy_type,
+        horizon=score.horizon,
+        reliability_score=float(score.reliability_score),
+        target_score=float(score.target_score),
+        backtest_score=float(score.backtest_score),
+        recent_score=float(score.recent_score),
+        stability_score=float(score.stability_score),
+        regime_fit_score=float(score.regime_fit_score),
+        sample_size=score.sample_size,
+        validation_status=score.validation_status,
+        min_weight=float(score.min_weight),
+        max_weight=float(score.max_weight),
+        metrics=score.metrics,
+        last_evaluated_at=score.last_evaluated_at.isoformat(),
+    )
+
+
+def build_composite_score_response(score) -> StockCompositeScoreResponse:
+    return StockCompositeScoreResponse(
+        stock_id=score.stock_id,
+        symbol=score.symbol,
+        market=score.market,
+        score_date=score.score_date.isoformat(),
+        composite_score=float(score.composite_score),
+        direction=score.direction,
+        confidence=float(score.confidence),
+        weight_version_id=score.weight_version_id,
+        horizon_breakdown=score.horizon_breakdown,
+        strategy_contributions=score.strategy_contributions,
+        positive_count=score.positive_count,
+        negative_count=score.negative_count,
+        neutral_count=score.neutral_count,
+        data_quality_weight=float(score.data_quality_weight),
+    )
 
 
 # ============================================================================
@@ -79,6 +197,7 @@ async def get_available_strategies():
 @router.post("/subscriptions", response_model=SubscriptionResponse, status_code=201)
 async def create_subscription(
     request: SubscriptionCreateRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -108,25 +227,17 @@ async def create_subscription(
             params=request.params,
             monitor_all_lists=request.monitor_all_lists,
             monitor_portfolio=request.monitor_portfolio,
+            monitor_all_stocks=request.monitor_all_stocks,
             selected_list_ids=request.selected_list_ids,
         )
 
-        return SubscriptionResponse(
-            id=subscription.id,
-            user_id=str(subscription.user_id),
-            strategy_type=subscription.strategy_type,
-            is_active=subscription.is_active,
-            monitor_all_lists=subscription.monitor_all_lists,
-            monitor_portfolio=subscription.monitor_portfolio,
-            parameters=subscription.parameters,
-            monitored_lists=subscription.get_monitored_stock_list_ids(),
-            created_at=(
-                subscription.created_at.isoformat() if subscription.created_at else None
-            ),
-            updated_at=(
-                subscription.updated_at.isoformat() if subscription.updated_at else None
-            ),
-        )
+        if subscription.is_active:
+            background_tasks.add_task(
+                _generate_signals_for_subscription,
+                subscription.id,
+            )
+
+        return build_subscription_response(subscription)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -154,21 +265,7 @@ async def get_user_subscriptions(
         db=db, user_id=current_user.id, active_only=active_only
     )
 
-    subscription_responses = [
-        SubscriptionResponse(
-            id=sub.id,
-            user_id=str(sub.user_id),
-            strategy_type=sub.strategy_type,
-            is_active=sub.is_active,
-            monitor_all_lists=sub.monitor_all_lists,
-            monitor_portfolio=sub.monitor_portfolio,
-            parameters=sub.parameters,
-            monitored_lists=sub.get_monitored_stock_list_ids(),
-            created_at=sub.created_at.isoformat() if sub.created_at else None,
-            updated_at=sub.updated_at.isoformat() if sub.updated_at else None,
-        )
-        for sub in subscriptions
-    ]
+    subscription_responses = [build_subscription_response(sub) for sub in subscriptions]
 
     return SubscriptionListResponse(
         subscriptions=subscription_responses, total=len(subscription_responses)
@@ -179,6 +276,7 @@ async def get_user_subscriptions(
 async def update_subscription(
     subscription_id: int,
     request: SubscriptionUpdateRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -208,6 +306,7 @@ async def update_subscription(
             params=request.params,
             monitor_all_lists=request.monitor_all_lists,
             monitor_portfolio=request.monitor_portfolio,
+            monitor_all_stocks=request.monitor_all_stocks,
             selected_list_ids=request.selected_list_ids,
         )
 
@@ -215,22 +314,13 @@ async def update_subscription(
         if subscription.user_id != current_user.id:
             raise HTTPException(status_code=404, detail="Subscription not found")
 
-        return SubscriptionResponse(
-            id=subscription.id,
-            user_id=str(subscription.user_id),
-            strategy_type=subscription.strategy_type,
-            is_active=subscription.is_active,
-            monitor_all_lists=subscription.monitor_all_lists,
-            monitor_portfolio=subscription.monitor_portfolio,
-            parameters=subscription.parameters,
-            monitored_lists=subscription.get_monitored_stock_list_ids(),
-            created_at=(
-                subscription.created_at.isoformat() if subscription.created_at else None
-            ),
-            updated_at=(
-                subscription.updated_at.isoformat() if subscription.updated_at else None
-            ),
-        )
+        if subscription.is_active:
+            background_tasks.add_task(
+                _generate_signals_for_subscription,
+                subscription.id,
+            )
+
+        return build_subscription_response(subscription)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -280,6 +370,7 @@ async def delete_subscription(
 )
 async def toggle_subscription(
     subscription_id: int,
+    background_tasks: BackgroundTasks,
     is_active: Optional[bool] = Query(None, description="目標狀態（None=自動切換）"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -313,22 +404,13 @@ async def toggle_subscription(
         if subscription.user_id != current_user.id:
             raise HTTPException(status_code=404, detail="Subscription not found")
 
-        return SubscriptionResponse(
-            id=subscription.id,
-            user_id=str(subscription.user_id),
-            strategy_type=subscription.strategy_type,
-            is_active=subscription.is_active,
-            monitor_all_lists=subscription.monitor_all_lists,
-            monitor_portfolio=subscription.monitor_portfolio,
-            parameters=subscription.parameters,
-            monitored_lists=subscription.get_monitored_stock_list_ids(),
-            created_at=(
-                subscription.created_at.isoformat() if subscription.created_at else None
-            ),
-            updated_at=(
-                subscription.updated_at.isoformat() if subscription.updated_at else None
-            ),
-        )
+        if subscription.is_active:
+            background_tasks.add_task(
+                _generate_signals_for_subscription,
+                subscription.id,
+            )
+
+        return build_subscription_response(subscription)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -395,6 +477,7 @@ async def get_user_signals(
             stock_symbol=signal.stock.symbol if signal.stock else None,
             stock_name=signal.stock.name if signal.stock else None,
             strategy_type=signal.strategy_type,
+            signal_horizon=signal.signal_horizon,
             direction=signal.direction,
             confidence=float(signal.confidence),
             entry_zone={"min": float(signal.entry_min), "max": float(signal.entry_max)},
@@ -442,6 +525,40 @@ async def get_signal_statistics(
     return SignalStatisticsResponse(**stats)
 
 
+@router.get("/reliability", response_model=StrategyReliabilityScoreListResponse)
+async def get_strategy_reliability_scores(
+    market: str = Query("US", pattern="^(TW|US)$"),
+    universe: str = Query("active_us", max_length=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    scores = await evaluation_service.list_reliability_scores(
+        db=db,
+        market=market,
+        universe=universe,
+    )
+    items = [build_reliability_response(score) for score in scores]
+    return StrategyReliabilityScoreListResponse(items=items, total=len(items))
+
+
+@router.get("/composite-scores", response_model=StockCompositeScoreListResponse)
+async def get_stock_composite_scores(
+    market: str = Query("US", pattern="^(TW|US)$"),
+    score_date: Optional[date] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    scores = await evaluation_service.list_composite_scores(
+        db=db,
+        market=market,
+        score_date=score_date,
+        limit=limit,
+    )
+    items = [build_composite_score_response(score) for score in scores]
+    return StockCompositeScoreListResponse(items=items, total=len(items))
+
+
 @router.put("/signals/{signal_id}/status", response_model=SignalResponse)
 async def update_signal_status(
     signal_id: int,
@@ -479,6 +596,7 @@ async def update_signal_status(
             stock_symbol=signal.stock.symbol if signal.stock else None,
             stock_name=signal.stock.name if signal.stock else None,
             strategy_type=signal.strategy_type,
+            signal_horizon=signal.signal_horizon,
             direction=signal.direction,
             confidence=float(signal.confidence),
             entry_zone={"min": float(signal.entry_min), "max": float(signal.entry_max)},
@@ -539,3 +657,66 @@ async def generate_signals(
         "generated_signals": result["generated_signals"],
         "errors": result["errors"],
     }
+
+
+@internal_router.post(
+    "/signals/generate",
+    dependencies=[Depends(require_internal_token)],
+)
+async def generate_signals_internal(
+    user_id: Optional[uuid.UUID] = Query(None, description="用戶 ID（可選）"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Airflow/internal trigger for cached strategy signal generation.
+    """
+    result = await signal_service.batch_generate_signals(db=db, user_id=user_id)
+    return {
+        "message": "Signal generation completed",
+        "processed_subscriptions": result["processed_subscriptions"],
+        "generated_signals": result["generated_signals"],
+        "errors": result["errors"],
+    }
+
+
+@internal_router.post(
+    "/evaluation/run",
+    response_model=StrategyEvaluationRunResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def run_strategy_evaluation_internal(
+    market: str = Query("US", pattern="^(TW|US)$"),
+    universe: str = Query("active_us", max_length=100),
+    horizons: Optional[List[str]] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await evaluation_service.run_full_evaluation(
+        db=db,
+        market=market,
+        universe=universe,
+        horizons=horizons,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return StrategyEvaluationRunResponse(**result)
+
+
+@internal_router.post(
+    "/composite-scores/generate",
+    dependencies=[Depends(require_internal_token)],
+)
+async def generate_composite_scores_internal(
+    market: str = Query("US", pattern="^(TW|US)$"),
+    universe: str = Query("active_us", max_length=100),
+    score_date: Optional[date] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    count = await evaluation_service.generate_composite_scores(
+        db=db,
+        market=market,
+        universe=universe,
+        score_date=score_date,
+    )
+    return {"message": "Composite scores generated", "composite_scores": count}

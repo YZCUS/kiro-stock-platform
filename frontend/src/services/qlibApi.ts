@@ -39,6 +39,23 @@ export interface QlibReadiness {
   recommendations: string[];
 }
 
+export interface QlibModelOption {
+  name: string;
+  label: string;
+  model_type: string;
+  feature_set: string;
+  horizon: string;
+  min_lookback_days: number;
+  description: string;
+  portfolio_strategy: string;
+  status: string;
+  config_uri?: string | null;
+}
+
+export interface QlibModelOptionsResponse {
+  models: QlibModelOption[];
+}
+
 export async function getQlibReadiness(params: {
   market?: 'US' | 'TW';
   min_stocks?: number;
@@ -47,5 +64,11 @@ export async function getQlibReadiness(params: {
   const key = `readiness:${params.market ?? ''}:${params.min_stocks ?? ''}:${params.min_bars ?? ''}`;
   return dedupeInFlight(key, () =>
     ApiService.get(API_ENDPOINTS.QLIB.READINESS, params)
+  );
+}
+
+export async function getQlibModels(): Promise<QlibModelOptionsResponse> {
+  return dedupeInFlight('models', () =>
+    ApiService.get<QlibModelOptionsResponse>(API_ENDPOINTS.QLIB.MODELS)
   );
 }

@@ -96,7 +96,7 @@ class WebSocketService:
                 logger.warning("無法取得股票 %s: %s，跳過初始數據發送", stock_id, exc)
                 return
 
-            price_data = await self.trading_signal_service.get_price_history(
+            price_data = await self.trading_signal_service.get_daily_price_history(
                 fresh_db, stock_id=stock_id, limit=100
             )
             indicator_data = await self.trading_signal_service.get_indicator_history(

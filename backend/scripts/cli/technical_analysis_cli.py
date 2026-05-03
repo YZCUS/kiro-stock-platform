@@ -23,7 +23,7 @@ from domain.services.technical_analysis_service import IndicatorType
 from services.analysis.technical_analysis import technical_analysis_service
 from services.analysis.indicator_calculator import advanced_calculator
 from infrastructure.persistence.stock_repository import StockRepository
-from infrastructure.persistence.price_history_repository import PriceHistoryRepository
+from infrastructure.persistence.daily_price_repository import DailyPriceRepository
 import pandas as pd
 import numpy as np
 
@@ -263,7 +263,7 @@ class TechnicalAnalysisCLI:
         async with self.async_session_local() as session:
             # ✅ Clean Architecture: 實例化 repositories
             stock_repo = StockRepository(session)
-            price_repo = PriceHistoryRepository(session)
+            price_repo = DailyPriceRepository(session)
 
             # 驗證股票存在
             stock = await stock_repo.get(session, stock_id)

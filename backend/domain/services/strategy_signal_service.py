@@ -15,6 +15,8 @@ import uuid
 from domain.models.user_strategy_subscription import UserStrategySubscription
 from domain.models.strategy_signal import StrategySignal
 from domain.models.stock import Stock
+from domain.models.user_portfolio import UserPortfolio
+from domain.models.user_stock_list import UserStockList, UserStockListItem
 from domain.strategies import strategy_registry
 from domain.strategies.strategy_interface import TradingSignal
 from domain.services.strategy_subscription_service import StrategySubscriptionService
@@ -34,9 +36,21 @@ class StrategySignalService:
     def __init__(self):
         """初始化服務，注入訂閱服務依賴"""
         self.subscription_service = StrategySubscriptionService()
+        self.default_strategy_horizons = {
+            "golden_cross": "20d",
+            "death_cross": "20d",
+            "macd_crossover": "20d",
+            "bollinger_breakout": "5d",
+            "rsi_reversal": "5d",
+            "volume_spike": "5d",
+            "ml_prediction": "20d",
+        }
 
     async def generate_signals_for_subscription(
-        self, db: AsyncSession, subscription_id: int
+        self,
+        db: AsyncSession,
+        subscription_id: int,
+        stock_ids: Optional[List[int]] = None,
     ) -> List[StrategySignal]:
         """
         為特定訂閱生成交易信號
@@ -44,6 +58,7 @@ class StrategySignalService:
         Args:
             db: 資料庫 session
             subscription_id: 訂閱 ID
+            stock_ids: 可選，限制只補跑指定股票
 
         Returns:
             List[StrategySignal]: 生成的信號列表
@@ -78,9 +93,17 @@ class StrategySignalService:
             raise ValueError(f"Strategy not found: {subscription.strategy_type}")
 
         # 3. 獲取需要監控的股票列表
-        stocks = await self.subscription_service.get_monitored_stocks(
-            db=db, user_id=subscription.user_id, subscription_id=subscription_id
-        )
+        if stock_ids is None:
+            stocks = await self.subscription_service.get_monitored_stocks(
+                db=db, user_id=subscription.user_id, subscription_id=subscription_id
+            )
+        else:
+            result = await db.execute(
+                select(Stock)
+                .filter(Stock.id.in_(stock_ids), Stock.is_active == True)
+                .order_by(Stock.symbol)
+            )
+            stocks = list(result.scalars().all())
 
         if not stocks:
             return []  # 沒有需要監控的股票
@@ -108,12 +131,14 @@ class StrategySignalService:
 
         # 5. 將檢測到的信號保存到資料庫
         for trading_signal in trading_signals:
+            signal_horizon = self._resolve_signal_horizon(subscription, trading_signal)
             # 檢查是否已存在相同的活躍信號（避免重複）
             existing_signal = await self._check_duplicate_signal(
                 db=db,
                 user_id=subscription.user_id,
                 stock_id=trading_signal.stock_id,
                 strategy_type=trading_signal.strategy_type.value,
+                signal_horizon=signal_horizon,
                 signal_date=trading_signal.signal_date,
             )
 
@@ -125,6 +150,7 @@ class StrategySignalService:
                 user_id=subscription.user_id,
                 stock_id=trading_signal.stock_id,
                 strategy_type=trading_signal.strategy_type.value,
+                signal_horizon=signal_horizon,
                 direction=trading_signal.direction.value,
                 confidence=float(trading_signal.confidence),
                 entry_min=float(trading_signal.entry_zone[0]),
@@ -147,6 +173,19 @@ class StrategySignalService:
             await db.refresh(signal)
 
         return signals_to_save
+
+    def _resolve_signal_horizon(
+        self,
+        subscription: UserStrategySubscription,
+        trading_signal: TradingSignal,
+    ) -> str:
+        extra_horizon = (trading_signal.extra_data or {}).get("horizon")
+        if extra_horizon:
+            return str(extra_horizon)
+        params = subscription.parameters or {}
+        if params.get("horizon"):
+            return str(params["horizon"])
+        return self.default_strategy_horizons.get(subscription.strategy_type, "20d")
 
     async def get_user_signals(
         self,
@@ -465,12 +504,110 @@ class StrategySignalService:
             "errors": errors,
         }
 
+    async def generate_signals_for_user_stock(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        stock_id: int,
+    ) -> Dict[str, Any]:
+        """補跑單一股票在該用戶受影響訂閱中的信號。"""
+        result = await db.execute(
+            select(UserStrategySubscription)
+            .filter(
+                UserStrategySubscription.user_id == user_id,
+                UserStrategySubscription.is_active == True,
+            )
+            .options(joinedload(UserStrategySubscription.stock_lists))
+        )
+        subscriptions = result.scalars().unique().all()
+
+        processed_count = 0
+        total_signals = 0
+        errors = []
+
+        for subscription in subscriptions:
+            try:
+                if not await self._subscription_monitors_stock(
+                    db=db,
+                    subscription=subscription,
+                    stock_id=stock_id,
+                ):
+                    continue
+
+                signals = await self.generate_signals_for_subscription(
+                    db=db,
+                    subscription_id=subscription.id,
+                    stock_ids=[stock_id],
+                )
+                processed_count += 1
+                total_signals += len(signals)
+            except Exception as e:
+                errors.append(
+                    {
+                        "subscription_id": subscription.id,
+                        "strategy_type": subscription.strategy_type,
+                        "error": str(e),
+                    }
+                )
+
+        return {
+            "processed_subscriptions": processed_count,
+            "generated_signals": total_signals,
+            "errors": errors,
+        }
+
+    async def _subscription_monitors_stock(
+        self,
+        db: AsyncSession,
+        subscription: UserStrategySubscription,
+        stock_id: int,
+    ) -> bool:
+        if subscription.monitor_all_stocks:
+            return True
+
+        if subscription.monitor_portfolio:
+            portfolio_result = await db.execute(
+                select(UserPortfolio.id).filter(
+                    UserPortfolio.user_id == subscription.user_id,
+                    UserPortfolio.stock_id == stock_id,
+                )
+            )
+            if portfolio_result.scalar_one_or_none() is not None:
+                return True
+
+        if subscription.monitor_all_lists:
+            list_result = await db.execute(
+                select(UserStockListItem.id)
+                .join(UserStockList, UserStockList.id == UserStockListItem.list_id)
+                .filter(
+                    UserStockList.user_id == subscription.user_id,
+                    UserStockListItem.stock_id == stock_id,
+                )
+                .limit(1)
+            )
+            return list_result.scalar_one_or_none() is not None
+
+        list_ids = subscription.get_monitored_stock_list_ids()
+        if not list_ids:
+            return False
+
+        item_result = await db.execute(
+            select(UserStockListItem.id)
+            .filter(
+                UserStockListItem.list_id.in_(list_ids),
+                UserStockListItem.stock_id == stock_id,
+            )
+            .limit(1)
+        )
+        return item_result.scalar_one_or_none() is not None
+
     async def _check_duplicate_signal(
         self,
         db: AsyncSession,
         user_id: uuid.UUID,
         stock_id: int,
         strategy_type: str,
+        signal_horizon: str,
         signal_date: date,
     ) -> Optional[StrategySignal]:
         """
@@ -491,6 +628,7 @@ class StrategySignalService:
                 StrategySignal.user_id == user_id,
                 StrategySignal.stock_id == stock_id,
                 StrategySignal.strategy_type == strategy_type,
+                StrategySignal.signal_horizon == signal_horizon,
                 StrategySignal.signal_date == signal_date,
                 StrategySignal.status == "active",
             )

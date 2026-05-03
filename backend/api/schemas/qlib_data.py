@@ -29,3 +29,20 @@ class QlibReadinessResponse(BaseModel):
     coverage: QlibCoverageSummary
     issues: list[str]
     recommendations: list[str]
+
+
+class QlibModelOptionResponse(BaseModel):
+    name: str
+    label: str
+    model_type: str
+    feature_set: str
+    horizon: str
+    min_lookback_days: int
+    description: str
+    portfolio_strategy: str
+    status: str
+    config_uri: Optional[str] = None
+
+
+class QlibModelOptionsResponse(BaseModel):
+    models: list[QlibModelOptionResponse]

@@ -10,14 +10,13 @@ from enum import Enum
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.repositories.stock_repository_interface import IStockRepository
-from domain.repositories.price_history_repository_interface import (
-    IPriceHistoryRepository,
+from domain.repositories.daily_price_repository_interface import (
+    IDailyPriceRepository,
 )
 from domain.repositories.price_data_source_interface import IPriceDataSource
 from domain.repositories.market_data_bar_repository_interface import (
     IMarketDataBarRepository,
 )
-from domain.services.market_data_ingestion_service import MarketDataIngestionService
 from infrastructure.cache.redis_cache_service import ICacheService
 
 DEFAULT_PRICE_PREFETCH_DAYS = 365 * 3
@@ -78,7 +77,7 @@ class DataCollectionService:
     def __init__(
         self,
         stock_repository: IStockRepository,
-        price_repository: IPriceHistoryRepository,
+        price_repository: IDailyPriceRepository,
         cache_service: ICacheService,
         price_data_source: IPriceDataSource,
         market_data_bar_repository: Optional[IMarketDataBarRepository] = None,
@@ -158,6 +157,8 @@ class DataCollectionService:
                 for data_point in collected_data:
                     formatted_point = {
                         "stock_id": stock_id,
+                        "symbol": stock.symbol,
+                        "market": stock.market,
                         "date": data_point["date"],
                         "open_price": data_point["open"],
                         "high_price": data_point["high"],
@@ -165,16 +166,12 @@ class DataCollectionService:
                         "close_price": data_point["close"],
                         "volume": data_point.get("volume", 0),
                         "adjusted_close": data_point.get("adj_close"),
+                        "source": self.price_source.get_source_name(),
+                        "quality_status": "complete",
                     }
                     formatted_data.append(formatted_point)
 
                 saved_records = await self.price_repo.create_batch(db, formatted_data)
-                if self.market_data_bar_repo is not None:
-                    await self._mirror_daily_prices_to_market_data_bars(
-                        db=db,
-                        stock=stock,
-                        collected_data=collected_data,
-                    )
                 records_count = len(saved_records)
                 status = DataCollectionStatus.SUCCESS
                 errors = []
@@ -847,6 +844,8 @@ class DataCollectionService:
                 for price_point in price_data:
                     record = {
                         "stock_id": stock_id,
+                        "symbol": stock.symbol,
+                        "market": stock.market,
                         "date": price_point["date"],
                         "open_price": price_point.get("open"),
                         "high_price": price_point.get("high"),
@@ -854,16 +853,12 @@ class DataCollectionService:
                         "close_price": price_point.get("close"),
                         "volume": price_point.get("volume", 0),
                         "adjusted_close": price_point.get("adj_close"),
+                        "source": self.price_source.get_source_name(),
+                        "quality_status": "complete",
                     }
                     records.append(record)
 
                 await self.price_repo.create_batch(db, records)
-                if self.market_data_bar_repo is not None:
-                    await self._mirror_daily_prices_to_market_data_bars(
-                        db=db,
-                        stock=stock,
-                        collected_data=price_data,
-                    )
                 logger.info(
                     f"Successfully saved {len(records)} records for {stock.symbol}"
                 )
@@ -875,29 +870,3 @@ class DataCollectionService:
         except Exception as e:
             logger.error(f"Error collecting prices for {stock.symbol}: {str(e)}")
             raise
-
-    async def _mirror_daily_prices_to_market_data_bars(
-        self,
-        db: AsyncSession,
-        stock,
-        collected_data: List[Dict[str, Any]],
-    ) -> None:
-        if not collected_data:
-            return
-
-        ingestion_service = MarketDataIngestionService(
-            stock_repository=self.stock_repo,
-            bar_repository=self.market_data_bar_repo,
-            price_data_source=self.price_source,
-        )
-        records = [
-            ingestion_service.price_point_to_daily_bar_record(
-                price_point=data_point,
-                stock_id=stock.id,
-                symbol=stock.symbol,
-                market=stock.market,
-                source=self.price_source.get_source_name(),
-            )
-            for data_point in collected_data
-        ]
-        await self.market_data_bar_repo.upsert_batch(db, records)

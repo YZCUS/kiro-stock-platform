@@ -32,6 +32,7 @@ class QlibModelRun(BaseModel, TimestampMixin):
     feature_set = Column(String(100), nullable=False, index=True)
     mode = Column(String(20), nullable=False, index=True)
     status = Column(String(20), nullable=False, index=True, default="pending")
+    horizon = Column(String(20), nullable=True, index=True)
 
     train_start = Column(Date, nullable=True)
     train_end = Column(Date, nullable=True)
@@ -44,6 +45,12 @@ class QlibModelRun(BaseModel, TimestampMixin):
     metrics = Column(JSON, nullable=True)
     artifact_uri = Column(String(500), nullable=True)
     config_uri = Column(String(500), nullable=True)
+    stage = Column(String(20), nullable=True, index=True)
+    promoted_at = Column(DateTime(timezone=True), nullable=True)
+    promoted_by = Column(String(100), nullable=True)
+    promotion_note = Column(Text, nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    artifact_deleted_at = Column(DateTime(timezone=True), nullable=True)
     error_message = Column(Text, nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
@@ -68,6 +75,14 @@ class QlibModelRun(BaseModel, TimestampMixin):
             "mode",
             "status",
             "prediction_date",
+        ),
+        Index(
+            "ix_qlib_model_runs_version_lookup",
+            "market",
+            "universe",
+            "model_name",
+            "feature_set",
+            "stage",
         ),
         {"comment": "Qlib model training, inference, and backtest runs"},
     )

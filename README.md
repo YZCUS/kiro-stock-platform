@@ -15,6 +15,8 @@
 - ⭐ **自選股功能**: 個人化自選股管理，追蹤關注的股票並查看即時報價
 - 🤖 **智慧股票管理**: 自動識別台股/美股代號，自動查詢公司名稱，一鍵回填價格數據
 - 💰 **即時價格顯示**: 股票列表顯示最新價格、漲跌幅、成交量等關鍵資訊
+- 🧠 **Qlib 多週期預測**: 支援 `1d`、`5d`、`20d`、`60d` CPU 模型訓練、推論與版本管理
+- ⚖️ **策略可信度權重**: 定期回測策略表現，產生 bounded dynamic weights 與股票綜合走勢分數
 
 ## 技術架構
 
@@ -26,6 +28,7 @@
 - **Apache Airflow** - 工作流程自動化和調度
 - **TA-Lib** - 技術指標計算庫
 - **yfinance** - Yahoo Finance 數據源整合
+- **Qlib Prediction Service** - 獨立模型訓練、推論與策略評估服務
 - **Alembic** - 資料庫遷移管理
 - **JWT (python-jose)** - JSON Web Token 認證
 - **Passlib + bcrypt** - 密碼加密
@@ -133,7 +136,7 @@ make test-coverage     # backend + frontend coverage
 make e2e               # Playwright Chromium E2E
 ```
 
-最近一次本地驗證：backend `192 passed`，product coverage `29%`；frontend `126 passed`，statements `24.87%`；E2E `6 passed`。Frontend coverage gate 先固定在目前可通過的 baseline，後續依測試補強逐步拉高。
+最近一次本地驗證：backend `192 passed`，product coverage `29%`；frontend `126 passed`，statements `24.87%`；E2E `6 passed`。本階段新增的 Qlib/策略評估 smoke test 已跑通：`28` 組策略/週期可靠度、`504` 筆最新 composite score。Frontend coverage gate 先固定在目前可通過的 baseline，後續依測試補強逐步拉高。
 
 ## 相關文檔
 
@@ -176,11 +179,11 @@ kiro-stock-platform/
 │   │   │   └── order_execution_worker.py       # broker 送單 worker
 │   │   └── repositories/      # Repository 介面 (Ports)
 │   │       ├── stock_repository_interface.py
-│   │       └── price_history_repository_interface.py
+│   │       └── market_data_bar_repository_interface.py
 │   ├── infrastructure/         # 基礎設施層
 │   │   ├── persistence/       # Repository 實作
 │   │   │   ├── stock_repository.py
-│   │   │   └── price_history_repository.py
+│   │   │   └── market_data_bar_repository.py
 │   │   ├── cache/             # Redis 快取封裝
 │   │   │   └── redis_cache_service.py
 │   │   ├── external/          # 外部服務整合
@@ -192,7 +195,6 @@ kiro-stock-platform/
 │   │   └── domain/            # 資料庫實體定義
 │   │       ├── stock.py
 │   │       ├── market_data_bar.py    # 多 timeframe OHLCV K 線
-│   │       ├── price_history.py
 │   │       ├── technical_indicator.py
 │   │       ├── trading_signal.py
 │   │       ├── user.py              # 用戶模型
@@ -295,9 +297,9 @@ docker compose --profile workers up
 - `strategy`：消費 `strategy_tasks`，檢查策略宣告的 timeframe / indicator 資料需求。
 - `notification`：預留通知任務。
 
-K 線資料統一存於 `market_data_bars`，以 `timeframe` 區分 `1m`、`5m`、`15m`、`30m`、`1h`、`1d`、`1w`。直接從資料源取得的 5m / 1d 標記為 `source`，由系統聚合產生的 15m / 30m / 1h 標記為 `derived`，並記錄 `generated_from_timeframe`。策略需透過 `StrategySpec` 宣告 `required_timeframes`、`lookback_bars` 與 `required_indicators`，再由 worker 檢查資料是否足夠。
+K 線資料統一存於 `market_data_bars`，以 `timeframe` 區分 `1m`、`5m`、`15m`、`30m`、`1h`、`1d`、`1w`。直接從資料源取得的 5m / 1d 標記為 `source`，由系統聚合產生的 15m / 30m / 1h 標記為 `derived`，並記錄 `generated_from_timeframe`。舊的 `price_history` 實體表與相容 view 已移除，讀寫路徑都應直接使用 `market_data_bars`。策略需透過 `StrategySpec` 宣告 `required_timeframes`、`lookback_bars` 與 `required_indicators`，再由 worker 檢查資料是否足夠。
 
-完整資料流程與驗證方式見 `docs/market-data-pipeline.md`。Airflow 的台股日線 DAG 會在 legacy `price_history` 收集後呼叫 `/api/v1/stocks/market-data/orchestrate`，將資料同步寫入 `market_data_bars` 並產生 derived timeframes。
+完整資料流程與驗證方式見 `docs/market-data-pipeline.md`。Airflow 的台股日線 DAG 會在日線資料收集後呼叫 `/api/v1/stocks/market-data/orchestrate`，將 source bars 寫入 `market_data_bars` 並產生 derived timeframes。
 
 缺 source K 棒時系統不做線性回填，也不反推低 timeframe。derived bar 會先標為 `partial`；pipeline 會嘗試直接補受影響的 `15m`、`30m`、`1h` 或 `1w` provider bar，並標記 `quality_status=backfilled`。策略資料讀取只使用 `complete`、`backfilled` 或 `corrected`。
 

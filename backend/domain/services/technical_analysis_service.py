@@ -10,8 +10,8 @@ from enum import Enum
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.repositories.stock_repository_interface import IStockRepository
-from domain.repositories.price_history_repository_interface import (
-    IPriceHistoryRepository,
+from domain.repositories.daily_price_repository_interface import (
+    IDailyPriceRepository,
 )
 from infrastructure.cache.redis_cache_service import ICacheService
 
@@ -72,7 +72,7 @@ class TechnicalAnalysisService:
     def __init__(
         self,
         stock_repository: IStockRepository,
-        price_repository: IPriceHistoryRepository,
+        price_repository: IDailyPriceRepository,
         cache_service: ICacheService,
     ):
         self.stock_repo = stock_repository

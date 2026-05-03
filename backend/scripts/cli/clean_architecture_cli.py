@@ -25,7 +25,7 @@ from domain.services.data_collection_service import DataCollectionService
 
 # Infrastructure
 from infrastructure.persistence.stock_repository import StockRepository
-from infrastructure.persistence.price_history_repository import PriceHistoryRepository
+from infrastructure.persistence.daily_price_repository import DailyPriceRepository
 from infrastructure.cache.unified_cache_service import MockCacheService
 
 # Core
@@ -48,7 +48,7 @@ class CleanArchitectureCLI:
         """建立服務實例"""
         # Repository實例
         stock_repo = StockRepository(db)
-        price_repo = PriceHistoryRepository(db)
+        price_repo = DailyPriceRepository(db)
 
         # Domain Services
         stock_service = StockService(stock_repo, price_repo, self.cache_service)

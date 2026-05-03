@@ -10,8 +10,8 @@ from enum import Enum
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.repositories.stock_repository_interface import IStockRepository
-from domain.repositories.price_history_repository_interface import (
-    IPriceHistoryRepository,
+from domain.repositories.daily_price_repository_interface import (
+    IDailyPriceRepository,
 )
 from domain.repositories.trading_signal_repository_interface import (
     ITradingSignalRepository,
@@ -103,7 +103,7 @@ class TradingSignalService:
     def __init__(
         self,
         stock_repository: IStockRepository,
-        price_repository: IPriceHistoryRepository,
+        price_repository: IDailyPriceRepository,
         cache_service: ICacheService,
         signal_repository: ITradingSignalRepository,
     ):
@@ -400,7 +400,7 @@ class TradingSignalService:
             "max_drawdown": 0.08,
         }
 
-    async def get_price_history(
+    async def get_daily_price_history(
         self, db: AsyncSession, stock_id: int, limit: int = 100
     ) -> List[Dict[str, Any]]:
         prices = await self.price_repo.get_by_stock(db, stock_id, limit=limit)

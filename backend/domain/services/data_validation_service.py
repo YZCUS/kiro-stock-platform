@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.policies.validation_rules import ValidationRules
-from domain.repositories.price_history_repository_interface import (
-    IPriceHistoryRepository,
+from domain.repositories.daily_price_repository_interface import (
+    IDailyPriceRepository,
 )
 from domain.repositories.stock_repository_interface import IStockRepository
 from infrastructure.cache.redis_cache_service import ICacheService
@@ -47,7 +47,7 @@ class DataValidationService:
     def __init__(
         self,
         stock_repository: IStockRepository,
-        price_repository: IPriceHistoryRepository,
+        price_repository: IDailyPriceRepository,
         cache_service: ICacheService,
     ) -> None:
         self.stock_repo = stock_repository

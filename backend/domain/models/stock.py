@@ -20,7 +20,7 @@ from typing import List, Optional, TYPE_CHECKING
 import re
 
 if TYPE_CHECKING:
-    from domain.models.price_history import PriceHistory
+    from domain.models.market_data_bar import MarketDataBar
     from domain.models.technical_indicator import TechnicalIndicator
     from domain.models.trading_signal import TradingSignal
 
@@ -58,13 +58,6 @@ class Stock(BaseModel, TimestampMixin):
     )
 
     # 關聯關係
-    price_history = relationship(
-        "PriceHistory",
-        back_populates="stock",
-        cascade="all, delete-orphan",
-        lazy="dynamic",
-    )
-
     market_data_bars = relationship(
         "MarketDataBar",
         back_populates="stock",
@@ -157,23 +150,28 @@ class Stock(BaseModel, TimestampMixin):
             symbol = symbol.upper()
         return symbol
 
-    def get_latest_price(self) -> Optional[PriceHistory]:
-        """取得最新價格"""
-        return self.price_history.order_by(
-            self.price_history.property.mapper.class_.date.desc()
-        ).first()
+    def get_latest_price(self) -> Optional[MarketDataBar]:
+        """取得最新日線價格"""
+        bar_model = self.market_data_bars.property.mapper.class_
+        return (
+            self.market_data_bars.filter(bar_model.timeframe == "1d")
+            .order_by(bar_model.timestamp.desc())
+            .first()
+        )
 
-    def get_price_range(self, days: int = 30) -> List[PriceHistory]:
-        """取得指定天數的價格數據"""
-        from datetime import date, timedelta
+    def get_price_range(self, days: int = 30) -> List[MarketDataBar]:
+        """取得指定天數的日線價格數據"""
+        from datetime import datetime, timedelta
 
-        start_date = date.today() - timedelta(days=days)
+        start_at = datetime.now() - timedelta(days=days)
+        bar_model = self.market_data_bars.property.mapper.class_
 
         return (
-            self.price_history.filter(
-                self.price_history.property.mapper.class_.date >= start_date
+            self.market_data_bars.filter(
+                bar_model.timeframe == "1d",
+                bar_model.timestamp >= start_at,
             )
-            .order_by(self.price_history.property.mapper.class_.date.desc())
+            .order_by(bar_model.timestamp.desc())
             .all()
         )
 

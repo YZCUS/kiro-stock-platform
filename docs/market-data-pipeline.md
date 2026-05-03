@@ -1,8 +1,8 @@
 # Market Data Pipeline
 
 This project now keeps strategy-facing OHLCV data in `market_data_bars`.
-Legacy `price_history` is still kept for compatibility, but new strategy and
-worker code should read from `market_data_bars`.
+The old `price_history` table and compatibility view have been dropped. All
+daily OHLCV reads and writes should use `market_data_bars`.
 
 ## Timeframes
 
@@ -58,9 +58,9 @@ Start workers locally:
 docker compose --profile workers up market-data-worker bar-aggregation-worker data-validation-worker
 ```
 
-Airflow calls the synchronous `orchestrate` endpoint after the daily legacy
-collection task. For production, switch the Airflow task to enqueue mode only
-when workers are always running and monitored.
+Airflow calls the synchronous `orchestrate` endpoint after daily source
+collection. For production, switch the Airflow task to enqueue mode only when
+workers are always running and monitored.
 
 ## Completeness Rules
 

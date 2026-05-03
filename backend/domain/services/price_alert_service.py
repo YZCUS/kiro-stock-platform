@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.models.market_data_bar import MarketDataBar
 from domain.models.price_alert import PriceAlert
-from domain.models.price_history import PriceHistory
 from domain.models.stock import Stock
 from domain.services.market_info_service import MarketInfoService
 
@@ -143,16 +142,6 @@ class PriceAlertService:
         bar = bar_result.scalar_one_or_none()
         if bar is not None:
             return {"price": float(bar.close_price), "source": "market_data_bars"}
-
-        price_result = await db.execute(
-            select(PriceHistory)
-            .where(PriceHistory.stock_id == alert.stock_id)
-            .order_by(desc(PriceHistory.date))
-            .limit(1)
-        )
-        price = price_result.scalar_one_or_none()
-        if price is not None and price.close_price is not None:
-            return {"price": float(price.close_price), "source": "price_history"}
 
         if self.market_info_service is not None:
             quote = await self.market_info_service.get_quote(

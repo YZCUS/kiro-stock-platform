@@ -47,6 +47,27 @@ class StrategySubscriptionService:
         if missing_ids:
             raise ValueError(f"Stock lists not found for user: {missing_ids}")
 
+    async def _load_subscription_with_lists(
+        self, db: AsyncSession, user_id: uuid.UUID, subscription_id: int
+    ) -> UserStrategySubscription:
+        """Load a subscription with list metadata needed by API responses."""
+        result = await db.execute(
+            select(UserStrategySubscription)
+            .filter(
+                UserStrategySubscription.id == subscription_id,
+                UserStrategySubscription.user_id == user_id,
+            )
+            .options(
+                joinedload(UserStrategySubscription.stock_lists)
+                .joinedload(UserStrategyStockList.stock_list)
+                .joinedload(UserStockList.list_items)
+            )
+        )
+        subscription = result.scalars().unique().one_or_none()
+        if not subscription:
+            raise ValueError(f"Subscription not found: {subscription_id}")
+        return subscription
+
     async def create_subscription(
         self,
         db: AsyncSession,
@@ -55,6 +76,7 @@ class StrategySubscriptionService:
         params: Optional[Dict[str, Any]] = None,
         monitor_all_lists: bool = True,
         monitor_portfolio: bool = True,
+        monitor_all_stocks: bool = False,
         selected_list_ids: Optional[List[int]] = None,
     ) -> UserStrategySubscription:
         """
@@ -67,6 +89,7 @@ class StrategySubscriptionService:
             params: 策略參數（可選，不提供則使用策略的預設參數）
             monitor_all_lists: 是否監控所有清單
             monitor_portfolio: 是否監控持倉
+            monitor_all_stocks: 是否監控資料庫全部啟用股票
             selected_list_ids: 選擇的清單 ID 列表（當 monitor_all_lists=False 時使用）
 
         Returns:
@@ -94,6 +117,11 @@ class StrategySubscriptionService:
         if not strategy.validate_params(params):
             raise ValueError(f"Invalid parameters for strategy '{strategy_type}'")
 
+        if monitor_all_stocks:
+            monitor_all_lists = False
+            monitor_portfolio = False
+            selected_list_ids = []
+
         if not monitor_all_lists:
             await self._ensure_lists_belong_to_user(db, user_id, selected_list_ids)
 
@@ -112,15 +140,11 @@ class StrategySubscriptionService:
             existing.parameters = params
             existing.monitor_all_lists = monitor_all_lists
             existing.monitor_portfolio = monitor_portfolio
+            existing.monitor_all_stocks = monitor_all_stocks
 
             # 更新清單關聯
-            if not monitor_all_lists and selected_list_ids:
+            if monitor_all_stocks or monitor_all_lists or selected_list_ids is not None:
                 # 先刪除舊的關聯
-                await db.execute(
-                    select(UserStrategyStockList).filter(
-                        UserStrategyStockList.subscription_id == existing.id
-                    )
-                )
                 old_lists = (
                     (
                         await db.execute(
@@ -136,15 +160,15 @@ class StrategySubscriptionService:
                     await db.delete(old_list)
 
                 # 添加新的關聯
-                for list_id in selected_list_ids:
-                    list_item = UserStrategyStockList(
-                        subscription_id=existing.id, stock_list_id=list_id
-                    )
-                    db.add(list_item)
+                if not monitor_all_stocks and not monitor_all_lists:
+                    for list_id in selected_list_ids or []:
+                        list_item = UserStrategyStockList(
+                            subscription_id=existing.id, stock_list_id=list_id
+                        )
+                        db.add(list_item)
 
             await db.commit()
-            await db.refresh(existing)
-            return existing
+            return await self._load_subscription_with_lists(db, user_id, existing.id)
 
         # 5. 創建新訂閱
         subscription = UserStrategySubscription(
@@ -153,13 +177,14 @@ class StrategySubscriptionService:
             parameters=params,
             monitor_all_lists=monitor_all_lists,
             monitor_portfolio=monitor_portfolio,
+            monitor_all_stocks=monitor_all_stocks,
             is_active=True,
         )
         db.add(subscription)
         await db.flush()
 
         # 6. 如果指定了清單，建立關聯
-        if not monitor_all_lists and selected_list_ids:
+        if not monitor_all_stocks and not monitor_all_lists and selected_list_ids:
             for list_id in selected_list_ids:
                 list_item = UserStrategyStockList(
                     subscription_id=subscription.id, stock_list_id=list_id
@@ -167,8 +192,7 @@ class StrategySubscriptionService:
                 db.add(list_item)
 
         await db.commit()
-        await db.refresh(subscription)
-        return subscription
+        return await self._load_subscription_with_lists(db, user_id, subscription.id)
 
     async def get_user_subscriptions(
         self, db: AsyncSession, user_id: uuid.UUID, active_only: bool = False
@@ -187,7 +211,11 @@ class StrategySubscriptionService:
         query = (
             select(UserStrategySubscription)
             .filter(UserStrategySubscription.user_id == user_id)
-            .options(joinedload(UserStrategySubscription.stock_lists))
+            .options(
+                joinedload(UserStrategySubscription.stock_lists)
+                .joinedload(UserStrategyStockList.stock_list)
+                .joinedload(UserStockList.list_items)
+            )
             .order_by(UserStrategySubscription.created_at)
         )
 
@@ -206,6 +234,7 @@ class StrategySubscriptionService:
         params: Optional[Dict[str, Any]] = None,
         monitor_all_lists: Optional[bool] = None,
         monitor_portfolio: Optional[bool] = None,
+        monitor_all_stocks: Optional[bool] = None,
         selected_list_ids: Optional[List[int]] = None,
     ) -> UserStrategySubscription:
         """
@@ -217,6 +246,7 @@ class StrategySubscriptionService:
             params: 新的策略參數
             monitor_all_lists: 是否監控所有清單
             monitor_portfolio: 是否監控持倉
+            monitor_all_stocks: 是否監控資料庫全部啟用股票
             selected_list_ids: 選擇的清單 ID 列表
 
         Returns:
@@ -246,6 +276,16 @@ class StrategySubscriptionService:
                 )
             subscription.parameters = params
 
+        target_monitor_all_stocks = (
+            monitor_all_stocks
+            if monitor_all_stocks is not None
+            else subscription.monitor_all_stocks
+        )
+        if target_monitor_all_stocks:
+            monitor_all_lists = False
+            monitor_portfolio = False
+            selected_list_ids = []
+
         # 3. 更新監控配置
         if monitor_all_lists is not None:
             subscription.monitor_all_lists = monitor_all_lists
@@ -253,12 +293,15 @@ class StrategySubscriptionService:
         if monitor_portfolio is not None:
             subscription.monitor_portfolio = monitor_portfolio
 
+        if monitor_all_stocks is not None:
+            subscription.monitor_all_stocks = monitor_all_stocks
+
         # 4. 更新清單關聯
-        if selected_list_ids is not None:
+        if selected_list_ids is not None or target_monitor_all_stocks:
             target_monitor_all_lists = subscription.monitor_all_lists
             if monitor_all_lists is not None:
                 target_monitor_all_lists = monitor_all_lists
-            if not target_monitor_all_lists:
+            if not target_monitor_all_stocks and not target_monitor_all_lists:
                 await self._ensure_lists_belong_to_user(db, user_id, selected_list_ids)
 
             # 刪除舊的關聯
@@ -278,16 +321,15 @@ class StrategySubscriptionService:
                 await db.delete(old_list)
 
             # 添加新的關聯
-            if not subscription.monitor_all_lists:
-                for list_id in selected_list_ids:
+            if not target_monitor_all_stocks and not subscription.monitor_all_lists:
+                for list_id in selected_list_ids or []:
                     list_item = UserStrategyStockList(
                         subscription_id=subscription_id, stock_list_id=list_id
                     )
                     db.add(list_item)
 
         await db.commit()
-        await db.refresh(subscription)
-        return subscription
+        return await self._load_subscription_with_lists(db, user_id, subscription.id)
 
     async def delete_subscription(
         self,
@@ -367,8 +409,7 @@ class StrategySubscriptionService:
             subscription.is_active = is_active
 
         await db.commit()
-        await db.refresh(subscription)
-        return subscription
+        return await self._load_subscription_with_lists(db, user_id, subscription.id)
 
     async def get_monitored_stocks(
         self, db: AsyncSession, user_id: uuid.UUID, subscription_id: int
@@ -376,7 +417,8 @@ class StrategySubscriptionService:
         """
         獲取訂閱需要監控的所有股票
 
-        根據訂閱的配置（monitor_all_lists, monitor_portfolio, selected_lists）
+        根據訂閱的配置（monitor_all_stocks, monitor_all_lists,
+        monitor_portfolio, selected_lists）
         計算出需要監控的股票列表。
 
         Args:
@@ -405,6 +447,13 @@ class StrategySubscriptionService:
             raise ValueError(f"Subscription not found: {subscription_id}")
 
         stock_ids = set()
+
+        # 2. 全 DB 股票監控。此模式明確以所有啟用股票作為預推論範圍。
+        if subscription.monitor_all_stocks:
+            stocks_result = await db.execute(
+                select(Stock).filter(Stock.is_active == True).order_by(Stock.symbol)
+            )
+            return list(stocks_result.scalars().all())
 
         # 2. 收集監控清單中的股票
         if subscription.monitor_all_lists:

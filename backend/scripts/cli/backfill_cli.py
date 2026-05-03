@@ -24,7 +24,7 @@ from services.data.backfill import (
 
 # ✅ Clean Architecture: 使用 repository implementation 而非 CRUD
 from infrastructure.persistence.stock_repository import StockRepository
-from infrastructure.persistence.price_history_repository import PriceHistoryRepository
+from infrastructure.persistence.daily_price_repository import DailyPriceRepository
 import json
 
 logging.basicConfig(
@@ -96,12 +96,12 @@ class BackfillCLI:
             total_gaps = 0
             stocks_with_gaps = 0
 
-            # ✅ Clean Architecture: 實例化 price_history repository
-            price_repo = PriceHistoryRepository(session)
+            # ✅ Clean Architecture: 實例化 daily price repository
+            price_repo = DailyPriceRepository(session)
 
             for stock in stocks:
                 try:
-                    # ✅ Clean Architecture: 使用 PriceHistoryRepository 的 get_missing_dates()
+                    # ✅ Clean Architecture: 使用 DailyPriceRepository 的 get_missing_dates()
                     missing_dates = await price_repo.get_missing_dates(
                         session,
                         stock_id=stock.id,

@@ -20,8 +20,9 @@ from app.dependencies import (
 from api.schemas.stocks import PriceDataResponse
 from domain.services.stock_service import StockService
 from domain.services.data_collection_service import DataCollectionService, DataCollectionStatus
+from domain.market_data.daily_prices import market_bar_date_expr
+from domain.models.market_data_bar import MarketDataBar
 from domain.models.stock import Stock
-from domain.models.price_history import PriceHistory
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -48,9 +49,9 @@ async def check_price_data_exists(
         # 解析日期
         check_date = datetime.strptime(date, "%Y-%m-%d").date()
 
-        # 查詢該日期的價格數據數量
-        query = select(func.count(PriceHistory.id)).where(
-            PriceHistory.date == check_date
+        query = select(func.count(func.distinct(MarketDataBar.stock_id))).where(
+            MarketDataBar.timeframe == "1d",
+            market_bar_date_expr() == check_date,
         )
 
         result = await db.execute(query)
@@ -123,7 +124,7 @@ async def get_stock_prices(
 
 
 @router.get("/{stock_id}/price-history", response_model=Dict[str, Any])
-async def get_stock_price_history(
+async def get_stock_daily_price_history(
     stock_id: int,
     start_date: Optional[date] = Query(None, description="開始日期"),
     end_date: Optional[date] = Query(None, description="結束日期"),
@@ -138,7 +139,7 @@ async def get_stock_price_history(
         # 注意：interval 參數暫未實現，目前統一返回日線數據
         _ = interval  # 消除未使用警告
 
-        return await stock_service.get_price_history(
+        return await stock_service.get_daily_price_history(
             db=db,
             stock_id=stock_id,
             start_date=start_date,
@@ -363,13 +364,18 @@ async def backfill_missing_prices(
         logger.info("開始批量回填缺失的股票價格數據")
 
         # 查找所有沒有價格數據的活躍股票
-        # 使用 LEFT JOIN 找出 price_history 表中沒有記錄的股票
+        stocks_with_bars = (
+            select(MarketDataBar.stock_id)
+            .where(MarketDataBar.timeframe == "1d")
+            .distinct()
+            .subquery()
+        )
         query = (
             select(Stock)
-            .outerjoin(PriceHistory, Stock.id == PriceHistory.stock_id)
+            .outerjoin(stocks_with_bars, Stock.id == stocks_with_bars.c.stock_id)
             .where(Stock.is_active == True)
             .group_by(Stock.id)
-            .having(func.count(PriceHistory.id) == 0)
+            .having(func.count(stocks_with_bars.c.stock_id) == 0)
         )
 
         result = await db.execute(query)

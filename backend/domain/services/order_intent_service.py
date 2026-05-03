@@ -27,7 +27,7 @@ from domain.models.order_intent import (
     OrderExecution,
     OrderIntent,
 )
-from domain.models.price_history import PriceHistory
+from domain.market_data.daily_prices import fetch_latest_daily_price
 from domain.models.risk import RiskCheckResult
 from domain.models.stock import Stock
 from domain.models.transaction import Transaction
@@ -333,17 +333,8 @@ class OrderIntentService:
     async def _get_latest_reference_price(
         self, db: AsyncSession, stock_id: int
     ) -> Optional[Decimal]:
-        result = await db.execute(
-            select(PriceHistory.close_price)
-            .where(
-                PriceHistory.stock_id == stock_id,
-                PriceHistory.close_price.is_not(None),
-            )
-            .order_by(PriceHistory.date.desc())
-            .limit(1)
-        )
-        price = result.scalar_one_or_none()
-        return Decimal(price) if price is not None else None
+        price = await fetch_latest_daily_price(db, stock_id)
+        return Decimal(price.close_price) if price is not None else None
 
     def _is_filled_result(self, order_result) -> bool:
         return (

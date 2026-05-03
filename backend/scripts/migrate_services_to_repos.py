@@ -14,10 +14,10 @@ CRUD_TO_REPO_MAP = {
         "repo_class": "StockRepository",
         "repo_var": "stock_repo",
     },
-    "crud_price_history": {
-        "import": "from infrastructure.persistence.price_history_repository import PriceHistoryRepository",
-        "crud_var": "price_history_crud",
-        "repo_class": "PriceHistoryRepository",
+    "crud_daily_price": {
+        "import": "from infrastructure.persistence.daily_price_repository import DailyPriceRepository",
+        "crud_var": "daily_price_crud",
+        "repo_class": "DailyPriceRepository",
         "repo_var": "price_repo",
     },
     "crud_technical_indicator": {

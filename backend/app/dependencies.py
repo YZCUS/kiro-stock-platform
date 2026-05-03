@@ -13,8 +13,8 @@ from fastapi import Depends
 if TYPE_CHECKING:
     from domain.repositories.price_data_source_interface import IPriceDataSource
     from domain.repositories.stock_repository_interface import IStockRepository
-    from domain.repositories.price_history_repository_interface import (
-        IPriceHistoryRepository,
+    from domain.repositories.daily_price_repository_interface import (
+        IDailyPriceRepository,
     )
     from domain.repositories.technical_indicator_repository_interface import (
         ITechnicalIndicatorRepository,
@@ -187,18 +187,18 @@ def get_stock_repository(
     return StockRepository(db, price_data_source)
 
 
-def get_price_history_repository_clean(
+def get_daily_price_repository_clean(
     db: AsyncSession = Depends(get_database_session),
-) -> "IPriceHistoryRepository":
-    """取得價格歷史儲存庫 (Clean Architecture版本)"""
-    from domain.repositories.price_history_repository_interface import (
-        IPriceHistoryRepository,
+) -> "IDailyPriceRepository":
+    """取得日線價格儲存庫 (Clean Architecture版本)"""
+    from domain.repositories.daily_price_repository_interface import (
+        IDailyPriceRepository,
     )
-    from infrastructure.persistence.price_history_repository import (
-        PriceHistoryRepository,
+    from infrastructure.persistence.daily_price_repository import (
+        DailyPriceRepository,
     )
 
-    return PriceHistoryRepository(db)
+    return DailyPriceRepository(db)
 
 
 def get_technical_indicator_repository_clean(
@@ -247,7 +247,7 @@ def get_market_data_bar_repository(
 
 def get_stock_service(
     stock_repo: "IStockRepository" = Depends(get_stock_repository),
-    price_repo: "IPriceHistoryRepository" = Depends(get_price_history_repository_clean),
+    price_repo: "IDailyPriceRepository" = Depends(get_daily_price_repository_clean),
     cache_service: ICacheService = Depends(get_cache_service),
 ) -> "StockService":
     """取得股票業務服務 (Clean Architecture版本)"""
@@ -258,7 +258,7 @@ def get_stock_service(
 
 def get_technical_analysis_service_clean(
     stock_repo: "IStockRepository" = Depends(get_stock_repository),
-    price_repo: "IPriceHistoryRepository" = Depends(get_price_history_repository_clean),
+    price_repo: "IDailyPriceRepository" = Depends(get_daily_price_repository_clean),
     cache_service: ICacheService = Depends(get_cache_service),
 ) -> "TechnicalAnalysisService":
     """取得技術分析服務 (Clean Architecture版本)"""
@@ -269,7 +269,7 @@ def get_technical_analysis_service_clean(
 
 def get_data_collection_service_clean(
     stock_repo: "IStockRepository" = Depends(get_stock_repository),
-    price_repo: "IPriceHistoryRepository" = Depends(get_price_history_repository_clean),
+    price_repo: "IDailyPriceRepository" = Depends(get_daily_price_repository_clean),
     cache_service: ICacheService = Depends(get_cache_service),
     price_data_source: "IPriceDataSource" = Depends(get_price_data_source),
     bar_repo: "IMarketDataBarRepository" = Depends(get_market_data_bar_repository),
@@ -309,7 +309,7 @@ def get_market_data_validation_service(
 
 def get_trading_signal_service_clean(
     stock_repo: "IStockRepository" = Depends(get_stock_repository),
-    price_repo: "IPriceHistoryRepository" = Depends(get_price_history_repository_clean),
+    price_repo: "IDailyPriceRepository" = Depends(get_daily_price_repository_clean),
     cache_service: ICacheService = Depends(get_cache_service),
     signal_repo: "ITradingSignalRepository" = Depends(
         get_trading_signal_repository_clean
@@ -377,7 +377,7 @@ def get_bar_aggregation_service():
 
 def get_data_validation_service_clean(
     stock_repo: "IStockRepository" = Depends(get_stock_repository),
-    price_repo: "IPriceHistoryRepository" = Depends(get_price_history_repository_clean),
+    price_repo: "IDailyPriceRepository" = Depends(get_daily_price_repository_clean),
     cache_service: ICacheService = Depends(get_cache_service),
 ) -> "DataValidationService":
     """取得數據驗證服務 (Clean Architecture版本)"""
@@ -493,8 +493,8 @@ def get_websocket_service() -> "WebSocketService":
         from domain.services.stock_service import StockService
         from domain.services.trading_signal_service import TradingSignalService
         from infrastructure.persistence.stock_repository import StockRepository
-        from infrastructure.persistence.price_history_repository import (
-            PriceHistoryRepository,
+        from infrastructure.persistence.daily_price_repository import (
+            DailyPriceRepository,
         )
         from infrastructure.persistence.trading_signal_repository import (
             TradingSignalRepository,
@@ -508,7 +508,7 @@ def get_websocket_service() -> "WebSocketService":
         # 創建 Repository 單例（輕量級，只包含查詢邏輯）
         # 注意：Repository 的 __init__ 不持有 db，db 在每個方法調用時傳入
         stock_repo = StockRepository(db_session=None)  # db 會在調用時傳入
-        price_repo = PriceHistoryRepository(db_session=None)
+        price_repo = DailyPriceRepository(db_session=None)
         signal_repo = TradingSignalRepository(db_session=None)
 
         # 創建 Service 單例

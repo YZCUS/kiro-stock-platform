@@ -8,7 +8,10 @@ from api.v1 import analysis, indicators, signals
 from api.routers.v1.auth import router as auth_router
 from api.routers.v1.portfolio import router as portfolio_router
 from api.routers.v1.stock_lists import router as stock_lists_router
-from api.routers.v1.strategies import router as strategies_router
+from api.routers.v1.strategies import (
+    internal_router as internal_strategies_router,
+    router as strategies_router,
+)
 from api.routers.v1.trading import router as trading_router
 from api.routers.v1.watchlist import router as watchlist_router
 from api.routers.v1.market_info import router as market_info_router
@@ -47,6 +50,7 @@ api_router.include_router(market_info_router)
 api_router.include_router(price_alerts_router)
 api_router.include_router(internal_price_alerts_router)
 api_router.include_router(qlib_data_router)
+api_router.include_router(internal_strategies_router)
 api_router.include_router(
     strategies_router
 )  # 策略管理路由（已包含 prefix /api/v1/strategies）

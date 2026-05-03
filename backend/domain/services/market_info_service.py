@@ -8,11 +8,10 @@ import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 
-from sqlalchemy import desc, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from domain.models.market_data_bar import MarketDataBar
-from domain.models.price_history import PriceHistory
+from domain.market_data.daily_prices import fetch_daily_prices
 from domain.models.stock import Stock
 from domain.models.user_stock_list import UserStockList, UserStockListItem
 from domain.repositories.market_info_provider_interface import IMarketInfoProvider
@@ -289,37 +288,7 @@ class MarketInfoService:
     async def _latest_local_quote(
         self, db: AsyncSession, stock: Stock
     ) -> Optional[dict[str, Any]]:
-        bar_result = await db.execute(
-            select(MarketDataBar)
-            .where(MarketDataBar.stock_id == stock.id, MarketDataBar.timeframe == "1d")
-            .order_by(desc(MarketDataBar.timestamp))
-            .limit(2)
-        )
-        bars = bar_result.scalars().all()
-        if bars:
-            latest = bars[0]
-            previous = bars[1] if len(bars) > 1 else None
-            price = float(latest.close_price)
-            prev_close = float(previous.close_price) if previous else None
-            change = price - prev_close if prev_close else None
-            return {
-                "symbol": stock.symbol,
-                "market": stock.market,
-                "price": price,
-                "change": change,
-                "change_percent": (change / prev_close * 100) if change is not None and prev_close else None,
-                "timestamp": latest.timestamp,
-                "source": "market_data_bars",
-                "is_realtime": False,
-            }
-
-        price_result = await db.execute(
-            select(PriceHistory)
-            .where(PriceHistory.stock_id == stock.id)
-            .order_by(desc(PriceHistory.date))
-            .limit(2)
-        )
-        prices = price_result.scalars().all()
+        prices = await fetch_daily_prices(db, stock.id, limit=2)
         if not prices:
             return None
         latest = prices[0]
@@ -342,7 +311,7 @@ class MarketInfoService:
             "timestamp": datetime.combine(
                 latest.date, time.min, tzinfo=timezone.utc
             ),
-            "source": "price_history",
+            "source": "market_data_bars",
             "is_realtime": False,
         }
 

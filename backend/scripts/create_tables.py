@@ -10,7 +10,7 @@ sys.path.insert(0, str(backend_dir))
 
 from core.database import Base, engine
 from domain.models.stock import Stock
-from domain.models.price_history import PriceHistory
+from domain.models.market_data_bar import MarketDataBar
 from domain.models.technical_indicator import TechnicalIndicator
 from domain.models.trading_signal import TradingSignal
 

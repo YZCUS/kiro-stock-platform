@@ -9,7 +9,6 @@ from pathlib import Path
 # 需要遷移的 import 映射
 IMPORT_MAPPINGS = {
     "from domain.models.stock": "from domain.models.stock",
-    "from domain.models.price_history": "from domain.models.price_history",
     "from domain.models.technical_indicator": "from domain.models.technical_indicator",
     "from domain.models.trading_signal": "from domain.models.trading_signal",
     "from domain.models.system_log": "from domain.models.system_log",

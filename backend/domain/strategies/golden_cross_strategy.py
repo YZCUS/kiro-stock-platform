@@ -8,11 +8,16 @@
 """
 
 from typing import Optional, Dict, Any, List
-from datetime import date, timedelta
-from sqlalchemy import select, func, and_
+from datetime import timedelta
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
+from domain.market_data.daily_prices import (
+    fetch_daily_prices,
+    fetch_latest_daily_price_rows_by_stock,
+)
+from domain.policies.indicator_strategies import IndicatorStrategies
 from domain.strategies.strategy_interface import (
     IndicatorSpec,
     IStrategyEngine,
@@ -21,8 +26,6 @@ from domain.strategies.strategy_interface import (
     StrategySpec,
     StrategyType,
 )
-from domain.models.technical_indicator import TechnicalIndicator
-from domain.models.price_history import PriceHistory
 from domain.models.stock import Stock
 
 logger = logging.getLogger(__name__)
@@ -181,6 +184,134 @@ class GoldenCrossStrategy(IStrategyEngine):
             output_type="signal",
         )
 
+    def _merge_params(self, params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        strategy_params = self.get_default_params()
+        if params:
+            strategy_params.update(params)
+        return strategy_params
+
+    def _lookback_bars(self, params: Dict[str, Any]) -> int:
+        return max(
+            int(params["long_period"]) + 1,
+            int(params["volume_period"]),
+            int(params["short_period"]) + 1,
+        )
+
+    def _build_signal_from_price_rows(
+        self,
+        stock: Stock,
+        price_rows: List[Dict[str, Any]],
+        params: Dict[str, Any],
+    ) -> Optional[TradingSignal]:
+        short_period = int(params["short_period"])
+        long_period = int(params["long_period"])
+        volume_confirmation = bool(params["volume_confirmation"])
+        volume_threshold = float(params["volume_threshold"])
+        volume_period = int(params["volume_period"])
+        signal_validity_days = int(params["signal_validity_days"])
+        lookback_bars = self._lookback_bars(params)
+
+        rows = sorted(price_rows, key=lambda row: row["date"])
+        if len(rows) < lookback_bars:
+            logger.warning(f"Insufficient price data for stock {stock.id}")
+            return None
+
+        closes = [float(row["close_price"]) for row in rows]
+        short_ma_values = IndicatorStrategies.calculate_sma(closes, short_period)
+        long_ma_values = IndicatorStrategies.calculate_sma(closes, long_period)
+
+        if len(short_ma_values) < 2 or len(long_ma_values) < 2:
+            logger.warning(f"Insufficient SMA window for stock {stock.id}")
+            return None
+
+        today_short_ma = short_ma_values[-1]
+        today_long_ma = long_ma_values[-1]
+        yesterday_short_ma = short_ma_values[-2]
+        yesterday_long_ma = long_ma_values[-2]
+        latest_price = rows[-1]
+
+        is_golden_cross = (
+            yesterday_short_ma < yesterday_long_ma and today_short_ma > today_long_ma
+        )
+        if not is_golden_cross:
+            logger.debug(f"No golden cross detected for stock {stock.id}")
+            return None
+
+        volume_ratio = 1.0
+        if volume_confirmation:
+            recent_volumes = [
+                int(row["volume"]) for row in rows[-volume_period:] if row["volume"]
+            ]
+            if len(recent_volumes) < volume_period * 0.8:
+                logger.warning(f"Insufficient volume data for stock {stock.id}")
+                return None
+
+            avg_volume = sum(recent_volumes) / len(recent_volumes)
+            today_volume = latest_price["volume"]
+            if not today_volume or avg_volume == 0:
+                logger.warning(f"Invalid volume data for stock {stock.id}")
+                return None
+
+            volume_ratio = int(today_volume) / avg_volume
+            if volume_ratio < volume_threshold:
+                logger.debug(
+                    f"Volume confirmation failed for stock {stock.id}: "
+                    f"ratio={volume_ratio:.2f}, threshold={volume_threshold}"
+                )
+                return None
+
+        base_confidence = 60.0
+        volume_boost = (
+            min(20.0, (volume_ratio - 1.0) * 10.0) if volume_confirmation else 0.0
+        )
+        ma_diff_percent = ((today_short_ma - today_long_ma) / today_long_ma) * 100
+        momentum_boost = min(20.0, max(0.0, ma_diff_percent * 20.0))
+        confidence = min(100.0, base_confidence + volume_boost + momentum_boost)
+
+        current_price = float(latest_price["close_price"])
+        entry_min = current_price * 0.98
+        entry_max = current_price * 1.02
+        stop_loss = min(today_long_ma, current_price * 0.95)
+        take_profit = [
+            current_price * 1.05,
+            current_price * 1.10,
+            current_price * 1.15,
+        ]
+        signal_date = latest_price["date"]
+        valid_until = signal_date + timedelta(days=signal_validity_days)
+
+        reason = (
+            f"檢測到黃金交叉信號：{short_period}日均線({today_short_ma:.2f})向上突破"
+            f"{long_period}日均線({today_long_ma:.2f})。"
+        )
+        if volume_confirmation:
+            reason += f" 成交量確認：當日成交量為平均值的{volume_ratio:.2f}倍。"
+
+        logger.info(
+            f"Golden cross signal generated for {stock.symbol}: "
+            f"confidence={confidence:.2f}, price={current_price:.2f}"
+        )
+        return TradingSignal(
+            stock_id=stock.id,
+            stock_symbol=stock.symbol,
+            strategy_type=self.strategy_type,
+            direction=SignalDirection.LONG,
+            confidence=confidence,
+            entry_zone=(entry_min, entry_max),
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            signal_date=signal_date,
+            valid_until=valid_until,
+            reason=reason,
+            extra_data={
+                "short_ma": today_short_ma,
+                "long_ma": today_long_ma,
+                "volume_ratio": volume_ratio,
+                "ma_diff_percent": ma_diff_percent,
+                "current_price": current_price,
+            },
+        )
+
     async def analyze(
         self, stock_id: int, db: AsyncSession, params: Optional[Dict[str, Any]] = None
     ) -> Optional[TradingSignal]:
@@ -196,20 +327,10 @@ class GoldenCrossStrategy(IStrategyEngine):
             TradingSignal: 如果檢測到黃金交叉，返回交易信號
             None: 如果沒有檢測到信號
         """
-        # 合併參數
-        strategy_params = self.get_default_params()
-        if params:
-            strategy_params.update(params)
-
-        short_period = strategy_params["short_period"]
-        long_period = strategy_params["long_period"]
-        volume_confirmation = strategy_params["volume_confirmation"]
-        volume_threshold = strategy_params["volume_threshold"]
-        volume_period = strategy_params["volume_period"]
-        signal_validity_days = strategy_params["signal_validity_days"]
+        strategy_params = self._merge_params(params)
+        lookback_bars = self._lookback_bars(strategy_params)
 
         try:
-            # 1. 獲取股票資訊
             stock_result = await db.execute(select(Stock).where(Stock.id == stock_id))
             stock = stock_result.scalar_one_or_none()
 
@@ -217,191 +338,25 @@ class GoldenCrossStrategy(IStrategyEngine):
                 logger.warning(f"Stock {stock_id} not found")
                 return None
 
-            # 2. 獲取最近的價格數據（需要足夠的歷史數據）
-            today = date.today()
-            lookback_days = max(long_period, volume_period) + 10  # 多取一些以防假日
-
-            price_result = await db.execute(
-                select(PriceHistory)
-                .where(
-                    and_(
-                        PriceHistory.stock_id == stock_id,
-                        PriceHistory.date >= today - timedelta(days=lookback_days),
-                    )
-                )
-                .order_by(PriceHistory.date.desc())
-                .limit(lookback_days)
-            )
-            price_data = price_result.scalars().all()
-
-            if len(price_data) < long_period + 1:
-                logger.warning(f"Insufficient price data for stock {stock_id}")
-                return None
-
-            # 按日期排序（最新的在前）
-            price_data = sorted(price_data, key=lambda x: x.date, reverse=True)
-
-            # 3. 獲取今日和昨日的技術指標（SMA）
-            today_date = price_data[0].date
-            yesterday_date = price_data[1].date
-
-            # 查詢今日的 SMA
-            today_sma_result = await db.execute(
-                select(TechnicalIndicator).where(
-                    and_(
-                        TechnicalIndicator.stock_id == stock_id,
-                        TechnicalIndicator.date == today_date,
-                        TechnicalIndicator.indicator_type.in_(
-                            [f"SMA_{short_period}", f"SMA_{long_period}"]
-                        ),
-                    )
-                )
-            )
-            today_sma_list = today_sma_result.scalars().all()
-
-            # 查詢昨日的 SMA
-            yesterday_sma_result = await db.execute(
-                select(TechnicalIndicator).where(
-                    and_(
-                        TechnicalIndicator.stock_id == stock_id,
-                        TechnicalIndicator.date == yesterday_date,
-                        TechnicalIndicator.indicator_type.in_(
-                            [f"SMA_{short_period}", f"SMA_{long_period}"]
-                        ),
-                    )
-                )
-            )
-            yesterday_sma_list = yesterday_sma_result.scalars().all()
-
-            # 將列表轉換為字典以便查找
-            today_sma = {ind.indicator_type: ind.float_value for ind in today_sma_list}
-            yesterday_sma = {
-                ind.indicator_type: ind.float_value for ind in yesterday_sma_list
-            }
-
-            # 檢查是否有所需的指標數據
-            today_short_ma = today_sma.get(f"SMA_{short_period}")
-            today_long_ma = today_sma.get(f"SMA_{long_period}")
-            yesterday_short_ma = yesterday_sma.get(f"SMA_{short_period}")
-            yesterday_long_ma = yesterday_sma.get(f"SMA_{long_period}")
-
-            if not all(
-                [today_short_ma, today_long_ma, yesterday_short_ma, yesterday_long_ma]
-            ):
-                logger.warning(f"Missing SMA indicators for stock {stock_id}")
-                return None
-
-            # 4. 檢測黃金交叉
-            # 條件：昨日短期MA < 長期MA，今日短期MA > 長期MA
-            is_golden_cross = (
-                yesterday_short_ma < yesterday_long_ma
-                and today_short_ma > today_long_ma
-            )
-
-            if not is_golden_cross:
-                logger.debug(f"No golden cross detected for stock {stock_id}")
-                return None
-
-            # 5. 成交量確認（如果啟用）
-            volume_ratio = 1.0
-            if volume_confirmation:
-                # 計算平均成交量
-                recent_volumes = [
-                    p.volume for p in price_data[:volume_period] if p.volume
-                ]
-                if len(recent_volumes) < volume_period * 0.8:  # 至少要有80%的數據
-                    logger.warning(f"Insufficient volume data for stock {stock_id}")
-                    return None
-
-                avg_volume = sum(recent_volumes) / len(recent_volumes)
-                today_volume = price_data[0].volume
-
-                if not today_volume or avg_volume == 0:
-                    logger.warning(f"Invalid volume data for stock {stock_id}")
-                    return None
-
-                volume_ratio = today_volume / avg_volume
-
-                # 如果成交量未達標，不產生信號
-                if volume_ratio < volume_threshold:
-                    logger.debug(
-                        f"Volume confirmation failed for stock {stock_id}: "
-                        f"ratio={volume_ratio:.2f}, threshold={volume_threshold}"
-                    )
-                    return None
-
-            # 6. 計算信心度
-            base_confidence = 60.0
-
-            # 成交量加成（最多+20）
-            volume_boost = (
-                min(20.0, (volume_ratio - 1.0) * 10.0) if volume_confirmation else 0.0
-            )
-
-            # 動能加成（短期趨勢強度，最多+20）
-            # 使用短期MA與長期MA的差距百分比作為動能指標
-            ma_diff_percent = ((today_short_ma - today_long_ma) / today_long_ma) * 100
-            momentum_boost = min(20.0, max(0.0, ma_diff_percent * 20.0))
-
-            confidence = min(100.0, base_confidence + volume_boost + momentum_boost)
-
-            # 7. 計算進場區間、停損和止盈
-            current_price = float(price_data[0].close_price)
-
-            # 進場區間（當日收盤價上下 2%）
-            entry_min = current_price * 0.98
-            entry_max = current_price * 1.02
-
-            # 停損（跌破長期均線或下跌 5%，取較小者）
-            stop_loss = min(today_long_ma, current_price * 0.95)
-
-            # 止盈（三個目標）
-            take_profit = [
-                current_price * 1.05,  # +5%
-                current_price * 1.10,  # +10%
-                current_price * 1.15,  # +15%
-            ]
-
-            # 8. 計算信號有效期
-            signal_date = today_date
-            valid_until = signal_date + timedelta(days=signal_validity_days)
-
-            # 9. 生成信號原因說明
-            reason = (
-                f"檢測到黃金交叉信號：{short_period}日均線({today_short_ma:.2f})向上突破"
-                f"{long_period}日均線({today_long_ma:.2f})。"
-            )
-            if volume_confirmation:
-                reason += f" 成交量確認：當日成交量為平均值的{volume_ratio:.2f}倍。"
-
-            # 10. 創建交易信號
-            signal = TradingSignal(
+            price_data = await fetch_daily_prices(
+                db,
                 stock_id=stock_id,
-                stock_symbol=stock.symbol,
-                strategy_type=self.strategy_type,
-                direction=SignalDirection.LONG,
-                confidence=confidence,
-                entry_zone=(entry_min, entry_max),
-                stop_loss=stop_loss,
-                take_profit=take_profit,
-                signal_date=signal_date,
-                valid_until=valid_until,
-                reason=reason,
-                extra_data={
-                    "short_ma": today_short_ma,
-                    "long_ma": today_long_ma,
-                    "volume_ratio": volume_ratio,
-                    "ma_diff_percent": ma_diff_percent,
-                    "current_price": current_price,
-                },
+                limit=lookback_bars,
+                ascending=True,
             )
-
-            logger.info(
-                f"Golden cross signal generated for {stock.symbol}: "
-                f"confidence={confidence:.2f}, price={current_price:.2f}"
+            price_rows = [
+                {
+                    "date": price.date,
+                    "close_price": price.close_price,
+                    "volume": price.volume,
+                }
+                for price in price_data
+            ]
+            return self._build_signal_from_price_rows(
+                stock=stock,
+                price_rows=price_rows,
+                params=strategy_params,
             )
-
-            return signal
 
         except Exception as e:
             logger.error(f"Error analyzing stock {stock_id}: {str(e)}", exc_info=True)
@@ -424,10 +379,31 @@ class GoldenCrossStrategy(IStrategyEngine):
         Returns:
             List[TradingSignal]: 檢測到的所有交易信號列表
         """
-        signals = []
+        if not stock_ids:
+            return []
 
+        strategy_params = self._merge_params(params)
+        stock_result = await db.execute(select(Stock).where(Stock.id.in_(stock_ids)))
+        stocks_by_id = {stock.id: stock for stock in stock_result.scalars().all()}
+        if not stocks_by_id:
+            return []
+
+        prices_by_stock = await fetch_latest_daily_price_rows_by_stock(
+            db,
+            stocks_by_id.keys(),
+            rows_per_stock=self._lookback_bars(strategy_params),
+        )
+
+        signals = []
         for stock_id in stock_ids:
-            signal = await self.analyze(stock_id, db, params)
+            stock = stocks_by_id.get(stock_id)
+            if stock is None:
+                continue
+            signal = self._build_signal_from_price_rows(
+                stock=stock,
+                price_rows=prices_by_stock.get(stock_id, []),
+                params=strategy_params,
+            )
             if signal:
                 signals.append(signal)
 

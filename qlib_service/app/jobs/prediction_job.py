@@ -8,8 +8,17 @@ from uuid import uuid4
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.qlib.cpu_training import (
+    ModelArtifact,
+    load_model_artifact,
+    predict_with_artifact,
+)
 from app.qlib.export_market_data import export_predictions_input_csv
-from app.qlib.run_experiment import score_price_window
+from app.qlib.run_experiment import (
+    QlibModelConfig,
+    get_model_config,
+    score_price_window,
+)
 from app.schemas import DailyPredictionRequest, JobResponse
 from app.settings import Settings
 
@@ -23,18 +32,33 @@ class PredictionJob:
     async def run(
         self, db: AsyncSession, request: DailyPredictionRequest
     ) -> JobResponse:
+        model_config = self._validate_request(request)
         run_id = self._build_run_id(request)
-        model_run_id = await self._upsert_model_run(db, run_id, request, "running")
+        model_run_id = await self._upsert_model_run(
+            db, run_id, request, model_config, None, "running"
+        )
         try:
+            trained_artifact = await self._load_latest_training_artifact(
+                db, request, model_config
+            )
             price_rows = await self._load_price_rows(db, request)
             artifact_uri = self._export_input_rows(run_id, price_rows)
-            predictions = self._build_predictions(run_id, model_run_id, request, price_rows)
+            predictions = self._build_predictions(
+                run_id,
+                model_run_id,
+                request,
+                model_config,
+                trained_artifact,
+                price_rows,
+            )
             await self._replace_predictions(db, run_id, predictions)
             await self._mark_run_succeeded(
                 db=db,
                 run_id=run_id,
                 artifact_uri=artifact_uri,
                 prediction_count=len(predictions),
+                model_config=model_config,
+                trained_artifact=trained_artifact,
             )
             return JobResponse(
                 run_id=run_id,
@@ -46,6 +70,25 @@ class PredictionJob:
             await db.rollback()
             await self._mark_run_failed(db, run_id, str(exc))
             raise
+
+    def _validate_request(self, request: DailyPredictionRequest) -> QlibModelConfig:
+        model_config = get_model_config(request.model_name)
+        if request.feature_set != model_config.feature_set:
+            raise ValueError(
+                f"Model {request.model_name} requires feature_set "
+                f"{model_config.feature_set}, got {request.feature_set}"
+            )
+        if request.horizon != model_config.horizon:
+            raise ValueError(
+                f"Model {request.model_name} requires horizon "
+                f"{model_config.horizon}, got {request.horizon}"
+            )
+        if request.lookback_days < model_config.min_lookback_days:
+            raise ValueError(
+                f"Model {request.model_name} requires at least "
+                f"{model_config.min_lookback_days} lookback days"
+            )
+        return model_config
 
     def _build_run_id(self, request: DailyPredictionRequest) -> str:
         suffix = uuid4().hex[:8]
@@ -59,6 +102,8 @@ class PredictionJob:
         db: AsyncSession,
         run_id: str,
         request: DailyPredictionRequest,
+        model_config: QlibModelConfig,
+        trained_artifact: ModelArtifact | None,
         status: str,
     ) -> int:
         now = datetime.now(timezone.utc)
@@ -67,15 +112,19 @@ class PredictionJob:
                 """
                 INSERT INTO qlib_model_runs (
                     run_id, market, universe, model_name, feature_set, mode, status,
-                    prediction_date, metrics, started_at, created_at, updated_at
+                    prediction_date, horizon, metrics, artifact_uri, config_uri,
+                    started_at, created_at, updated_at
                 )
                 VALUES (
                     :run_id, :market, :universe, :model_name, :feature_set, 'infer',
-                    :status, :prediction_date, CAST(:metrics AS JSON), :started_at,
-                    NOW(), NOW()
+                    :status, :prediction_date, :horizon, CAST(:metrics AS JSON),
+                    NULL, :config_uri, :started_at, NOW(), NOW()
                 )
                 ON CONFLICT (run_id) DO UPDATE SET
                     status = EXCLUDED.status,
+                    horizon = EXCLUDED.horizon,
+                    metrics = EXCLUDED.metrics,
+                    config_uri = EXCLUDED.config_uri,
                     started_at = EXCLUDED.started_at,
                     updated_at = NOW()
                 RETURNING id
@@ -89,7 +138,11 @@ class PredictionJob:
                 "feature_set": request.feature_set,
                 "status": status,
                 "prediction_date": request.prediction_date,
-                "metrics": json.dumps({"engine": "bootstrap_momentum"}),
+                "horizon": request.horizon,
+                "metrics": json.dumps(
+                    self._build_metrics(model_config, trained_artifact)
+                ),
+                "config_uri": model_config.config_uri,
                 "started_at": now,
             },
         )
@@ -114,16 +167,18 @@ class PredictionJob:
                     b.close_price,
                     b.volume,
                     b.is_adjusted,
-                    ph.adjusted_close
+                    b.close_price AS adjusted_close
                 FROM stocks s
                 JOIN market_data_bars b ON b.stock_id = s.id
-                LEFT JOIN price_history ph
-                  ON ph.stock_id = s.id
-                 AND ph.date = b.timestamp::date
                 WHERE s.market = :market
                   AND s.is_active = TRUE
                   AND b.timeframe = '1d'
-                  AND b.timestamp::date <= :prediction_date
+                  AND (
+                    CASE
+                      WHEN b.market = 'TW' THEN (b.timestamp AT TIME ZONE 'Asia/Taipei')::date
+                      ELSE (b.timestamp AT TIME ZONE 'America/New_York')::date
+                    END
+                  ) <= :prediction_date
                 ORDER BY s.symbol ASC, b.timestamp DESC
                 """
             ),
@@ -146,7 +201,8 @@ class PredictionJob:
             price_rows.extend(reversed(rows))
         if not price_rows:
             raise ValueError(
-                f"No {request.market} daily market data found for {request.prediction_date}"
+                f"No {request.market} daily market data found for "
+                f"{request.prediction_date}"
             )
         return price_rows
 
@@ -160,6 +216,8 @@ class PredictionJob:
         run_id: str,
         model_run_id: int,
         request: DailyPredictionRequest,
+        model_config: QlibModelConfig,
+        trained_artifact: ModelArtifact | None,
         price_rows: list[dict],
     ) -> list[dict]:
         rows_by_stock: dict[int, list[dict]] = {}
@@ -172,7 +230,7 @@ class PredictionJob:
                 float(row["adjusted_close"] or row["close_price"])
                 for row in rows
             ]
-            if len(closes) < 6:
+            if len(closes) < model_config.min_lookback_days:
                 continue
             latest = rows[-1]
             scored.append(
@@ -184,7 +242,12 @@ class PredictionJob:
                     "market": latest["market"],
                     "prediction_date": request.prediction_date,
                     "horizon": request.horizon,
-                    "score": score_price_window(closes),
+                    "score": self._score_rows(
+                        rows,
+                        closes,
+                        model_config,
+                        trained_artifact,
+                    ),
                     "model_name": request.model_name,
                     "feature_set": request.feature_set,
                 }
@@ -193,7 +256,7 @@ class PredictionJob:
         scored.sort(key=lambda item: item["score"], reverse=True)
         total = len(scored)
         if total == 0:
-            raise ValueError("Not enough price history to produce predictions")
+            raise ValueError("Not enough daily market data to produce predictions")
 
         for index, item in enumerate(scored):
             rank = index + 1
@@ -207,11 +270,29 @@ class PredictionJob:
             else:
                 item["signal_direction"] = "NEUTRAL"
             item["metadata_json"] = {
-                "engine": "bootstrap_momentum",
+                "engine": self._engine_name(trained_artifact),
+                "model_type": model_config.model_type,
+                "model_status": model_config.status,
+                "portfolio_strategy": model_config.portfolio_strategy,
+                "config_uri": model_config.config_uri,
+                "training_run_id": (
+                    trained_artifact.run_id if trained_artifact else None
+                ),
                 "universe": request.universe,
                 "lookback_days": request.lookback_days,
             }
         return scored
+
+    def _score_rows(
+        self,
+        rows: list[dict],
+        closes: list[float],
+        model_config: QlibModelConfig,
+        trained_artifact: ModelArtifact | None,
+    ) -> float:
+        if trained_artifact is not None:
+            return predict_with_artifact(rows, trained_artifact)
+        return score_price_window(closes, model_config)
 
     async def _replace_predictions(
         self, db: AsyncSession, run_id: str, predictions: list[dict]
@@ -260,6 +341,8 @@ class PredictionJob:
         run_id: str,
         artifact_uri: str,
         prediction_count: int,
+        model_config: QlibModelConfig,
+        trained_artifact: ModelArtifact | None,
     ) -> None:
         await db.execute(
             text(
@@ -277,15 +360,97 @@ class PredictionJob:
                 "run_id": run_id,
                 "artifact_uri": artifact_uri,
                 "metrics": json.dumps(
-                    {
-                        "engine": "bootstrap_momentum",
-                        "prediction_count": prediction_count,
-                    }
+                    self._build_metrics(
+                        model_config,
+                        trained_artifact,
+                        {"prediction_count": prediction_count},
+                    )
                 ),
                 "finished_at": datetime.now(timezone.utc),
             },
         )
         await db.commit()
+
+    def _build_metrics(
+        self,
+        model_config: QlibModelConfig,
+        trained_artifact: ModelArtifact | None = None,
+        extra_metrics: dict | None = None,
+    ) -> dict:
+        metrics = {
+            "engine": self._engine_name(trained_artifact),
+            "model_type": model_config.model_type,
+            "model_status": model_config.status,
+            "feature_set": model_config.feature_set,
+            "horizon": model_config.horizon,
+            "min_lookback_days": model_config.min_lookback_days,
+            "portfolio_strategy": model_config.portfolio_strategy,
+            "training_run_id": trained_artifact.run_id if trained_artifact else None,
+        }
+        if extra_metrics:
+            metrics.update(extra_metrics)
+        return metrics
+
+    def _engine_name(self, trained_artifact: ModelArtifact | None) -> str:
+        if trained_artifact is not None:
+            return "cpu_model_artifact"
+        return "bootstrap_model_registry"
+
+    async def _load_latest_training_artifact(
+        self,
+        db: AsyncSession,
+        request: DailyPredictionRequest,
+        model_config: QlibModelConfig,
+    ) -> ModelArtifact | None:
+        result = await db.execute(
+            text(
+                """
+                SELECT run_id, artifact_uri
+                FROM qlib_model_runs
+                WHERE market = :market
+                  AND universe = :universe
+                  AND model_name = :model_name
+                  AND feature_set = :feature_set
+                  AND (
+                    horizon = :horizon
+                    OR (horizon IS NULL AND :horizon = '1d')
+                  )
+                  AND mode = 'train'
+                  AND status = 'succeeded'
+                  AND stage = 'production'
+                  AND artifact_uri IS NOT NULL
+                  AND artifact_deleted_at IS NULL
+                  AND train_end <= :prediction_date
+                ORDER BY promoted_at DESC NULLS LAST, train_end DESC, finished_at DESC
+                LIMIT 1
+                """
+            ),
+            {
+                "market": request.market,
+                "universe": request.universe,
+                "model_name": request.model_name,
+                "feature_set": request.feature_set,
+                "horizon": request.horizon,
+                "prediction_date": request.prediction_date,
+            },
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            if model_config.status == "cpu_trainable":
+                raise ValueError(
+                    "No production training artifact found for "
+                    f"{request.market}/{request.universe}/{request.model_name}. "
+                    "Promote a succeeded train run before daily prediction."
+                )
+            return None
+
+        artifact = load_model_artifact(row["artifact_uri"])
+        if artifact.model_name != model_config.name:
+            raise ValueError(
+                f"Training artifact {row['run_id']} is for {artifact.model_name}, "
+                f"not {model_config.name}"
+            )
+        return artifact
 
     async def _mark_run_failed(
         self, db: AsyncSession, run_id: str, error_message: str

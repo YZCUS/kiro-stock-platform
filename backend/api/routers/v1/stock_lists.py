@@ -2,7 +2,9 @@
 股票清單管理 API 路由
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 from typing import List
@@ -10,7 +12,10 @@ from datetime import date
 
 # 依賴注入
 from app.dependencies import get_database_session
+from core.database import AsyncSessionLocal
 from core.auth_dependencies import get_current_active_user
+from domain.market_data.daily_prices import fetch_latest_daily_price_rows_by_stock
+from domain.services.strategy_signal_service import StrategySignalService
 
 # Models
 from domain.models.user import User
@@ -32,6 +37,25 @@ from api.schemas.stock_list import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+async def _generate_signals_for_added_stock(user_id, stock_id: int) -> None:
+    if AsyncSessionLocal is None:
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await StrategySignalService().generate_signals_for_user_stock(
+                db=db,
+                user_id=user_id,
+                stock_id=stock_id,
+            )
+    except Exception:
+        logger.exception(
+            "Failed to generate strategy signals for added stock %s",
+            stock_id,
+        )
 
 
 def _build_price_freshness(latest_price, stale_after_days: int = 1) -> dict:
@@ -40,7 +64,7 @@ def _build_price_freshness(latest_price, stale_after_days: int = 1) -> dict:
             "is_stale": True,
             "age_days": None,
             "last_updated_at": None,
-            "source": "price_history",
+            "source": "market_data_bars",
         }
 
     price_date = (
@@ -58,7 +82,7 @@ def _build_price_freshness(latest_price, stale_after_days: int = 1) -> dict:
         "is_stale": age_days is None or age_days > stale_after_days,
         "age_days": age_days,
         "last_updated_at": updated_at.isoformat() if updated_at else None,
-        "source": "price_history",
+        "source": "market_data_bars",
     }
 
 
@@ -354,7 +378,6 @@ async def get_list_stocks(
     """獲取清單中的所有股票（包含最新價格和完整股票信息）"""
     try:
         from sqlalchemy.orm import selectinload
-        from domain.models.price_history import PriceHistory
 
         # 驗證清單所有權
         list_query = select(UserStockList).where(
@@ -380,35 +403,11 @@ async def get_list_stocks(
         prices_by_stock = {}
 
         if stock_ids:
-            price_rank = (
-                func.row_number()
-                .over(
-                    partition_by=PriceHistory.stock_id,
-                    order_by=PriceHistory.date.desc(),
-                )
-                .label("price_rank")
+            prices_by_stock = await fetch_latest_daily_price_rows_by_stock(
+                db,
+                stock_ids,
+                rows_per_stock=2,
             )
-            ranked_prices = (
-                select(
-                    PriceHistory.stock_id.label("stock_id"),
-                    PriceHistory.date.label("date"),
-                    PriceHistory.close_price.label("close_price"),
-                    PriceHistory.volume.label("volume"),
-                    PriceHistory.updated_at.label("updated_at"),
-                    price_rank,
-                )
-                .where(PriceHistory.stock_id.in_(stock_ids))
-                .subquery()
-            )
-            prices_query = (
-                select(ranked_prices)
-                .where(ranked_prices.c.price_rank <= 2)
-                .order_by(ranked_prices.c.stock_id, ranked_prices.c.date.desc())
-            )
-            prices_result = await db.execute(prices_query)
-
-            for price in prices_result.mappings().all():
-                prices_by_stock.setdefault(price["stock_id"], []).append(dict(price))
 
         # 為每個股票構建完整的響應（包含本地最新價格）
         stock_responses = []
@@ -486,6 +485,7 @@ async def get_list_stocks(
 async def add_stock_to_list(
     list_id: int,
     request: StockListItemAddRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_database_session),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -537,6 +537,11 @@ async def add_stock_to_list(
         db.add(new_item)
         await db.commit()
         await db.refresh(new_item)
+        background_tasks.add_task(
+            _generate_signals_for_added_stock,
+            current_user.id,
+            request.stock_id,
+        )
 
         return StockListItemResponse(
             id=new_item.id,
@@ -558,6 +563,7 @@ async def add_stock_to_list(
 async def batch_add_stocks_to_list(
     list_id: int,
     request: StockListItemBatchAddRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_database_session),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -578,6 +584,7 @@ async def batch_add_stocks_to_list(
         success_count = 0
         failed_count = 0
         errors = []
+        added_stock_ids = []
 
         for stock_id in request.stock_ids:
             try:
@@ -602,12 +609,20 @@ async def batch_add_stocks_to_list(
                 # 添加新項目
                 new_item = UserStockListItem(list_id=list_id, stock_id=stock_id)
                 db.add(new_item)
+                added_stock_ids.append(stock_id)
                 success_count += 1
             except Exception as e:
                 failed_count += 1
                 errors.append(f"股票 ID {stock_id}: {str(e)}")
 
         await db.commit()
+
+        for stock_id in added_stock_ids:
+            background_tasks.add_task(
+                _generate_signals_for_added_stock,
+                current_user.id,
+                stock_id,
+            )
 
         return {
             "message": "批量添加完成",

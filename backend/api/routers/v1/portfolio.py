@@ -17,6 +17,7 @@ from domain.models.user import User
 from domain.models.user_portfolio import UserPortfolio
 from domain.models.transaction import Transaction
 from domain.models.stock import Stock
+from domain.market_data.daily_prices import fetch_latest_daily_price
 
 # Schemas
 from api.schemas.portfolio import (
@@ -70,17 +71,7 @@ async def get_user_portfolio(
             if not stock:
                 continue
 
-            # 獲取最新價格
-            from domain.models.price_history import PriceHistory
-
-            price_query = (
-                select(PriceHistory)
-                .where(PriceHistory.stock_id == stock.id)
-                .order_by(PriceHistory.date.desc())
-                .limit(1)
-            )
-            price_result = await db.execute(price_query)
-            latest_price = price_result.scalar_one_or_none()
+            latest_price = await fetch_latest_daily_price(db, stock.id)
 
             current_price = None
             current_value = None
@@ -149,7 +140,6 @@ async def get_portfolio_summary(
     try:
         from sqlalchemy import select
         from sqlalchemy.orm import selectinload
-        from domain.models.price_history import PriceHistory
 
         # 查詢用戶持倉（使用 eager loading）
         query = (
@@ -168,15 +158,7 @@ async def get_portfolio_summary(
             if not stock:
                 continue
 
-            # 獲取最新價格
-            price_query = (
-                select(PriceHistory)
-                .where(PriceHistory.stock_id == stock.id)
-                .order_by(PriceHistory.date.desc())
-                .limit(1)
-            )
-            price_result = await db.execute(price_query)
-            latest_price = price_result.scalar_one_or_none()
+            latest_price = await fetch_latest_daily_price(db, stock.id)
 
             if latest_price:
                 current_price = Decimal(str(latest_price.close_price))
@@ -229,16 +211,7 @@ async def get_portfolio_detail(
 
         current_price = None
         if stock:
-            from domain.models.price_history import PriceHistory
-
-            price_query = (
-                select(PriceHistory)
-                .where(PriceHistory.stock_id == stock.id)
-                .order_by(PriceHistory.date.desc())
-                .limit(1)
-            )
-            price_result = await db.execute(price_query)
-            latest_price = price_result.scalar_one_or_none()
+            latest_price = await fetch_latest_daily_price(db, stock.id)
             if latest_price:
                 current_price = float(latest_price.close_price)
 

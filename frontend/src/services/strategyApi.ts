@@ -12,6 +12,8 @@ import type {
   SubscriptionListResponse,
   SignalListResponse,
   SignalStatistics,
+  StockCompositeScoreListResponse,
+  StrategyReliabilityScoreListResponse,
   TradingSignal,
   UpdateSignalStatusRequest,
   SignalQueryParams,
@@ -126,6 +128,21 @@ export const getSignalStatistics = async (
   return get<SignalStatistics>(
     API_ENDPOINTS.STRATEGIES.SIGNALS.STATISTICS,
     params
+  );
+};
+
+export const getStrategyReliabilityScores = async (): Promise<StrategyReliabilityScoreListResponse> => {
+  return get<StrategyReliabilityScoreListResponse>(
+    API_ENDPOINTS.STRATEGIES.RELIABILITY
+  );
+};
+
+export const getStockCompositeScores = async (
+  limit: number = 20
+): Promise<StockCompositeScoreListResponse> => {
+  return get<StockCompositeScoreListResponse>(
+    API_ENDPOINTS.STRATEGIES.COMPOSITE_SCORES,
+    { limit }
   );
 };
 

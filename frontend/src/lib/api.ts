@@ -87,6 +87,8 @@ export const API_ENDPOINTS = {
       GENERATE: '/api/v1/strategies/signals/generate',
       UPDATE_STATUS: (id: number) => `/api/v1/strategies/signals/${id}/status`,
     },
+    RELIABILITY: '/api/v1/strategies/reliability',
+    COMPOSITE_SCORES: '/api/v1/strategies/composite-scores',
   },
 
   // Watchlist endpoints
@@ -117,6 +119,7 @@ export const API_ENDPOINTS = {
 
   QLIB: {
     READINESS: '/api/v1/qlib/readiness',
+    MODELS: '/api/v1/qlib/models',
   },
 
   // System endpoints

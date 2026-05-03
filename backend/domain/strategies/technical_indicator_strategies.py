@@ -1,7 +1,7 @@
 """
 主流技術指標策略。
 
-這些策略直接使用本地 price_history 日線資料計算指標，避免依賴事先寫入
+這些策略直接使用本地 market_data_bars 日線資料計算指標，避免依賴事先寫入
 technical_indicators 的批次結果，適合 demo 和每日預抓後的快速信號生成。
 """
 
@@ -11,10 +11,14 @@ from datetime import timedelta
 import logging
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from domain.models.price_history import PriceHistory
+from domain.market_data.daily_prices import (
+    DailyPriceBar,
+    fetch_daily_prices,
+    fetch_latest_daily_price_rows_by_stock,
+)
 from domain.models.stock import Stock
 from domain.policies.indicator_strategies import IndicatorStrategies
 from domain.strategies.strategy_interface import (
@@ -28,8 +32,8 @@ from domain.strategies.strategy_interface import (
 logger = logging.getLogger(__name__)
 
 
-class PriceHistoryStrategyBase(IStrategyEngine):
-    """Shared helpers for price-history based daily strategies."""
+class DailyBarStrategyBase(IStrategyEngine):
+    """Shared helpers for daily-bar based strategies."""
 
     @property
     def strategy_type(self) -> StrategyType:
@@ -61,35 +65,28 @@ class PriceHistoryStrategyBase(IStrategyEngine):
         stock_id: int,
         db: AsyncSession,
         lookback_bars: int,
-    ) -> tuple[Optional[Stock], List[PriceHistory]]:
+    ) -> tuple[Optional[Stock], List[DailyPriceBar]]:
         stock_result = await db.execute(select(Stock).where(Stock.id == stock_id))
         stock = stock_result.scalar_one_or_none()
         if not stock:
             logger.warning("Stock %s not found", stock_id)
             return None, []
 
-        price_result = await db.execute(
-            select(PriceHistory)
-            .where(
-                and_(
-                    PriceHistory.stock_id == stock_id,
-                    PriceHistory.close_price.is_not(None),
-                )
-            )
-            .order_by(PriceHistory.date.desc())
-            .limit(lookback_bars)
+        prices = await fetch_daily_prices(
+            db,
+            stock_id=stock_id,
+            limit=lookback_bars,
+            ascending=True,
         )
-        prices = list(price_result.scalars().all())
-        prices = sorted(prices, key=lambda item: item.date)
         return stock, prices
 
-    def _close_prices(self, prices: List[PriceHistory]) -> List[float]:
+    def _close_prices(self, prices: List[DailyPriceBar]) -> List[float]:
         return [float(price.close_price) for price in prices]
 
     def _build_signal(
         self,
         stock: Stock,
-        latest_price: PriceHistory,
+        latest_price: DailyPriceBar,
         direction: SignalDirection,
         confidence: float,
         reason: str,
@@ -150,7 +147,7 @@ class PriceHistoryStrategyBase(IStrategyEngine):
         )
 
 
-class DeathCrossStrategy(PriceHistoryStrategyBase):
+class DeathCrossStrategy(DailyBarStrategyBase):
     @property
     def strategy_type(self) -> StrategyType:
         return StrategyType.DEATH_CROSS
@@ -320,7 +317,7 @@ class DeathCrossStrategy(PriceHistoryStrategyBase):
         )
 
 
-class RsiReversalStrategy(PriceHistoryStrategyBase):
+class RsiReversalStrategy(DailyBarStrategyBase):
     @property
     def strategy_type(self) -> StrategyType:
         return StrategyType.RSI_REVERSAL
@@ -456,7 +453,7 @@ class RsiReversalStrategy(PriceHistoryStrategyBase):
         )
 
 
-class MacdCrossoverStrategy(PriceHistoryStrategyBase):
+class MacdCrossoverStrategy(DailyBarStrategyBase):
     @property
     def strategy_type(self) -> StrategyType:
         return StrategyType.MACD_CROSSOVER
@@ -616,7 +613,7 @@ class MacdCrossoverStrategy(PriceHistoryStrategyBase):
         )
 
 
-class BollingerBreakoutStrategy(PriceHistoryStrategyBase):
+class BollingerBreakoutStrategy(DailyBarStrategyBase):
     @property
     def strategy_type(self) -> StrategyType:
         return StrategyType.BOLLINGER_BREAKOUT
@@ -748,8 +745,100 @@ class BollingerBreakoutStrategy(PriceHistoryStrategyBase):
             float(strategy_params["take_profit_percent"]),
         )
 
+    async def batch_analyze(
+        self,
+        stock_ids: List[int],
+        db: AsyncSession,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> List[TradingSignal]:
+        if not stock_ids:
+            return []
 
-class VolumeSpikeStrategy(PriceHistoryStrategyBase):
+        strategy_params = {**self.get_default_params(), **(params or {})}
+        period = int(strategy_params["period"])
+        stock_result = await db.execute(select(Stock).where(Stock.id.in_(stock_ids)))
+        stocks_by_id = {stock.id: stock for stock in stock_result.scalars().all()}
+        if not stocks_by_id:
+            return []
+
+        prices_by_stock = await fetch_latest_daily_price_rows_by_stock(
+            db,
+            stocks_by_id.keys(),
+            rows_per_stock=period + 10,
+        )
+
+        signals = []
+        for stock_id in stock_ids:
+            stock = stocks_by_id.get(stock_id)
+            rows = sorted(
+                prices_by_stock.get(stock_id, []),
+                key=lambda row: row["date"],
+            )
+            if stock is None or len(rows) < period:
+                continue
+
+            upper, middle, lower = IndicatorStrategies.calculate_bollinger_bands(
+                [float(row["close_price"]) for row in rows],
+                period,
+                float(strategy_params["std_dev"]),
+            )
+            if not upper or not lower:
+                continue
+
+            latest_row = rows[-1]
+            current_price = float(latest_row["close_price"])
+            buffer_ratio = float(strategy_params["breakout_buffer_percent"]) / 100
+            upper_trigger = upper[-1] * (1 + buffer_ratio)
+            lower_trigger = lower[-1] * (1 - buffer_ratio)
+
+            if current_price > upper_trigger:
+                direction = SignalDirection.LONG
+                distance = (current_price - upper[-1]) / upper[-1] * 100
+                label = "突破上軌"
+            elif current_price < lower_trigger:
+                direction = SignalDirection.SHORT
+                distance = (lower[-1] - current_price) / lower[-1] * 100
+                label = "跌破下軌"
+            else:
+                continue
+
+            latest_bar = DailyPriceBar(
+                id=0,
+                stock_id=stock.id,
+                date=latest_row["date"],
+                open_price=latest_row["close_price"],
+                high_price=latest_row["close_price"],
+                low_price=latest_row["close_price"],
+                close_price=latest_row["close_price"],
+                volume=latest_row["volume"],
+                adjusted_close=latest_row["close_price"],
+            )
+            confidence = 60 + min(35, distance * 8)
+            reason = (
+                f"收盤價 {current_price:.2f} {label}，布林通道顯示趨勢可能延伸。"
+            )
+            signals.append(
+                self._build_signal(
+                    stock,
+                    latest_bar,
+                    direction,
+                    confidence,
+                    reason,
+                    {
+                        "upper_band": upper[-1],
+                        "middle_band": middle[-1],
+                        "lower_band": lower[-1],
+                    },
+                    int(strategy_params["signal_validity_days"]),
+                    float(strategy_params["stop_loss_percent"]),
+                    float(strategy_params["take_profit_percent"]),
+                )
+            )
+
+        return signals
+
+
+class VolumeSpikeStrategy(DailyBarStrategyBase):
     @property
     def strategy_type(self) -> StrategyType:
         return StrategyType.VOLUME_SPIKE
