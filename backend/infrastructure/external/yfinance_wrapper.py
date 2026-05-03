@@ -126,9 +126,20 @@ class YFinanceWrapper:
             return _yf_module.download(tickers, start=start, end=end, **kwargs)
         except Exception as e:
             logger.error(f"Error downloading data for {tickers}: {e}")
-            return self._get_mock_history(tickers, start, end)
+            return self._get_mock_history(
+                tickers,
+                start,
+                end,
+                interval=kwargs.get("interval", "1d"),
+            )
 
-    def _get_mock_history(self, tickers: str, start: Optional[str], end: Optional[str]):
+    def _get_mock_history(
+        self,
+        tickers: str,
+        start: Optional[str],
+        end: Optional[str],
+        interval: str = "1d",
+    ):
         """生成 mock 歷史數據"""
         import pandas as pd
         import numpy as np
