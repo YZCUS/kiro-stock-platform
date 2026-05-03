@@ -3,6 +3,7 @@
 Core Database Tests - Clean Architecture
 Testing database connection, session management, and configuration
 """
+
 import inspect
 import sys
 from pathlib import Path
@@ -108,29 +109,42 @@ class TestDatabaseIntegration:
     def test_repository_interfaces_exist(self):
         """Test that repository interfaces exist for Clean Architecture"""
         try:
+            from domain.repositories.daily_price_repository_interface import (
+                IDailyPriceRepository,
+            )
+            from domain.repositories.market_data_bar_repository_interface import (
+                IMarketDataBarRepository,
+            )
             from domain.repositories.stock_repository_interface import IStockRepository
-            from domain.repositories.price_history_repository_interface import IPriceHistoryRepository
 
             # Verify interfaces are abstract base classes
-            assert hasattr(IStockRepository, '__abstractmethods__')
-            assert hasattr(IPriceHistoryRepository, '__abstractmethods__')
+            assert hasattr(IStockRepository, "__abstractmethods__")
+            assert hasattr(IDailyPriceRepository, "__abstractmethods__")
+            assert hasattr(IMarketDataBarRepository, "__abstractmethods__")
 
         except ImportError:
             pytest.fail("Repository interfaces should exist in Clean Architecture")
 
     def test_infrastructure_repositories_exist(self):
         """Test that infrastructure repository implementations exist"""
-        from domain.repositories.price_history_repository_interface import (
-            IPriceHistoryRepository,
+        from domain.repositories.daily_price_repository_interface import (
+            IDailyPriceRepository,
+        )
+        from domain.repositories.market_data_bar_repository_interface import (
+            IMarketDataBarRepository,
         )
         from domain.repositories.stock_repository_interface import IStockRepository
-        from infrastructure.persistence.price_history_repository import (
-            PriceHistoryRepository,
+        from infrastructure.persistence.daily_price_repository import (
+            DailyPriceRepository,
+        )
+        from infrastructure.persistence.market_data_bar_repository import (
+            MarketDataBarRepository,
         )
         from infrastructure.persistence.stock_repository import StockRepository
 
         assert issubclass(StockRepository, IStockRepository)
-        assert issubclass(PriceHistoryRepository, IPriceHistoryRepository)
+        assert issubclass(DailyPriceRepository, IDailyPriceRepository)
+        assert issubclass(MarketDataBarRepository, IMarketDataBarRepository)
 
     def test_dependency_injection_setup(self):
         """Test dependency injection configuration"""
@@ -140,17 +154,17 @@ class TestDatabaseIntegration:
 
     def test_domain_models_exist(self):
         """Test that domain models are properly structured"""
-        from domain.models import PriceHistory, Stock, TechnicalIndicator
+        from domain.models import MarketDataBar, Stock, TechnicalIndicator
 
         assert Stock.__tablename__ == "stocks"
-        assert PriceHistory.__tablename__ == "price_history"
+        assert MarketDataBar.__tablename__ == "market_data_bars"
         assert TechnicalIndicator.__tablename__ == "technical_indicators"
 
 
 class TestDatabaseConnectionPooling:
     """Database connection pooling and configuration tests"""
 
-    @patch('sqlalchemy.ext.asyncio.create_async_engine')
+    @patch("sqlalchemy.ext.asyncio.create_async_engine")
     def test_engine_creation_with_pooling(self, mock_create_engine):
         """Test engine creation with proper pooling configuration"""
         mock_engine = Mock()
@@ -161,11 +175,7 @@ class TestDatabaseConnectionPooling:
 
         test_url = "postgresql+asyncpg://user:pass@localhost:5432/test"
         engine = create_async_engine(
-            test_url,
-            echo=False,
-            future=True,
-            pool_size=5,
-            max_overflow=10
+            test_url, echo=False, future=True, pool_size=5, max_overflow=10
         )
 
         # Verify mock was called
@@ -176,7 +186,7 @@ class TestDatabaseConnectionPooling:
         valid_urls = [
             "postgresql+asyncpg://user:pass@localhost:5432/db",
             "sqlite+aiosqlite:///test.db",
-            "postgresql+asyncpg://user@localhost/db"
+            "postgresql+asyncpg://user@localhost/db",
         ]
 
         for url in valid_urls:
@@ -234,7 +244,7 @@ class TestDatabaseSecurity:
             "password=123456",
             "password=admin",
             "password=root",
-            "password=test"
+            "password=test",
         ]
 
         test_url = "postgresql+asyncpg://user:securepass@localhost:5432/db"
@@ -247,17 +257,11 @@ class TestDatabaseSecurity:
         import os
 
         # Test that typical database environment variables can be read
-        db_env_vars = [
-            "DATABASE_URL",
-            "DB_HOST",
-            "DB_PORT",
-            "DB_NAME",
-            "DB_USER"
-        ]
+        db_env_vars = ["DATABASE_URL", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER"]
 
         # At least check that os.environ can be used (not that they're set)
         for var in db_env_vars:
-            assert hasattr(os, 'environ')
+            assert hasattr(os, "environ")
             # Just verify we can access environment variables
             _ = os.environ.get(var, "default")
 
@@ -280,7 +284,7 @@ class TestDatabasePerformance:
         timeout_config = {
             "pool_timeout": 30,
             "pool_recycle": 3600,
-            "connect_timeout": 10
+            "connect_timeout": 10,
         }
 
         for key, value in timeout_config.items():

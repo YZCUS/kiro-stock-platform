@@ -2,7 +2,7 @@
 Order execution queue and API contract tests.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
@@ -66,6 +66,9 @@ class FakeScalarResult:
 
     def scalar_one_or_none(self):
         return self.value
+
+    def all(self):
+        return self.value if isinstance(self.value, list) else []
 
 
 class FakeQuery:
@@ -290,9 +293,7 @@ async def test_redis_stream_execution_queue_claims_stale_pending_message():
 
     assert dequeued.order_intent_id == command.order_intent_id
     assert dequeued.metadata["_redis_message_id"] == "9-0"
-    assert redis_client.claimed == [
-        ("orders", "workers", "worker-2", 1000, "0-0", 1)
-    ]
+    assert redis_client.claimed == [("orders", "workers", "worker-2", 1000, "0-0", 1)]
     assert redis_client.read_calls == []
 
 
@@ -407,11 +408,22 @@ async def test_paper_order_execution_records_fill_transaction_and_position():
         client_order_id="client-paper-42",
     )
     stock = SimpleNamespace(id=1, symbol="AAPL", market="US")
+    latest_daily_bar = SimpleNamespace(
+        id=100,
+        stock_id=1,
+        timestamp=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        market="US",
+        open_price=Decimal("100.00"),
+        high_price=Decimal("102.00"),
+        low_price=Decimal("99.00"),
+        close_price=Decimal("101.25"),
+        volume=1000,
+    )
     db = FakeAsyncSession(
         execute_results=[
             intent,
             None,
-            Decimal("101.25"),
+            [(latest_daily_bar, date(2026, 1, 2))],
         ],
         stock=stock,
     )
