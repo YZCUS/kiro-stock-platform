@@ -17,7 +17,7 @@ redis==5.0.1
 hiredis==2.2.3
 
 # 數據處理
-pandas>=2.2.0
+pandas>=3.0.2
 numpy>=1.26.0
 yfinance>=0.2.37
 requests>=2.31.0
