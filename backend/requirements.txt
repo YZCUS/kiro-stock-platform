@@ -10,7 +10,7 @@ alembic==1.13.0
 psycopg2-binary==2.9.9
 asyncpg==0.29.0
 aiosqlite==0.19.0
-greenlet>=3.0.0
+greenlet>=3.5.3
 
 # Redis 快取
 redis==5.0.1
