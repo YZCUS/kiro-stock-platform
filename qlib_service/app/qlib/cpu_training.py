@@ -98,8 +98,7 @@ def build_training_dataset(
         valid=_to_dataset_split(split_features["valid"], split_targets["valid"]),
         test=_to_dataset_split(split_features["test"], split_targets["test"]),
         sample_counts={
-            split_name: len(features)
-            for split_name, features in split_features.items()
+            split_name: len(features) for split_name, features in split_features.items()
         },
     )
     if dataset.sample_counts["train"] == 0:
@@ -118,8 +117,9 @@ def train_cpu_model(
     dataset: TrainingDataset,
     artifact_dir: Path,
     metadata: dict[str, Any],
+    cpu_threads: int = 2,
 ) -> tuple[str, dict[str, Any]]:
-    model = _create_model(model_config)
+    model = _create_model(model_config, cpu_threads)
     model.fit(dataset.train.features, dataset.train.targets)
 
     valid_predictions = model.predict(dataset.valid.features)
@@ -176,7 +176,7 @@ def predict_with_artifact(
     return float(prediction[0])
 
 
-def _create_model(model_config: QlibModelConfig):
+def _create_model(model_config: QlibModelConfig, cpu_threads: int = 2):
     if model_config.model_type == "lightgbm":
         try:
             from lightgbm import LGBMRegressor
@@ -191,7 +191,7 @@ def _create_model(model_config: QlibModelConfig):
             colsample_bytree=0.9,
             objective="regression",
             random_state=42,
-            n_jobs=-1,
+            n_jobs=cpu_threads,
             verbose=-1,
         )
 
@@ -210,7 +210,7 @@ def _create_model(model_config: QlibModelConfig):
             objective="reg:squarederror",
             tree_method="hist",
             random_state=42,
-            n_jobs=-1,
+            n_jobs=cpu_threads,
         )
 
     if model_config.model_type == "catboost":
@@ -225,7 +225,7 @@ def _create_model(model_config: QlibModelConfig):
             learning_rate=0.05,
             loss_function="RMSE",
             random_seed=42,
-            thread_count=-1,
+            thread_count=cpu_threads,
             verbose=False,
         )
 

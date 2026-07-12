@@ -19,10 +19,17 @@ from app.dependencies import (
 )
 from api.schemas.stocks import PriceDataResponse
 from domain.services.stock_service import StockService
-from domain.services.data_collection_service import DataCollectionService, DataCollectionStatus
+from domain.services.data_collection_service import (
+    DataCollectionService,
+    DataCollectionStatus,
+)
 from domain.market_data.daily_prices import market_bar_date_expr
 from domain.models.market_data_bar import MarketDataBar
 from domain.models.stock import Stock
+from core.internal_auth import (
+    require_active_user_or_internal_token,
+    require_internal_token,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,6 +38,8 @@ router = APIRouter()
 @router.get("/prices/data-exists")
 async def check_price_data_exists(
     date: str = Query(..., description="檢查日期 (YYYY-MM-DD)"),
+    market: Optional[str] = Query(None, pattern="^(TW|US)$"),
+    min_coverage: float = Query(0.9, ge=0.0, le=1.0),
     db: AsyncSession = Depends(get_database_session),
 ) -> Dict[str, Any]:
     """
@@ -49,21 +58,47 @@ async def check_price_data_exists(
         # 解析日期
         check_date = datetime.strptime(date, "%Y-%m-%d").date()
 
-        query = select(func.count(func.distinct(MarketDataBar.stock_id))).where(
+        stock_filters = [Stock.is_active == True]
+        bar_filters = [
             MarketDataBar.timeframe == "1d",
             market_bar_date_expr() == check_date,
+        ]
+        if market:
+            stock_filters.append(Stock.market == market)
+            bar_filters.append(MarketDataBar.market == market)
+
+        query = (
+            select(func.count(func.distinct(MarketDataBar.stock_id)))
+            .select_from(MarketDataBar)
+            .join(Stock, Stock.id == MarketDataBar.stock_id)
+            .where(*stock_filters, *bar_filters)
         )
+        active_count_query = select(func.count(Stock.id)).where(*stock_filters)
 
         result = await db.execute(query)
-        count = result.scalar()
+        active_result = await db.execute(active_count_query)
+        count = int(result.scalar() or 0)
+        active_count = int(active_result.scalar() or 0)
+        coverage = count / active_count if active_count else 0.0
 
-        logger.info(f"檢查日期 {check_date} 的價格數據: {count} 筆")
+        logger.info(
+            "檢查日期 %s 市場 %s 的價格覆蓋: %s/%s (%.1f%%)",
+            check_date,
+            market or "ALL",
+            count,
+            active_count,
+            coverage * 100,
+        )
 
         return {
             "success": True,
             "date": date,
-            "has_data": count > 0,
+            "market": market,
+            "has_data": active_count > 0 and coverage >= min_coverage,
             "stock_count": count,
+            "active_stock_count": active_count,
+            "coverage_ratio": coverage,
+            "min_coverage": min_coverage,
         }
 
     except ValueError as e:
@@ -221,7 +256,11 @@ async def get_stock_latest_price(
         raise HTTPException(status_code=500, detail=f"取得最新價格失敗: {str(e)}")
 
 
-@router.post("/{stock_id}/price/backfill", response_model=Dict[str, Any])
+@router.post(
+    "/{stock_id}/price/backfill",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_active_user_or_internal_token)],
+)
 async def backfill_stock_data(
     stock_id: int,
     start_date: Optional[date] = Query(None, description="開始日期"),
@@ -273,7 +312,11 @@ async def backfill_stock_data(
         raise HTTPException(status_code=500, detail=f"數據回填失敗: {str(e)}")
 
 
-@router.post("/refresh-all", response_model=Dict[str, Any])
+@router.post(
+    "/refresh-all",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_internal_token)],
+)
 async def refresh_all_stock_prices(
     db: AsyncSession = Depends(get_database_session),
     data_collection_service: DataCollectionService = Depends(
@@ -389,7 +432,11 @@ async def refresh_all_stock_prices(
         raise HTTPException(status_code=500, detail=f"批量刷新失敗: {str(e)}")
 
 
-@router.post("/backfill-missing", response_model=Dict[str, Any])
+@router.post(
+    "/backfill-missing",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_internal_token)],
+)
 async def backfill_missing_prices(
     db: AsyncSession = Depends(get_database_session),
     data_collection_service: DataCollectionService = Depends(

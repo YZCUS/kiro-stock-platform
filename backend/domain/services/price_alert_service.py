@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import desc, select
+from sqlalchemy import case, desc, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.models.market_data_bar import MarketDataBar
@@ -75,22 +75,15 @@ class PriceAlertService:
         limit: int = 500,
     ) -> dict:
         now = datetime.now(timezone.utc)
-        result = await db.execute(
-            select(PriceAlert)
-            .where(
-                PriceAlert.active == True,
-                PriceAlert.triggered == False,
-                PriceAlert.expires_at > now,
-            )
-            .order_by(PriceAlert.id)
-            .limit(limit)
-        )
+        result = await db.execute(self._alerts_to_check_query(now, limit))
         alerts = result.scalars().all()
+        price_snapshots = await self._get_price_snapshots(db, alerts)
         items = []
         skipped = 0
 
         for alert in alerts:
-            price_snapshot = await self._get_price_snapshot(db, alert)
+            price_snapshot = price_snapshots[(alert.stock_id, alert.source_timeframe)]
+            alert.last_checked_at = now
             if price_snapshot["price"] is None:
                 skipped += 1
                 items.append(
@@ -104,7 +97,6 @@ class PriceAlertService:
                 alert.condition == "ABOVE" and current_price >= target_price
             ) or (alert.condition == "BELOW" and current_price <= target_price)
 
-            alert.last_checked_at = now
             alert.last_price = current_price
             alert.last_source = price_snapshot["source"]
             if triggered:
@@ -129,30 +121,96 @@ class PriceAlertService:
             "items": items,
         }
 
-    async def _get_price_snapshot(self, db: AsyncSession, alert: PriceAlert) -> dict:
+    def _alerts_to_check_query(self, now: datetime, limit: int):
+        return (
+            select(PriceAlert)
+            .where(
+                PriceAlert.active.is_(True),
+                PriceAlert.triggered.is_(False),
+                PriceAlert.expires_at > now,
+            )
+            .order_by(
+                case((PriceAlert.last_checked_at.is_(None), 0), else_=1),
+                PriceAlert.last_checked_at,
+                PriceAlert.id,
+            )
+            .limit(limit)
+        )
+
+    async def _get_price_snapshots(
+        self,
+        db: AsyncSession,
+        alerts: list[PriceAlert],
+    ) -> dict[tuple[int, str], dict]:
+        keys = {(alert.stock_id, alert.source_timeframe) for alert in alerts}
+        if not keys:
+            return {}
+
+        latest_rank = (
+            func.row_number()
+            .over(
+                partition_by=(MarketDataBar.stock_id, MarketDataBar.timeframe),
+                order_by=(
+                    desc(MarketDataBar.timestamp),
+                    desc(MarketDataBar.updated_at),
+                    desc(MarketDataBar.id),
+                ),
+            )
+            .label("latest_rank")
+        )
+        ranked = (
+            select(MarketDataBar.id.label("bar_id"), latest_rank)
+            .where(tuple_(MarketDataBar.stock_id, MarketDataBar.timeframe).in_(keys))
+            .subquery()
+        )
         bar_result = await db.execute(
             select(MarketDataBar)
-            .where(
-                MarketDataBar.stock_id == alert.stock_id,
-                MarketDataBar.timeframe == alert.source_timeframe,
-            )
-            .order_by(desc(MarketDataBar.timestamp))
-            .limit(1)
+            .join(ranked, MarketDataBar.id == ranked.c.bar_id)
+            .where(ranked.c.latest_rank == 1)
         )
-        bar = bar_result.scalar_one_or_none()
-        if bar is not None:
-            return {"price": float(bar.close_price), "source": "market_data_bars"}
+        snapshots = {
+            (bar.stock_id, bar.timeframe): {
+                "price": float(bar.close_price),
+                "source": "market_data_bars",
+            }
+            for bar in bar_result.scalars().all()
+        }
 
+        representative_by_stock: dict[int, PriceAlert] = {}
+        for alert in alerts:
+            key = (alert.stock_id, alert.source_timeframe)
+            if key not in snapshots:
+                representative_by_stock.setdefault(alert.stock_id, alert)
+
+        provider_by_stock: dict[int, dict] = {}
         if self.market_info_service is not None:
-            quote = await self.market_info_service.get_quote(
-                db,
-                alert.symbol,
-                alert.market,
-                stock_id=alert.stock_id,
-            )
-            return {"price": quote.get("price"), "source": quote.get("source")}
+            for stock_id, alert in representative_by_stock.items():
+                quote = await self.market_info_service.get_quote(
+                    db,
+                    alert.symbol,
+                    alert.market,
+                    stock_id=stock_id,
+                )
+                provider_by_stock[stock_id] = {
+                    "price": quote.get("price"),
+                    "source": quote.get("source"),
+                }
 
-        return {"price": None, "source": None}
+        for alert in alerts:
+            key = (alert.stock_id, alert.source_timeframe)
+            snapshots.setdefault(
+                key,
+                provider_by_stock.get(
+                    alert.stock_id,
+                    {"price": None, "source": None},
+                ),
+            )
+        return snapshots
+
+    async def _get_price_snapshot(self, db: AsyncSession, alert: PriceAlert) -> dict:
+        return (await self._get_price_snapshots(db, [alert]))[
+            (alert.stock_id, alert.source_timeframe)
+        ]
 
     def _build_check_item(
         self,

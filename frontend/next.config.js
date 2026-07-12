@@ -22,6 +22,11 @@ const devDocumentCacheHeaders =
         },
       ];
 
+const apiRewriteBaseUrl =
+  process.env.NEXT_PUBLIC_API_URL === 'same-origin'
+    ? process.env.INTERNAL_API_BASE_URL || 'http://localhost:8000'
+    : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 const nextConfig = {
   // Enable static optimization
   output: 'standalone',
@@ -30,8 +35,6 @@ const nextConfig = {
   experimental: {
     // Enable modern builds for better performance
     esmExternals: true,
-    // Enable server components
-    serverComponentsExternalPackages: [],
     // 優化特定包的導入（減少 bundle 大小）
     optimizePackageImports: ['lucide-react', '@tanstack/react-query'],
   },
@@ -178,7 +181,7 @@ const nextConfig = {
     return [
       {
         source: '/api/proxy/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/:path*`,
+        destination: `${apiRewriteBaseUrl}/:path*`,
       },
     ];
   },
@@ -203,9 +206,6 @@ const nextConfig = {
 
   // 生產環境優化
   productionBrowserSourceMaps: false, // 禁用生產環境 source maps
-
-  // SWC minification (faster than Terser)
-  swcMinify: true,
 };
 
 module.exports = nextConfig;

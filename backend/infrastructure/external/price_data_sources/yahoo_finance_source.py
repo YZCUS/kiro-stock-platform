@@ -172,7 +172,13 @@ class YahooFinanceSource(IPriceDataSource):
                     f"between {start_at} and {end_at}"
                 )
 
-            return self._dataframe_to_bar_dict_list(df, market, timeframe)
+            bars = self._dataframe_to_bar_dict_list(df, market, timeframe)
+            market_tz = self._market_timezone(market)
+            window_start = self._ensure_market_timezone(start_at, market_tz)
+            window_end = self._ensure_market_timezone(end_at, market_tz)
+            return [
+                bar for bar in bars if window_start <= bar["timestamp"] < window_end
+            ]
 
         except DataUnavailableError:
             raise
@@ -339,9 +345,7 @@ class YahooFinanceSource(IPriceDataSource):
         for idx, row in df.iterrows():
             result.append(
                 {
-                    "timestamp": self._normalize_bar_timestamp(
-                        idx, market, timeframe
-                    ),
+                    "timestamp": self._normalize_bar_timestamp(idx, market, timeframe),
                     "open": float(row.get("Open", 0)),
                     "high": float(row.get("High", 0)),
                     "low": float(row.get("Low", 0)),
@@ -391,3 +395,12 @@ class YahooFinanceSource(IPriceDataSource):
         if market == "TW":
             return ZoneInfo("Asia/Taipei")
         return ZoneInfo("America/New_York")
+
+    def _ensure_market_timezone(
+        self,
+        value: datetime,
+        market_timezone: ZoneInfo,
+    ) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=market_timezone)
+        return value.astimezone(market_timezone)

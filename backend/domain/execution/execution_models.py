@@ -24,11 +24,12 @@ class OrderExecutionCommand:
 
     @classmethod
     def from_intent(cls, intent, attempt: int = 1) -> "OrderExecutionCommand":
+        durable_attempt = int(getattr(intent, "execution_attempt_count", 0) or 0)
         return cls(
             order_intent_id=intent.id,
             user_id=intent.user_id,
             idempotency_key=intent.idempotency_key,
-            attempt=attempt,
+            attempt=max(attempt, durable_attempt + 1),
             metadata={
                 "source": intent.source,
                 "client_order_id": intent.client_order_id,

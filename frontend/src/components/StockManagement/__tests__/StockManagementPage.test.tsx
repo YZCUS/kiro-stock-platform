@@ -266,6 +266,11 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
     expect(mockUseStocks).toHaveBeenCalledWith({
       page: 1,
       pageSize: 20,
+    }, {
+      enabled: false,
+      staleTime: 60 * 1000,
+      gcTime: 5 * 60 * 1000,
+      refetchOnWindowFocus: false,
     });
 
     // 驗證股票列表被渲染
@@ -311,6 +316,11 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
       page: 1,
       pageSize: 20,
       search: '台積電',
+    }, {
+      enabled: false,
+      staleTime: 60 * 1000,
+      gcTime: 5 * 60 * 1000,
+      refetchOnWindowFocus: false,
     });
   });
 
@@ -342,7 +352,7 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
     expect(screen.getAllByText('載入中...').length).toBeGreaterThan(0);
   });
 
-  it('應該顯示錯誤狀態和重試功能', () => {
+  it('清單模式不應顯示停用中的全域查詢錯誤', () => {
     const mockRefetch = jest.fn();
     mockUseStocks.mockReturnValue({
       data: null,
@@ -353,13 +363,8 @@ describe('StockManagementPage - 狀態管理優化測試', () => {
 
     render(<StockManagementPage />, { wrapper: createWrapper() });
 
-    expect(screen.getByText('網路連接失敗')).toBeInTheDocument();
-
-    // 點擊重新載入
-    const retryButton = screen.getByText('重新載入');
-    fireEvent.click(retryButton);
-
-    expect(mockRefetch).toHaveBeenCalled();
+    expect(screen.queryByText('網路連接失敗')).not.toBeInTheDocument();
+    expect(mockRefetch).not.toHaveBeenCalled();
   });
 
   it('應該顯示空狀態', () => {
@@ -577,7 +582,7 @@ describe('StockManagementPage - 性能優化', () => {
     expect(mockUseStocks.mock.calls[mockUseStocks.mock.calls.length - 1][0]).toEqual(initialParams);
   });
 
-  it('應該正確處理防抖搜尋（概念驗證）', () => {
+  it('應該將最新搜尋文字傳給查詢 hook', () => {
     render(<StockManagementPage />, { wrapper: createWrapper() });
 
     const searchInput = screen.getByPlaceholderText('搜尋股票名稱或代號...');
@@ -592,6 +597,11 @@ describe('StockManagementPage - 性能優化', () => {
       page: 1,
       pageSize: 20,
       search: '台積電',
+    }, {
+      enabled: false,
+      staleTime: 60 * 1000,
+      gcTime: 5 * 60 * 1000,
+      refetchOnWindowFocus: false,
     });
   });
 });

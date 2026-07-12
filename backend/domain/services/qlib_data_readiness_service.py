@@ -31,21 +31,29 @@ class QlibDataReadinessService:
             issues.append(
                 f"daily universe too small: {coverage['stocks_with_daily_bars']} < {min_stocks}"
             )
-            recommendations.append("Backfill a broader active universe before relying on Qlib ranking results.")
+            recommendations.append(
+                "Backfill a broader active universe before relying on Qlib ranking results."
+            )
 
         if coverage["median_bars"] < min_bars:
             issues.append(
                 f"median daily history too short: {coverage['median_bars']:.0f} < {min_bars}"
             )
-            recommendations.append("Backfill at least two years of daily OHLCV per instrument.")
+            recommendations.append(
+                "Backfill at least two years of daily OHLCV per instrument."
+            )
 
         if coverage["stocks_with_daily_bars"] < active_stocks:
             missing = active_stocks - coverage["stocks_with_daily_bars"]
             issues.append(f"{missing} active stocks have no daily bars")
-            recommendations.append("Run market-data prefetch for active stocks before Qlib inference.")
+            recommendations.append(
+                "Run market-data prefetch for active stocks before Qlib inference."
+            )
 
         if coverage["adjusted_rows"] == 0:
-            recommendations.append("Adopt a consistent adjusted-price policy before production backtests.")
+            recommendations.append(
+                "Adopt a consistent adjusted-price policy before production backtests."
+            )
 
         ready = not issues
         return {
@@ -74,21 +82,55 @@ class QlibDataReadinessService:
         active_stocks: int,
     ) -> dict:
         result = await db.execute(
-            text(
-                """
-                WITH daily AS (
+            text("""
+                WITH daily_candidates AS (
                     SELECT
                         b.stock_id,
-                        COUNT(*) AS bars,
-                        MIN(b.timestamp)::date AS min_date,
-                        MAX(b.timestamp)::date AS max_date,
-                        SUM(CASE WHEN b.is_adjusted THEN 1 ELSE 0 END) AS adjusted_rows
+                        b.id,
+                        b.source_type,
+                        b.quality_status,
+                        b.is_adjusted,
+                        b.updated_at,
+                        CASE
+                            WHEN b.market = 'TW'
+                                THEN timezone('Asia/Taipei', b.timestamp)::date
+                            ELSE timezone('America/New_York', b.timestamp)::date
+                        END AS bar_date
                     FROM market_data_bars b
                     JOIN stocks s ON s.id = b.stock_id
                     WHERE s.market = :market
                       AND s.is_active = TRUE
                       AND b.timeframe = '1d'
-                    GROUP BY b.stock_id
+                      AND b.close_price IS NOT NULL
+                ),
+                ranked_daily AS (
+                    SELECT
+                        daily_candidates.*,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY stock_id, bar_date
+                            ORDER BY
+                                CASE WHEN source_type = 'source' THEN 0 ELSE 1 END,
+                                CASE
+                                    WHEN quality_status IN (
+                                        'complete', 'backfilled', 'corrected'
+                                    ) THEN 0 ELSE 1
+                                END,
+                                is_adjusted ASC,
+                                updated_at DESC,
+                                id DESC
+                        ) AS daily_rank
+                    FROM daily_candidates
+                ),
+                daily AS (
+                    SELECT
+                        stock_id,
+                        COUNT(*) AS bars,
+                        MIN(bar_date) AS min_date,
+                        MAX(bar_date) AS max_date,
+                        SUM(CASE WHEN is_adjusted THEN 1 ELSE 0 END) AS adjusted_rows
+                    FROM ranked_daily
+                    WHERE daily_rank = 1
+                    GROUP BY stock_id
                 )
                 SELECT
                     COUNT(*) AS stocks_with_daily_bars,
@@ -100,8 +142,7 @@ class QlibDataReadinessService:
                     COALESCE(MAX(bars), 0) AS max_bars,
                     COALESCE(SUM(adjusted_rows), 0) AS adjusted_rows
                 FROM daily
-                """
-            ),
+                """),
             {"market": market},
         )
         row = result.mappings().one()

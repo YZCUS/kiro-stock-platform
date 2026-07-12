@@ -12,6 +12,8 @@ from sqlalchemy import (
     JSON,
     ForeignKey,
     Index,
+    CheckConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -30,7 +32,7 @@ class StrategySignal(BaseModel, TimestampMixin):
     user_id = Column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
         comment="用戶ID",
     )
@@ -64,6 +66,14 @@ class StrategySignal(BaseModel, TimestampMixin):
         index=True,
         comment="狀態 (active/expired/triggered/cancelled)",
     )
+    signal_scope = Column(
+        String(20),
+        nullable=False,
+        default="user",
+        server_default="user",
+        index=True,
+        comment="信號範圍 (user/canonical)",
+    )
     signal_date = Column(Date, nullable=False, index=True, comment="信號生成日期")
     valid_until = Column(Date, nullable=True, comment="信號有效期限")
     reason = Column(Text, nullable=True, comment="信號產生原因")
@@ -86,6 +96,30 @@ class StrategySignal(BaseModel, TimestampMixin):
             "strategy_type",
             "signal_horizon",
             "signal_date",
+        ),
+        Index(
+            "ix_strategy_signals_canonical_active_date",
+            "signal_scope",
+            "status",
+            "signal_date",
+        ),
+        Index(
+            "uq_strategy_signals_canonical_identity",
+            "stock_id",
+            "strategy_type",
+            "signal_horizon",
+            "signal_date",
+            unique=True,
+            postgresql_where=text("signal_scope = 'canonical'"),
+        ),
+        CheckConstraint(
+            "signal_scope IN ('user', 'canonical')",
+            name="ck_strategy_signals_scope",
+        ),
+        CheckConstraint(
+            "(signal_scope = 'user' AND user_id IS NOT NULL) OR "
+            "(signal_scope = 'canonical' AND user_id IS NULL)",
+            name="ck_strategy_signals_scope_owner",
         ),
         {"comment": "策略信號記錄表"},
     )
@@ -219,11 +253,12 @@ class StrategySignal(BaseModel, TimestampMixin):
         """轉換為字典"""
         return {
             "id": self.id,
-            "user_id": str(self.user_id),
+            "user_id": str(self.user_id) if self.user_id else None,
             "stock_id": self.stock_id,
             "stock_symbol": self.stock.symbol if self.stock else None,
             "stock_name": self.stock.name if self.stock else None,
             "strategy_type": self.strategy_type,
+            "signal_scope": self.signal_scope,
             "signal_horizon": self.signal_horizon,
             "direction": self.direction,
             "confidence": float(self.confidence) if self.confidence else None,

@@ -25,6 +25,8 @@ class FakeRedis:
         self.streams = {}
         self.acked = []
         self.claim_response = ("0-0", [], [])
+        self.fail_next_xadd = False
+        self.xadd_calls = []
 
     def xgroup_create(self, name, groupname, id="0", mkstream=False):
         key = (name, groupname)
@@ -39,7 +41,11 @@ class FakeRedis:
             self.streams.setdefault(name, [])
         return True
 
-    def xadd(self, name, fields):
+    def xadd(self, name, fields, maxlen=None, approximate=False):
+        if self.fail_next_xadd:
+            self.fail_next_xadd = False
+            raise RuntimeError("xadd unavailable")
+        self.xadd_calls.append((name, maxlen, approximate))
         stream = self.streams.setdefault(name, [])
         message_id = f"{len(stream) + 1}-0"
         stream.append((message_id, dict(fields)))
@@ -93,6 +99,7 @@ async def test_generic_redis_stream_task_queue_round_trips_and_acks():
     await queue.ack(dequeued)
 
     assert redis_client.acked == [("market_data_tasks", "market_data_workers", "1-0")]
+    assert redis_client.xadd_calls == [("market_data_tasks", 100000, True)]
 
 
 @pytest.mark.asyncio
@@ -120,6 +127,34 @@ async def test_generic_redis_stream_task_queue_dead_letters_after_retries():
     assert dead_message["attempt"] == "1"
     assert dead_message["failed_attempts"] == "1"
     assert "dead_lettered_at" in dead_message
+    assert redis_client.xadd_calls[-1] == ("strategy_tasks_dead", 10000, True)
+
+
+@pytest.mark.asyncio
+async def test_generic_redis_stream_task_queue_does_not_ack_when_dead_letter_write_fails():
+    redis_client = FakeRedis()
+    queue = RedisStreamTaskQueue(
+        redis_client=redis_client,
+        stream_name="strategy_tasks",
+        consumer_group="strategy_workers",
+        consumer_name="worker-1",
+        max_attempts=1,
+    )
+    command = StreamTaskCommand(
+        task_type="run_strategy",
+        payload={"stock_id": 1},
+        idempotency_key="task-retry-window",
+        attempt=1,
+    )
+
+    await queue.enqueue(command)
+    dequeued = await queue.dequeue(timeout=0)
+    redis_client.fail_next_xadd = True
+
+    with pytest.raises(RuntimeError, match="xadd unavailable"):
+        await queue.fail(dequeued, RuntimeError("temporary failure"))
+
+    assert redis_client.acked == []
 
 
 def test_bar_aggregation_service_aggregates_5m_to_15m():
@@ -415,9 +450,7 @@ async def test_market_data_validation_reports_missing_and_invalid_bars():
     assert report.expected_count == 3
     assert report.actual_count == 2
     assert report.invalid_ohlcv_count == 1
-    assert report.missing_timestamps == [
-        datetime(2026, 1, 5, 9, 10, tzinfo=tz)
-    ]
+    assert report.missing_timestamps == [datetime(2026, 1, 5, 9, 10, tzinfo=tz)]
     assert not report.is_complete
 
 

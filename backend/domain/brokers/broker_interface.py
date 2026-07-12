@@ -20,6 +20,11 @@ from domain.brokers.broker_models import (
 class IBrokerAdapter(ABC):
     """Broker adapter 抽象接口。"""
 
+    @property
+    def supports_idempotent_submission(self) -> bool:
+        """Whether retrying the same client_order_id is broker-safe."""
+        return False
+
     @abstractmethod
     async def get_status(self) -> BrokerStatus:
         """取得 broker 連線狀態。"""

@@ -33,7 +33,11 @@ def make_async_database_url(url: str) -> str:
     )
 
 
-def make_async_engine_kwargs(url: str) -> dict:
+def make_async_engine_kwargs(
+    url: str,
+    pool_size: int | None = None,
+    max_overflow: int | None = None,
+) -> dict:
     parsed = make_url(url)
     kwargs = {"connect_args": {}}
     if _is_postgresql(parsed.drivername) and _is_transaction_pooler(
@@ -44,6 +48,9 @@ def make_async_engine_kwargs(url: str) -> dict:
             "prepared_statement_name_func": lambda: f"__asyncpg_{uuid4()}__",
         }
         kwargs["poolclass"] = NullPool
+    elif pool_size is not None and max_overflow is not None:
+        kwargs["pool_size"] = pool_size
+        kwargs["max_overflow"] = max_overflow
     return kwargs
 
 
@@ -52,9 +59,15 @@ engine = create_async_engine(
     make_async_database_url(settings.database_url),
     pool_pre_ping=True,
     future=True,
-    **make_async_engine_kwargs(settings.database_url),
+    **make_async_engine_kwargs(
+        settings.database_url,
+        pool_size=settings.database_pool_size,
+        max_overflow=settings.database_max_overflow,
+    ),
 )
-AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+AsyncSessionLocal = async_sessionmaker(
+    engine, class_=AsyncSession, expire_on_commit=False
+)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

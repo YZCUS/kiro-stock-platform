@@ -3,12 +3,16 @@
 """
 
 from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from contextlib import asynccontextmanager
 import logging
+from time import perf_counter
 from typing import Optional
 
 from core.config import settings
+from core import database as database_module
 from api.v1.api import api_router
 from api.v1.websocket import (
     websocket_endpoint,
@@ -82,13 +86,18 @@ app = FastAPI(
     description="自動化股票數據收集與技術分析平台",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=settings.app.docs_url or None,
+    redoc_url=settings.app.redoc_url or None,
+    openapi_url=(
+        None if settings.app.environment.lower() == "production" else "/openapi.json"
+    ),
 )
 
 # 設定 CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_HOSTS,
-    allow_credentials=True,
+    allow_origins=settings.security.cors_origins,
+    allow_credentials=settings.security.cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -109,19 +118,46 @@ async def health_check():
     # 檢查WebSocket服務狀態
     websocket_health = await health_check_websocket_service()
 
+    database_health = await _database_health()
     overall_status = "healthy"
-    if websocket_health["status"] == "degraded":
+    status_code = 200
+    if database_health["status"] != "healthy":
+        overall_status = "unhealthy"
+        status_code = 503
+    elif websocket_health["status"] == "degraded":
         overall_status = "degraded"
 
-    return {
+    payload = {
         "status": overall_status,
         "service": "stock-analysis-platform",
         "components": {
             "websocket": websocket_health,
             "market_stream": await market_stream_stats(),
-            "database": {"status": "healthy"},  # 可以添加更詳細的資料庫檢查
+            "database": database_health,
         },
         "timestamp": websocket_health["timestamp"],
+    }
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+async def _database_health() -> dict:
+    """Verify the database connection used by the running application."""
+
+    engine = database_module.engine
+    if engine is None:
+        return {"status": "unavailable", "error": "database engine not initialized"}
+
+    started_at = perf_counter()
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        logger.error("Database health check failed: %s", exc)
+        return {"status": "unhealthy", "error": type(exc).__name__}
+
+    return {
+        "status": "healthy",
+        "response_time_ms": round((perf_counter() - started_at) * 1000, 2),
     }
 
 

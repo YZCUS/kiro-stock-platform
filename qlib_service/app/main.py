@@ -1,3 +1,6 @@
+import os
+from secrets import compare_digest
+
 from fastapi import Depends, FastAPI, Header, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +23,6 @@ from app.schemas import (
 )
 from app.settings import Settings, get_settings
 
-
 app = FastAPI(title="Qlib Prediction Service")
 
 
@@ -28,13 +30,35 @@ def require_internal_token(
     x_internal_token: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
 ) -> None:
-    if settings.internal_token and x_internal_token != settings.internal_token:
+    if settings.environment.lower() == "production" and (
+        not settings.internal_token or settings.internal_token == "dev-qlib-token"
+    ):
+        raise HTTPException(
+            status_code=503, detail="Qlib internal token is not configured"
+        )
+    if not x_internal_token or not compare_digest(
+        x_internal_token, settings.internal_token
+    ):
         raise HTTPException(status_code=401, detail="invalid internal token")
 
 
 @app.get("/health")
-async def health() -> dict:
-    return {"status": "ok"}
+async def health(
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    try:
+        await db.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"database unavailable: {type(exc).__name__}"
+        ) from exc
+    if not os.access(settings.artifact_root, os.W_OK):
+        raise HTTPException(status_code=503, detail="artifact storage is not writable")
+    return {
+        "status": "ok",
+        "components": {"database": "ok", "artifact_storage": "ok"},
+    }
 
 
 @app.post(
@@ -133,13 +157,11 @@ async def get_job(
     db: AsyncSession = Depends(get_db),
 ) -> JobResponse:
     result = await db.execute(
-        text(
-            """
+        text("""
             SELECT run_id, status, artifact_uri, error_message
             FROM qlib_model_runs
             WHERE run_id = :run_id
-            """
-        ),
+            """),
         {"run_id": run_id},
     )
     row = result.mappings().one_or_none()

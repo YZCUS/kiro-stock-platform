@@ -7,14 +7,17 @@ the shared database; backend strategies read only successful runs.
 """
 
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
 import os
+import pendulum
 
 import requests
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
-from airflow.utils.trigger_rule import TriggerRule
+from airflow.sensors.external_task import ExternalTaskSensor
 
+from plugins.common.date_utils import context_interval_date
 
 QLIB_API_URL = os.getenv("QLIB_PREDICTION_URL", "http://qlib-prediction-service:8090")
 QLIB_INTERNAL_TOKEN = os.getenv("QLIB_INTERNAL_TOKEN", "dev-qlib-token")
@@ -109,6 +112,8 @@ def get_enabled_model_names():
         for model_name in raw_model_names.split(",")
         if model_name.strip()
     ]
+    if not model_names:
+        raise ValueError("QLIB_MODEL_NAMES must enable at least one model")
     invalid_model_names = [
         model_name
         for model_name in model_names
@@ -122,13 +127,13 @@ def get_enabled_model_names():
 
 
 def build_prediction_payload(**context):
-    logical_date = context["logical_date"].date()
+    prediction_date = context_interval_date(context, "America/New_York")
     payloads = []
     for model_name in get_enabled_model_names():
         payloads.append(
             {
                 "market": "US",
-                "prediction_date": logical_date.isoformat(),
+                "prediction_date": prediction_date.isoformat(),
                 "universe": "active_us",
                 "model_name": model_name,
                 **MODEL_PAYLOAD_CONFIGS[model_name],
@@ -179,8 +184,7 @@ def trigger_qlib_prediction(**context):
     if isinstance(payloads, dict):
         payloads = [payloads]
 
-    results = []
-    for payload in payloads:
+    def submit(payload):
         response = requests.post(
             f"{QLIB_API_URL.rstrip('/')}/internal/jobs/daily-prediction",
             json=payload,
@@ -188,21 +192,27 @@ def trigger_qlib_prediction(**context):
             timeout=1800,
         )
         response.raise_for_status()
-        results.append(response.json())
-    return results
+        return response.json()
+
+    max_workers = min(
+        len(payloads),
+        max(1, int(os.getenv("QLIB_MAX_PARALLEL_MODELS", "2"))),
+    )
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return list(executor.map(submit, payloads))
 
 
 dag_config = {
     "dag_id": "qlib_daily_prediction",
     "description": "Run daily Qlib prediction and persist model scores",
-    "schedule_interval": "30 23 * * 1-5",
+    "schedule": "30 23 * * 1-5",
     "max_active_runs": 1,
     "catchup": False,
     "tags": ["qlib", "prediction", "ml"],
     "default_args": {
         "owner": "stock-analysis-platform",
         "depends_on_past": False,
-        "start_date": datetime(2024, 1, 1),
+        "start_date": pendulum.datetime(2024, 1, 1, tz="UTC"),
         "email_on_failure": True,
         "email_on_retry": False,
         "retries": 1,
@@ -213,6 +223,20 @@ dag_config = {
 dag = DAG(**dag_config)
 
 start_task = EmptyOperator(task_id="start", dag=dag)
+
+wait_for_collection_task = ExternalTaskSensor(
+    task_id="wait_for_us_collection_validation",
+    external_dag_id="daily_stock_collection_us_api",
+    external_task_id="verify_dependencies",
+    execution_delta=timedelta(hours=2, minutes=30),
+    allowed_states=["success"],
+    skipped_states=["skipped"],
+    failed_states=["failed", "upstream_failed"],
+    timeout=60 * 60,
+    poke_interval=60,
+    mode="reschedule",
+    dag=dag,
+)
 
 build_payload_task = PythonOperator(
     task_id="build_prediction_payload",
@@ -246,10 +270,9 @@ trigger_composite_scores_task = PythonOperator(
 
 complete_task = EmptyOperator(
     task_id="qlib_prediction_complete",
-    trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
     dag=dag,
 )
 
-start_task >> build_payload_task >> trigger_prediction_task
+start_task >> wait_for_collection_task >> build_payload_task >> trigger_prediction_task
 trigger_prediction_task >> validate_result_task >> trigger_signal_generation_task
 trigger_signal_generation_task >> trigger_composite_scores_task >> complete_task

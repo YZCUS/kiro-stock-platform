@@ -12,7 +12,6 @@ import requests
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
-
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://backend:8000/api/v1")
 INTERNAL_API_TOKEN = os.getenv(
     "INTERNAL_API_TOKEN",
@@ -27,13 +26,18 @@ def check_price_alerts():
         timeout=120,
     )
     response.raise_for_status()
-    return response.json()
+    result = response.json()
+    return {
+        "checked": int(result.get("checked") or 0),
+        "triggered": int(result.get("triggered") or 0),
+        "skipped": int(result.get("skipped") or 0),
+    }
 
 
 dag = DAG(
     dag_id="price_alert_monitoring",
     description="Check active price alerts",
-    schedule_interval="*/5 * * * *",
+    schedule="*/5 * * * *",
     max_active_runs=1,
     catchup=False,
     tags=["alerts", "market-data"],

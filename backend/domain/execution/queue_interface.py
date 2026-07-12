@@ -5,9 +5,17 @@ Order execution queue interface.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Optional
 
 from domain.execution.execution_models import OrderExecutionCommand
+
+
+class OrderQueueFailureDisposition(str, Enum):
+    """Durable result of applying the queue retry policy."""
+
+    REQUEUED = "requeued"
+    DEAD_LETTERED = "dead_lettered"
 
 
 class IOrderExecutionQueue(ABC):
@@ -31,6 +39,15 @@ class IOrderExecutionQueue(ABC):
         pass
 
     @abstractmethod
-    async def fail(self, command: OrderExecutionCommand, error: Exception) -> None:
-        """Record command failure and apply retry/dead-letter policy."""
+    async def fail(
+        self, command: OrderExecutionCommand, error: Exception
+    ) -> OrderQueueFailureDisposition:
+        """Apply retry policy and report whether durable DB fencing is required."""
+        pass
+
+    @abstractmethod
+    async def quarantine(
+        self, command: OrderExecutionCommand, error: Exception
+    ) -> None:
+        """Replace an executable command with reconciliation-only work."""
         pass

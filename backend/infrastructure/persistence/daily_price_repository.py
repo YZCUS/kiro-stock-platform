@@ -16,6 +16,7 @@ from domain.market_data.daily_prices import (
 )
 from domain.models.market_data_bar import MarketDataBar
 from domain.models.stock import Stock
+from domain.services.market_calendar_service import MarketCalendarService
 
 
 class DailyPriceRepository(IDailyPriceRepository):
@@ -163,7 +164,9 @@ class DailyPriceRepository(IDailyPriceRepository):
         dates = [data["date"] for data in price_data]
         created: list[DailyPriceBar] = []
         for stock_id in stock_ids:
-            stock_dates = [data["date"] for data in price_data if data["stock_id"] == stock_id]
+            stock_dates = [
+                data["date"] for data in price_data if data["stock_id"] == stock_id
+            ]
             if not stock_dates:
                 continue
             created.extend(
@@ -217,7 +220,9 @@ class DailyPriceRepository(IDailyPriceRepository):
             end_date=end_date,
             limit=days * 2,
         )
-        volumes = [int(price.volume) for price in prices if price.volume and price.volume > 0]
+        volumes = [
+            int(price.volume) for price in prices if price.volume and price.volume > 0
+        ]
         if volumes:
             return {
                 "avg_volume": sum(volumes) / len(volumes),
@@ -232,8 +237,6 @@ class DailyPriceRepository(IDailyPriceRepository):
         self, db: AsyncSession, stock_id: int, start_date: date, end_date: date
     ) -> List[date]:
         """取得缺失的交易日期"""
-        from datetime import timedelta
-
         prices = await fetch_daily_prices(
             db,
             stock_id=stock_id,
@@ -244,14 +247,14 @@ class DailyPriceRepository(IDailyPriceRepository):
         )
         existing_dates = {price.date for price in prices}
 
-        # 生成所有工作日（週一到週五）
-        all_dates = []
-        current_date = start_date
-        while current_date <= end_date:
-            # 只包含工作日
-            if current_date.weekday() < 5:
-                all_dates.append(current_date)
-            current_date += timedelta(days=1)
+        stock = await db.get(Stock, stock_id)
+        if stock is None:
+            return []
+        all_dates = MarketCalendarService().trading_days(
+            stock.market,
+            start_date,
+            end_date,
+        )
 
         # 找出缺失的日期
         missing_dates = [d for d in all_dates if d not in existing_dates]

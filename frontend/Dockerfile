@@ -15,6 +15,11 @@ RUN \
 FROM node:18-alpine AS builder
 WORKDIR /app
 
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_WS_URL
+ARG NEXT_PUBLIC_MARKET_WS_URL
+ARG INTERNAL_API_BASE_URL
+
 # Copy dependencies from previous stage
 COPY --from=dependencies /app/node_modules ./node_modules
 
@@ -30,6 +35,10 @@ RUN mkdir -p ./public
 # Set build-time environment variables
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
+ENV NEXT_PUBLIC_MARKET_WS_URL=${NEXT_PUBLIC_MARKET_WS_URL}
+ENV INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL}
 
 # Build the application
 RUN npm run build
@@ -38,8 +47,19 @@ RUN npm run build
 FROM node:18-alpine AS runner
 WORKDIR /app
 
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_WS_URL
+ARG NEXT_PUBLIC_MARKET_WS_URL
+ARG INTERNAL_API_BASE_URL
+
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
+ENV NEXT_PUBLIC_MARKET_WS_URL=${NEXT_PUBLIC_MARKET_WS_URL}
+ENV INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL}
+
+RUN apk add --no-cache curl
 
 # Create non-root user for security
 RUN addgroup --system --gid 1001 nodejs

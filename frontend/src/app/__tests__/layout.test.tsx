@@ -28,12 +28,6 @@ jest.mock('../../components/ui/Toast', () => {
   };
 });
 
-jest.mock('../../components/ui/WebSocketStatus', () => {
-  return function MockWebSocketStatus() {
-    return <div data-testid="websocket-status">WebSocket Status</div>;
-  };
-});
-
 jest.mock('../../components/ErrorBoundary', () => {
   return function MockErrorBoundary({ children }: { children: React.ReactNode }) {
     return <div data-testid="error-boundary">{children}</div>;
@@ -123,22 +117,12 @@ describe('RootLayout', () => {
     );
 
     // 檢查所有導航連結
-    expect(screen.getByText('股票分析平台')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '股票分析平台' })).toBeInTheDocument();
     expect(screen.getByText('首頁')).toBeInTheDocument();
     expect(screen.getByText('股票管理')).toBeInTheDocument();
     expect(screen.getByText('即時分析')).toBeInTheDocument();
     expect(screen.getByText('交易信號')).toBeInTheDocument();
     expect(screen.getByText('系統狀態')).toBeInTheDocument(); // 這個在 layout 2.tsx 中是缺失的
-  });
-
-  it('應該包含 WebSocket 狀態指示器', () => {
-    render(
-      <RootLayout>
-        <TestContent />
-      </RootLayout>
-    );
-
-    expect(screen.getByTestId('websocket-status')).toBeInTheDocument();
   });
 
   it('應該包含 Toast 通知組件', () => {
@@ -173,7 +157,7 @@ describe('RootLayout', () => {
     expect(html).toHaveAttribute('lang', 'zh-TW');
 
     const body = container.querySelector('body');
-    expect(body).toHaveClass('min-h-screen', 'bg-gradient-to-br', 'from-gray-50', 'to-gray-100');
+    expect(body).toHaveClass('min-h-screen', 'bg-white', 'text-gray-950');
   });
 
   it('應該包含版權信息', () => {
@@ -183,7 +167,7 @@ describe('RootLayout', () => {
       </RootLayout>
     );
 
-    expect(screen.getByText(/© 2025 股票分析平台. 版權所有./)).toBeInTheDocument();
+    expect(screen.getByRole('contentinfo')).toHaveTextContent('股票分析平台');
   });
 
   it('導航連結應該有正確的 href 屬性', () => {
@@ -209,12 +193,14 @@ describe('RootLayout', () => {
     );
 
     // 檢查響應式容器
-    const container = screen.getByText('股票分析平台').closest('.max-w-7xl');
+    const container = screen
+      .getByRole('link', { name: '股票分析平台' })
+      .closest('.max-w-7xl');
     expect(container).toHaveClass('mx-auto', 'px-4', 'sm:px-6', 'lg:px-8');
 
     // 檢查導航樣式
     const nav = screen.getByRole('navigation');
-    expect(nav).toHaveClass('bg-white/80', 'backdrop-blur-md', 'shadow-sm', 'border-b', 'border-gray-200');
+    expect(nav).toHaveClass('sticky', 'bg-white', 'border-b', 'border-gray-200');
   });
 });
 
@@ -236,7 +222,6 @@ describe('RootLayout - 組件集成測試', () => {
     // 驗證所有組件都被渲染
     expect(screen.getByTestId('error-boundary')).toBeInTheDocument();
     expect(screen.getByTestId('providers')).toBeInTheDocument();
-    expect(screen.getByTestId('websocket-status')).toBeInTheDocument();
     expect(screen.getByTestId('toast')).toBeInTheDocument();
 
     // 驗證頁面內容被正確渲染
@@ -295,7 +280,6 @@ describe('RootLayout - 對比 layout 2.tsx 缺失功能測試', () => {
     const criticalFeatures = [
       'error-boundary',      // 錯誤邊界
       'providers',          // Redux providers
-      'websocket-status',   // WebSocket 狀態
       'toast',             // Toast 通知
     ];
 

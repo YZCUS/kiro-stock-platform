@@ -19,8 +19,8 @@ class DatabaseSettings(BaseSettings):
         "postgresql://postgres:postgres@localhost:5432/stock_analysis", env="URL"
     )
     echo: bool = Field(False, env="ECHO")
-    pool_size: int = Field(10, env="POOL_SIZE")
-    max_overflow: int = Field(20, env="MAX_OVERFLOW")
+    pool_size: int = Field(5, ge=1, le=50, env="POOL_SIZE")
+    max_overflow: int = Field(5, ge=0, le=100, env="MAX_OVERFLOW")
 
     class Config:
         env_prefix = "DATABASE_"
@@ -71,9 +71,7 @@ class ExternalAPISettings(BaseSettings):
 
     # Finnhub market info 配置（搜尋、profile、quote、news）
     finnhub_api_key: Optional[str] = Field(None, env="FINNHUB_API_KEY")
-    finnhub_base_url: str = Field(
-        "https://finnhub.io/api/v1", env="FINNHUB_BASE_URL"
-    )
+    finnhub_base_url: str = Field("https://finnhub.io/api/v1", env="FINNHUB_BASE_URL")
     finnhub_ws_url: str = Field("wss://ws.finnhub.io", env="FINNHUB_WS_URL")
     finnhub_timeout_seconds: int = Field(10, env="FINNHUB_TIMEOUT_SECONDS")
 
@@ -256,9 +254,7 @@ class Settings(BaseSettings):
 
     BROKER_PROVIDER: Optional[str] = Field(None, alias="BROKER_PROVIDER")
     BROKER_MODE: Optional[str] = Field(None, alias="BROKER_MODE")
-    BROKER_TRADING_ENABLED: Optional[bool] = Field(
-        None, alias="BROKER_TRADING_ENABLED"
-    )
+    BROKER_TRADING_ENABLED: Optional[bool] = Field(None, alias="BROKER_TRADING_ENABLED")
     BROKER_READ_ONLY: Optional[bool] = Field(None, alias="BROKER_READ_ONLY")
     BROKER_DEFAULT_ACCOUNT_REF: Optional[str] = Field(
         None, alias="BROKER_DEFAULT_ACCOUNT_REF"

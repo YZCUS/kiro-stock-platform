@@ -9,9 +9,12 @@ USER airflow
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r /requirements.txt
 
-# Copy DAGs and include files
+# Copy the complete runtime; production does not bind-mount source code.
 COPY --chown=airflow:root dags/ /opt/airflow/dags/
+COPY --chown=airflow:root plugins/ /opt/airflow/plugins/
+COPY --chown=airflow:root config/ /opt/airflow/config/
 
 # Set environment variables
 ENV AIRFLOW__CORE__LOAD_EXAMPLES=False
 ENV AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+ENV PYTHONPATH=/opt/airflow
