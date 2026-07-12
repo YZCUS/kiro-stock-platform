@@ -35,8 +35,6 @@ const nextConfig = {
   experimental: {
     // Enable modern builds for better performance
     esmExternals: true,
-    // Enable server components
-    serverComponentsExternalPackages: [],
     // 優化特定包的導入（減少 bundle 大小）
     optimizePackageImports: ['lucide-react', '@tanstack/react-query'],
   },
@@ -208,9 +206,6 @@ const nextConfig = {
 
   // 生產環境優化
   productionBrowserSourceMaps: false, // 禁用生產環境 source maps
-
-  // SWC minification (faster than Terser)
-  swcMinify: true,
 };
 
 module.exports = nextConfig;
