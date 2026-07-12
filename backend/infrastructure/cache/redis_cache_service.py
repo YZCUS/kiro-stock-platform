@@ -3,10 +3,14 @@ Redis 快取服務 - 統一的快取實現
 整合原本分散在多個位置的快取邏輯
 """
 
-import json
-import redis
-from typing import Any, Optional, Dict, List
 from abc import ABC, abstractmethod
+import json
+import logging
+from typing import Any, Dict, List, Optional
+
+import redis.asyncio as redis
+
+logger = logging.getLogger(__name__)
 
 
 class ICacheService(ABC):
@@ -89,12 +93,12 @@ class RedisCacheService(ICacheService):
             return None
 
         try:
-            data = self.redis_client.get(key)
+            data = await self.redis_client.get(key)
             if data:
                 return json.loads(data)
             return None
         except Exception as e:
-            print(f"Redis get 操作失敗 [{key}]: {e}")
+            logger.warning("Redis get 操作失敗 [%s]: %s", key, e)
             return None
 
     async def set(self, key: str, value: Any, ttl: int = None) -> bool:
@@ -115,10 +119,10 @@ class RedisCacheService(ICacheService):
         try:
             ttl = ttl or self.settings.default_ttl
             serialized_value = json.dumps(value, ensure_ascii=False, default=str)
-            result = self.redis_client.setex(key, ttl, serialized_value)
+            result = await self.redis_client.setex(key, ttl, serialized_value)
             return bool(result)
         except Exception as e:
-            print(f"Redis set 操作失敗 [{key}]: {e}")
+            logger.warning("Redis set 操作失敗 [%s]: %s", key, e)
             return False
 
     async def delete(self, key: str) -> bool:
@@ -135,10 +139,10 @@ class RedisCacheService(ICacheService):
             return False
 
         try:
-            result = self.redis_client.delete(key)
+            result = await self.redis_client.delete(key)
             return result > 0
         except Exception as e:
-            print(f"Redis delete 操作失敗 [{key}]: {e}")
+            logger.warning("Redis delete 操作失敗 [%s]: %s", key, e)
             return False
 
     async def exists(self, key: str) -> bool:
@@ -155,9 +159,9 @@ class RedisCacheService(ICacheService):
             return False
 
         try:
-            return bool(self.redis_client.exists(key))
+            return bool(await self.redis_client.exists(key))
         except Exception as e:
-            print(f"Redis exists 操作失敗 [{key}]: {e}")
+            logger.warning("Redis exists 操作失敗 [%s]: %s", key, e)
             return False
 
     async def get_multi(self, keys: List[str]) -> Dict[str, Any]:
@@ -174,7 +178,7 @@ class RedisCacheService(ICacheService):
             return {}
 
         try:
-            values = self.redis_client.mget(keys)
+            values = await self.redis_client.mget(keys)
             result = {}
             for key, value in zip(keys, values):
                 if value:
@@ -184,7 +188,7 @@ class RedisCacheService(ICacheService):
                         result[key] = value
             return result
         except Exception as e:
-            print(f"Redis mget 操作失敗: {e}")
+            logger.warning("Redis mget 操作失敗: %s", e)
             return {}
 
     async def set_multi(self, data: Dict[str, Any], ttl: int = None) -> bool:
@@ -209,10 +213,10 @@ class RedisCacheService(ICacheService):
                 serialized_value = json.dumps(value, ensure_ascii=False, default=str)
                 pipeline.setex(key, ttl, serialized_value)
 
-            results = pipeline.execute()
+            results = await pipeline.execute()
             return all(results)
         except Exception as e:
-            print(f"Redis mset 操作失敗: {e}")
+            logger.warning("Redis mset 操作失敗: %s", e)
             return False
 
     async def clear_pattern(self, pattern: str) -> int:
@@ -229,15 +233,21 @@ class RedisCacheService(ICacheService):
             return 0
 
         try:
-            keys = self.redis_client.keys(pattern)
-            if keys:
-                return self.redis_client.delete(*keys)
-            return 0
+            deleted = 0
+            cursor = 0
+            while True:
+                cursor, keys = await self.redis_client.scan(
+                    cursor=cursor, match=pattern, count=500
+                )
+                if keys:
+                    deleted += await self.redis_client.unlink(*keys)
+                if cursor in {0, "0", b"0"}:
+                    return deleted
         except Exception as e:
-            print(f"Redis clear_pattern 操作失敗 [{pattern}]: {e}")
+            logger.warning("Redis clear_pattern 操作失敗 [%s]: %s", pattern, e)
             return 0
 
-    def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> Dict[str, Any]:
         """
         取得Redis統計資訊
 
@@ -248,7 +258,7 @@ class RedisCacheService(ICacheService):
             return {"connected": False}
 
         try:
-            info = self.redis_client.info()
+            info = await self.redis_client.info()
             return {
                 "connected": True,
                 "used_memory": info.get("used_memory_human"),
@@ -266,7 +276,7 @@ class RedisCacheService(ICacheService):
                 ),
             }
         except Exception as e:
-            print(f"Redis stats 操作失敗: {e}")
+            logger.warning("Redis stats 操作失敗: %s", e)
             return {"connected": False, "error": str(e)}
 
 

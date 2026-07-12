@@ -37,7 +37,11 @@ if not _is_testing:
             echo=settings.app.debug,
             future=True,
             pool_pre_ping=True,
-            **make_async_engine_kwargs(settings.database.url),
+            **make_async_engine_kwargs(
+                settings.database.url,
+                pool_size=settings.database.pool_size,
+                max_overflow=settings.database.max_overflow,
+            ),
         )
     except Exception as e:
         # 如果設定有問題，則使用記憶體資料庫

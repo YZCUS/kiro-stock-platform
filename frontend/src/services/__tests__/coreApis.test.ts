@@ -159,23 +159,23 @@ describe('StocksApiService', () => {
     });
     await StocksApiService.backfillStockData(3, { force: true });
 
-    expect(mockApiService.get).toHaveBeenNthCalledWith(1, '/api/v1/stocks/3/');
+    expect(mockApiService.get).toHaveBeenNthCalledWith(1, '/api/v1/stocks/3');
     expect(mockApiService.post).toHaveBeenNthCalledWith(1, '/api/v1/stocks/', {
       symbol: 'AAPL',
       name: 'Apple',
       market: 'US',
     });
-    expect(mockApiService.patch).toHaveBeenCalledWith('/api/v1/stocks/3/', {
+    expect(mockApiService.patch).toHaveBeenCalledWith('/api/v1/stocks/3', {
       name: 'Apple Inc.',
     });
-    expect(mockApiService.delete).toHaveBeenCalledWith('/api/v1/stocks/3/');
+    expect(mockApiService.delete).toHaveBeenCalledWith('/api/v1/stocks/3');
     expect(mockApiService.get).toHaveBeenNthCalledWith(
       2,
       '/api/v1/stocks/3/price-history/?start_date=2026-01-01&end_date=2026-01-31&interval=1d'
     );
     expect(mockApiService.post).toHaveBeenNthCalledWith(
       2,
-      '/api/v1/stocks/3/price/backfill/',
+      '/api/v1/stocks/3/price/backfill',
       { force: true }
     );
   });

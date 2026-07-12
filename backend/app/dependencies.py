@@ -41,7 +41,6 @@ from infrastructure.realtime.websocket_manager import (
 )
 from infrastructure.realtime.redis_pubsub import redis_broadcaster
 
-
 # =============================================================================
 # 基礎依賴 (暫時使用簡化版本，逐步遷移)
 # =============================================================================
@@ -58,6 +57,7 @@ async def get_database_session() -> Generator[AsyncSession, None, None]:
 
 # Redis 客戶端單例
 _redis_client_singleton = None
+_async_redis_client_singleton = None
 
 
 def get_redis_client(settings: Settings = Depends(get_settings)):
@@ -87,6 +87,30 @@ def get_redis_client(settings: Settings = Depends(get_settings)):
         return None
 
 
+def get_async_redis_client(settings: Settings = Depends(get_settings)):
+    """取得供 async request path 使用的 Redis 客戶端（單例模式）。"""
+    global _async_redis_client_singleton
+
+    if _async_redis_client_singleton is not None:
+        return _async_redis_client_singleton
+
+    import redis.asyncio as redis
+
+    try:
+        _async_redis_client_singleton = redis.Redis(
+            host=settings.redis.host,
+            port=settings.redis.port,
+            db=settings.redis.db,
+            password=settings.redis.password,
+            decode_responses=True,
+            socket_timeout=settings.redis.socket_timeout,
+        )
+        return _async_redis_client_singleton
+    except Exception as e:
+        print(f"Async Redis client 初始化失敗: {e}")
+        return None
+
+
 # =============================================================================
 # 快取服務 (Clean Architecture)
 # =============================================================================
@@ -96,7 +120,8 @@ _cache_service_singleton: Optional[ICacheService] = None
 
 
 def get_cache_service(
-    settings: Settings = Depends(get_settings), redis_client=Depends(get_redis_client)
+    settings: Settings = Depends(get_settings),
+    redis_client=Depends(get_async_redis_client),
 ) -> ICacheService:
     """取得統一快取服務（單例模式）"""
     global _cache_service_singleton
@@ -104,8 +129,10 @@ def get_cache_service(
     if _cache_service_singleton is not None:
         return _cache_service_singleton
 
-    _cache_service_singleton = RedisCacheService(redis_client, settings.redis)
-    return _cache_service_singleton
+    cache_service = RedisCacheService(redis_client, settings.redis)
+    if redis_client is not None:
+        _cache_service_singleton = cache_service
+    return cache_service
 
 
 _websocket_manager_singleton: Optional[IWebSocketManager] = None
@@ -502,7 +529,7 @@ def get_websocket_service() -> "WebSocketService":
 
         # 獲取單例依賴
         settings = get_settings()
-        cache_service = get_cache_service(settings, get_redis_client(settings))
+        cache_service = get_cache_service(settings, get_async_redis_client(settings))
         websocket_manager = get_websocket_manager(settings)
 
         # 創建 Repository 單例（輕量級，只包含查詢邏輯）

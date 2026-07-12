@@ -46,12 +46,19 @@ def make_async_connect_args(database_url: str) -> dict:
     return {}
 
 
-def make_async_engine_kwargs(database_url: str) -> dict:
+def make_async_engine_kwargs(
+    database_url: str,
+    pool_size: int | None = None,
+    max_overflow: int | None = None,
+) -> dict:
     """Return SQLAlchemy async engine kwargs for the target database URL."""
     url = make_url(database_url)
     kwargs = {"connect_args": make_async_connect_args(database_url)}
     if _is_postgresql(url.drivername) and _is_transaction_pooler(url.host, url.port):
         kwargs["poolclass"] = NullPool
+    elif pool_size is not None and max_overflow is not None:
+        kwargs["pool_size"] = pool_size
+        kwargs["max_overflow"] = max_overflow
     return kwargs
 
 

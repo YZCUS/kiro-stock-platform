@@ -11,7 +11,7 @@ from statistics import mean, pstdev
 from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4
 
-from sqlalchemy import desc, select, text
+from sqlalchemy import desc, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -28,7 +28,6 @@ from domain.models.strategy_evaluation import (
 from domain.models.strategy_signal import StrategySignal
 from domain.policies.indicator_strategies import IndicatorStrategies
 from domain.strategies import strategy_registry
-
 
 SUPPORTED_HORIZONS = ("1d", "5d", "20d", "60d")
 HORIZON_DAYS = {"1d": 1, "5d": 5, "20d": 20, "60d": 60}
@@ -246,7 +245,9 @@ class StrategyEvaluationService:
         count = 0
         for result in results:
             inputs = result.reliability_inputs or {}
-            target_score = self._clamp(float(inputs.get("target_score", 0.25)), 0.05, 0.95)
+            target_score = self._clamp(
+                float(inputs.get("target_score", 0.25)), 0.05, 0.95
+            )
             old_score = await self._get_existing_reliability(
                 db, market, universe, result.strategy_type, result.horizon
             )
@@ -373,7 +374,9 @@ class StrategyEvaluationService:
         score_date: Optional[date] = None,
     ) -> int:
         score_day = score_date or date.today()
-        version = weight_version or await self._latest_weight_version(db, market, universe)
+        version = weight_version or await self._latest_weight_version(
+            db, market, universe
+        )
         if version is None:
             version = await self._publish_baseline_weight_version(db, market, universe)
         weights = await self._weights_for_version(db, version.id)
@@ -382,7 +385,12 @@ class StrategyEvaluationService:
             select(Stock).where(Stock.market == market, Stock.is_active == True)
         )
         stocks = list(stocks_result.scalars().all())
-        latest_signals = await self._latest_strategy_signals(db, market)
+        latest_signals = await self._latest_strategy_signals(db, market, score_day)
+        existing_by_stock = await self._composite_scores_for_stocks(
+            db,
+            [stock.id for stock in stocks],
+            score_day,
+        )
 
         count = 0
         for stock in stocks:
@@ -393,7 +401,7 @@ class StrategyEvaluationService:
                 weight_version_id=version.id,
                 score_date=score_day,
             )
-            existing = await self._get_composite_score(db, stock.id, score_day)
+            existing = existing_by_stock.get(stock.id)
             if existing:
                 for key, value in composite.items():
                     setattr(existing, key, value)
@@ -452,8 +460,7 @@ class StrategyEvaluationService:
         end_date: date,
     ) -> Dict[int, List[Dict[str, Any]]]:
         result = await db.execute(
-            text(
-                """
+            text("""
                 WITH ranked AS (
                     SELECT
                         s.id AS stock_id,
@@ -498,8 +505,7 @@ class StrategyEvaluationService:
                 WHERE daily_rank = 1
                   AND bar_date BETWEEN :start_date AND :end_date
                 ORDER BY stock_id ASC, bar_date ASC
-                """
-            ),
+                """),
             {
                 "market": market,
                 "start_date": start_date,
@@ -536,7 +542,9 @@ class StrategyEvaluationService:
             if len(rows) <= horizon_days + 60:
                 continue
             closes = [row["close"] for row in rows]
-            indicators = self._precompute_strategy_indicators(strategy_type, rows, closes)
+            indicators = self._precompute_strategy_indicators(
+                strategy_type, rows, closes
+            )
             for index in range(1, len(rows) - horizon_days):
                 direction = self._technical_direction_from_indicators(
                     strategy_type,
@@ -657,9 +665,15 @@ class StrategyEvaluationService:
                 return None
             macd = indicators["macd"]
             signal = indicators["signal"]
-            if macd[macd_index - 1] <= signal[macd_index - 1] and macd[macd_index] > signal[macd_index]:
+            if (
+                macd[macd_index - 1] <= signal[macd_index - 1]
+                and macd[macd_index] > signal[macd_index]
+            ):
                 return "LONG"
-            if macd[macd_index - 1] >= signal[macd_index - 1] and macd[macd_index] < signal[macd_index]:
+            if (
+                macd[macd_index - 1] >= signal[macd_index - 1]
+                and macd[macd_index] < signal[macd_index]
+            ):
                 return "SHORT"
             return None
         if strategy_type == "volume_spike":
@@ -701,9 +715,17 @@ class StrategyEvaluationService:
         previous_long = long_ma[previous_long_index]
         current_short = short_ma[short_index]
         current_long = long_ma[long_index]
-        if direction == "LONG" and previous_short <= previous_long and current_short > current_long:
+        if (
+            direction == "LONG"
+            and previous_short <= previous_long
+            and current_short > current_long
+        ):
             return "LONG"
-        if direction == "SHORT" and previous_short >= previous_long and current_short < current_long:
+        if (
+            direction == "SHORT"
+            and previous_short >= previous_long
+            and current_short < current_long
+        ):
             return "SHORT"
         return None
 
@@ -720,9 +742,17 @@ class StrategyEvaluationService:
         long_ma = IndicatorStrategies.calculate_sma(closes, long_period)
         if len(short_ma) < 2 or len(long_ma) < 2:
             return None
-        if direction == "LONG" and short_ma[-2] <= long_ma[-2] and short_ma[-1] > long_ma[-1]:
+        if (
+            direction == "LONG"
+            and short_ma[-2] <= long_ma[-2]
+            and short_ma[-1] > long_ma[-1]
+        ):
             return "LONG"
-        if direction == "SHORT" and short_ma[-2] >= long_ma[-2] and short_ma[-1] < long_ma[-1]:
+        if (
+            direction == "SHORT"
+            and short_ma[-2] >= long_ma[-2]
+            and short_ma[-1] < long_ma[-1]
+        ):
             return "SHORT"
         return None
 
@@ -751,8 +781,12 @@ class StrategyEvaluationService:
             stock_id: {row["date"]: row for row in rows}
             for stock_id, rows in prices_by_stock.items()
         }
-        date_index = {
+        dates_by_stock = {
             stock_id: [row["date"] for row in rows]
+            for stock_id, rows in prices_by_stock.items()
+        }
+        date_position_by_stock = {
+            stock_id: {row["date"]: index for index, row in enumerate(rows)}
             for stock_id, rows in prices_by_stock.items()
         }
         horizon_days = HORIZON_DAYS[horizon]
@@ -761,10 +795,16 @@ class StrategyEvaluationService:
             direction = self._prediction_direction(prediction)
             if direction is None:
                 continue
-            dates = date_index.get(prediction.stock_id, [])
-            if prediction.prediction_date not in price_lookup.get(prediction.stock_id, {}):
+            dates = dates_by_stock.get(prediction.stock_id, [])
+            if prediction.prediction_date not in price_lookup.get(
+                prediction.stock_id, {}
+            ):
                 continue
-            index = dates.index(prediction.prediction_date)
+            index = date_position_by_stock.get(prediction.stock_id, {}).get(
+                prediction.prediction_date
+            )
+            if index is None:
+                continue
             if index + horizon_days >= len(dates):
                 continue
             entry = price_lookup[prediction.stock_id][prediction.prediction_date]
@@ -810,7 +850,9 @@ class StrategyEvaluationService:
         data_coverage: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         trades_by_date = sorted(trades, key=lambda trade: trade.signal_date)
-        returns = [self._clamp(trade.return_pct, -0.99, 9.0) for trade in trades_by_date]
+        returns = [
+            self._clamp(trade.return_pct, -0.99, 9.0) for trade in trades_by_date
+        ]
         wins = [value for value in returns if value > 0]
         losses = [value for value in returns if value < 0]
         days = max((end_date - start_date).days, 1)
@@ -896,7 +938,9 @@ class StrategyEvaluationService:
             return_std = pstdev(returns) if len(returns) > 1 else 0.0
             sharpe = 0.0
             if return_std > 0:
-                avg_holding_days = mean([HORIZON_DAYS[trade.horizon] for trade in chunk])
+                avg_holding_days = mean(
+                    [HORIZON_DAYS[trade.horizon] for trade in chunk]
+                )
                 sharpe = self._clamp(
                     avg_return / return_std * sqrt(252 / max(avg_holding_days, 1)),
                     -10.0,
@@ -909,7 +953,8 @@ class StrategyEvaluationService:
                     "end_date": chunk[-1].signal_date.isoformat(),
                     "trade_count": len(chunk),
                     "avg_return": avg_return,
-                    "win_rate": len([value for value in returns if value > 0]) / len(returns),
+                    "win_rate": len([value for value in returns if value > 0])
+                    / len(returns),
                     "sharpe_ratio": sharpe,
                     "passed": avg_return > 0 and sharpe >= 0,
                 }
@@ -935,7 +980,8 @@ class StrategyEvaluationService:
         for k_value in PRECISION_K_VALUES:
             top_trades = ranked[:k_value]
             precision = (
-                len([trade for trade in top_trades if trade.return_pct > 0]) / len(top_trades)
+                len([trade for trade in top_trades if trade.return_pct > 0])
+                / len(top_trades)
                 if top_trades
                 else None
             )
@@ -1045,11 +1091,19 @@ class StrategyEvaluationService:
         recent_score = (tanh(float(metrics["recent_return"]) * 10) + 1) / 2
         stability_score = 1 - min(float(metrics["return_std"]), 0.2) / 0.2
         walk_forward = metrics.get("walk_forward") or {}
-        walk_forward_score = self._clamp(float(walk_forward.get("pass_rate") or 0.0), 0.0, 1.0)
-        precision_score = self._optional_ratio_score(metrics.get("precision_at_20"), win_score)
-        rank_ic_score = (tanh(float(metrics.get("confidence_return_rank_ic") or 0.0) * 3) + 1) / 2
+        walk_forward_score = self._clamp(
+            float(walk_forward.get("pass_rate") or 0.0), 0.0, 1.0
+        )
+        precision_score = self._optional_ratio_score(
+            metrics.get("precision_at_20"), win_score
+        )
+        rank_ic_score = (
+            tanh(float(metrics.get("confidence_return_rank_ic") or 0.0) * 3) + 1
+        ) / 2
         coverage = metrics.get("data_coverage") or {}
-        coverage_score = self._clamp(float(coverage.get("coverage_ratio") or 0.0), 0.0, 1.0)
+        coverage_score = self._clamp(
+            float(coverage.get("coverage_ratio") or 0.0), 0.0, 1.0
+        )
         regime_fit_score = 0.5
         target_score = (
             0.35 * backtest_score
@@ -1060,7 +1114,9 @@ class StrategyEvaluationService:
             + 0.05 * rank_ic_score
             + 0.05 * regime_fit_score
         )
-        target_score = target_score * (0.35 + 0.55 * sample_score + 0.10 * coverage_score)
+        target_score = target_score * (
+            0.35 + 0.55 * sample_score + 0.10 * coverage_score
+        )
         if trade_count < 10:
             target_score = min(target_score, 0.25)
         if walk_forward_score < 0.4:
@@ -1128,16 +1184,30 @@ class StrategyEvaluationService:
         contributions = []
         latest_by_key: Dict[tuple[str, str], StrategySignal] = {}
         for signal in signals:
+            # Product-wide scores may only consume explicitly curated signals,
+            # never personalized subscription output.
+            if getattr(signal, "signal_scope", "user") != "canonical":
+                continue
+            if signal.signal_date > score_date:
+                continue
+            if signal.valid_until is not None and signal.valid_until < score_date:
+                continue
             key = (signal.strategy_type, signal.signal_horizon)
             current = latest_by_key.get(key)
-            if current is None or signal.signal_date > current.signal_date:
+            if current is None or self._signal_recency_key(
+                signal
+            ) > self._signal_recency_key(current):
                 latest_by_key[key] = signal
 
         for key, signal in latest_by_key.items():
             weight = weights.get(key)
             if weight is None:
                 continue
-            direction_multiplier = 1 if signal.direction == "LONG" else -1 if signal.direction == "SHORT" else 0
+            direction_multiplier = (
+                1
+                if signal.direction == "LONG"
+                else -1 if signal.direction == "SHORT" else 0
+            )
             if direction_multiplier > 0:
                 positive_count += 1
             elif direction_multiplier < 0:
@@ -1146,7 +1216,9 @@ class StrategyEvaluationService:
             contribution = direction_multiplier * confidence * float(weight.weight)
             contribution_total += contribution
             used_weight += float(weight.weight)
-            breakdown[signal.signal_horizon] = breakdown.get(signal.signal_horizon, 0.0) + contribution
+            breakdown[signal.signal_horizon] = (
+                breakdown.get(signal.signal_horizon, 0.0) + contribution
+            )
             contributions.append(
                 {
                     "strategy_type": signal.strategy_type,
@@ -1159,8 +1231,14 @@ class StrategyEvaluationService:
             )
 
         composite_score = contribution_total / used_weight if used_weight > 0 else 0.0
-        direction = "bullish" if composite_score > 0.15 else "bearish" if composite_score < -0.15 else "neutral"
-        confidence = min(1.0, abs(composite_score) * 1.5 + min(len(contributions), 5) * 0.05)
+        direction = (
+            "bullish"
+            if composite_score > 0.15
+            else "bearish" if composite_score < -0.15 else "neutral"
+        )
+        confidence = min(
+            1.0, abs(composite_score) * 1.5 + min(len(contributions), 5) * 0.05
+        )
         return {
             "stock_id": stock.id,
             "symbol": stock.symbol,
@@ -1182,6 +1260,7 @@ class StrategyEvaluationService:
         self,
         db: AsyncSession,
         market: str,
+        score_date: date,
     ) -> Dict[int, List[StrategySignal]]:
         result = await db.execute(
             select(StrategySignal)
@@ -1189,13 +1268,41 @@ class StrategyEvaluationService:
             .where(
                 Stock.market == market,
                 StrategySignal.status == "active",
+                StrategySignal.signal_scope == "canonical",
+                StrategySignal.signal_date <= score_date,
+                or_(
+                    StrategySignal.valid_until.is_(None),
+                    StrategySignal.valid_until >= score_date,
+                ),
             )
             .options(selectinload(StrategySignal.stock))
+            .order_by(
+                StrategySignal.stock_id,
+                StrategySignal.strategy_type,
+                StrategySignal.signal_horizon,
+                desc(StrategySignal.signal_date),
+                desc(StrategySignal.created_at),
+                desc(StrategySignal.id),
+            )
         )
         signals_by_stock: Dict[int, List[StrategySignal]] = {}
         for signal in result.scalars().all():
             signals_by_stock.setdefault(signal.stock_id, []).append(signal)
         return signals_by_stock
+
+    def _signal_recency_key(self, signal: StrategySignal) -> tuple[date, float, int]:
+        created_at = getattr(signal, "created_at", None)
+        if created_at is None:
+            created_timestamp = float("-inf")
+        else:
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            created_timestamp = created_at.timestamp()
+        return (
+            signal.signal_date,
+            created_timestamp,
+            int(getattr(signal, "id", 0) or 0),
+        )
 
     async def _weights_for_version(
         self,
@@ -1248,7 +1355,8 @@ class StrategyEvaluationService:
     ) -> StrategyWeightVersion:
         now = datetime.now(timezone.utc)
         strategies = [
-            strategy.strategy_type.value for strategy in strategy_registry.get_all_strategies()
+            strategy.strategy_type.value
+            for strategy in strategy_registry.get_all_strategies()
         ]
         raw = {
             (strategy_type, horizon): HORIZON_PRIOR_WEIGHT[horizon]
@@ -1296,7 +1404,9 @@ class StrategyEvaluationService:
         strategy_type: str,
         horizon: str,
     ) -> Optional[float]:
-        row = await self._get_reliability_row(db, market, universe, strategy_type, horizon)
+        row = await self._get_reliability_row(
+            db, market, universe, strategy_type, horizon
+        )
         return float(row.reliability_score) if row else None
 
     async def _get_reliability_row(
@@ -1317,16 +1427,22 @@ class StrategyEvaluationService:
         )
         return result.scalar_one_or_none()
 
-    async def _get_composite_score(
-        self, db: AsyncSession, stock_id: int, score_date: date
-    ) -> Optional[StockCompositeScore]:
+    async def _composite_scores_for_stocks(
+        self,
+        db: AsyncSession,
+        stock_ids: Iterable[int],
+        score_date: date,
+    ) -> Dict[int, StockCompositeScore]:
+        ids = list(stock_ids)
+        if not ids:
+            return {}
         result = await db.execute(
             select(StockCompositeScore).where(
-                StockCompositeScore.stock_id == stock_id,
+                StockCompositeScore.stock_id.in_(ids),
                 StockCompositeScore.score_date == score_date,
             )
         )
-        return result.scalar_one_or_none()
+        return {row.stock_id: row for row in result.scalars().all()}
 
     async def _latest_composite_score_date(
         self, db: AsyncSession, market: str
@@ -1354,7 +1470,9 @@ class StrategyEvaluationService:
         run.finished_at = datetime.now(timezone.utc)
         await db.commit()
 
-    def _benchmark_return(self, prices_by_stock: Dict[int, List[Dict[str, Any]]]) -> float:
+    def _benchmark_return(
+        self, prices_by_stock: Dict[int, List[Dict[str, Any]]]
+    ) -> float:
         returns = []
         for rows in prices_by_stock.values():
             if len(rows) < 2 or rows[0]["close"] <= 0:
@@ -1380,7 +1498,9 @@ class StrategyEvaluationService:
             "avg_bars_per_stock": average_bars,
             "min_bars_per_stock": min(counts) if counts else 0,
             "max_bars_per_stock": max(counts) if counts else 0,
-            "coverage_ratio": self._clamp(average_bars / expected_trading_days, 0.0, 1.0),
+            "coverage_ratio": self._clamp(
+                average_bars / expected_trading_days, 0.0, 1.0
+            ),
         }
 
     def _max_drawdown(self, equity_curve: List[float]) -> float:

@@ -26,6 +26,8 @@ class RedisStreamTaskQueue(IStreamTaskQueue):
         dead_letter_stream: Optional[str] = None,
         max_attempts: int = 3,
         pending_idle_ms: int = 60000,
+        stream_maxlen: int = 100000,
+        dead_letter_maxlen: int = 10000,
     ) -> None:
         if redis_client is None:
             raise ValueError("Redis client is required for Redis Streams task queue")
@@ -37,6 +39,8 @@ class RedisStreamTaskQueue(IStreamTaskQueue):
         self.dead_letter_stream = dead_letter_stream or f"{stream_name}_dead"
         self.max_attempts = max_attempts
         self.pending_idle_ms = pending_idle_ms
+        self.stream_maxlen = stream_maxlen
+        self.dead_letter_maxlen = dead_letter_maxlen
         self._group_ready = False
 
     async def enqueue(self, command: StreamTaskCommand) -> None:
@@ -45,6 +49,8 @@ class RedisStreamTaskQueue(IStreamTaskQueue):
             self.redis_client.xadd,
             self.stream_name,
             command.to_stream_fields(),
+            maxlen=self.stream_maxlen,
+            approximate=True,
         )
 
     async def dequeue(
@@ -86,8 +92,6 @@ class RedisStreamTaskQueue(IStreamTaskQueue):
         )
 
     async def fail(self, command: StreamTaskCommand, error: Exception) -> None:
-        await self.ack(command)
-
         failed_at = datetime.now(timezone.utc).isoformat()
         retry_metadata = {
             key: value
@@ -117,7 +121,10 @@ class RedisStreamTaskQueue(IStreamTaskQueue):
                 self.redis_client.xadd,
                 self.dead_letter_stream,
                 dead_fields,
+                maxlen=self.dead_letter_maxlen,
+                approximate=True,
             )
+            await self.ack(command)
             return None
 
         retry_command = StreamTaskCommand(
@@ -129,6 +136,7 @@ class RedisStreamTaskQueue(IStreamTaskQueue):
             metadata=retry_metadata,
         )
         await self.enqueue(retry_command)
+        await self.ack(command)
 
     async def _claim_stale_pending(self) -> Optional[StreamTaskCommand]:
         if self.pending_idle_ms <= 0 or not hasattr(self.redis_client, "xautoclaim"):

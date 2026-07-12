@@ -36,7 +36,10 @@ class IStockRepository(ABC):
 
     @abstractmethod
     async def get_active_stocks(
-        self, db: AsyncSession, market: Optional[str] = None, limit: int = 100
+        self,
+        db: AsyncSession,
+        market: Optional[str] = None,
+        limit: Optional[int] = None,
     ):
         """取得活躍股票清單"""
         pass

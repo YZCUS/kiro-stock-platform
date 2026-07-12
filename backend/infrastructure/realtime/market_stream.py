@@ -21,7 +21,9 @@ from core.database import AsyncSessionLocal
 from domain.market_data.realtime import MarketTradeEvent, RealtimeBar, RealtimeQuote
 from domain.models.stock import Stock
 from domain.services.intraday_signal_service import IntradaySignalEngine
-from infrastructure.persistence.market_data_bar_repository import MarketDataBarRepository
+from infrastructure.persistence.market_data_bar_repository import (
+    MarketDataBarRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -369,6 +371,7 @@ class MarketStreamService:
         self.subscribers: Dict[tuple[str, str], Set[WebSocket]] = {}
         self._stock_cache: Dict[tuple[str, str], dict] = {}
         self._seeded_symbols: Set[tuple[str, str]] = set()
+        self._send_timeout_seconds = 2.0
         self.provider.add_trade_handler(self._handle_trade)
 
     async def initialize(self) -> None:
@@ -426,7 +429,9 @@ class MarketStreamService:
                 {"type": "pong", "timestamp": datetime.now(timezone.utc).isoformat()},
             )
             return
-        await self._send(websocket, {"type": "error", "message": "Unknown message type"})
+        await self._send(
+            websocket, {"type": "error", "message": "Unknown message type"}
+        )
 
     async def subscribe_symbol(
         self,
@@ -438,7 +443,9 @@ class MarketStreamService:
         market = market.upper()
         symbol = symbol.upper().strip()
         if not symbol:
-            await self._send(websocket, {"type": "error", "message": "symbol is required"})
+            await self._send(
+                websocket, {"type": "error", "message": "symbol is required"}
+            )
             return
 
         key = (market, symbol)
@@ -513,6 +520,10 @@ class MarketStreamService:
             ttl_seconds=600,
         )
 
+        finalized_persisted = False
+        if finalized_bar is not None:
+            finalized_persisted = await self._persist_finalized_bar(finalized_bar)
+
         await self._broadcast(
             (event.market, event.symbol),
             {
@@ -533,8 +544,7 @@ class MarketStreamService:
             },
         )
 
-        if finalized_bar is not None:
-            await self._persist_finalized_bar(finalized_bar)
+        if finalized_bar is not None and finalized_persisted:
             await self._broadcast(
                 (event.market, event.symbol),
                 {
@@ -548,10 +558,10 @@ class MarketStreamService:
 
         await self._publish_intraday_signals(current_bar)
 
-    async def _persist_finalized_bar(self, bar: RealtimeBar) -> None:
+    async def _persist_finalized_bar(self, bar: RealtimeBar) -> bool:
         stock = await self._get_stock_snapshot(bar.market, bar.symbol)
         if stock is None or AsyncSessionLocal is None:
-            return
+            return False
 
         async with AsyncSessionLocal() as db:
             await MarketDataBarRepository().upsert_batch(
@@ -576,6 +586,7 @@ class MarketStreamService:
                     }
                 ],
             )
+        return True
 
     async def _publish_intraday_signals(self, bar: RealtimeBar) -> None:
         stock = await self._get_stock_snapshot(bar.market, bar.symbol)
@@ -698,12 +709,19 @@ class MarketStreamService:
             )
 
     async def _broadcast(self, key: tuple[str, str], message: dict) -> None:
-        for websocket in list(self.subscribers.get(key) or []):
-            await self._send(websocket, message)
+        websockets = list(self.subscribers.get(key) or [])
+        if not websockets:
+            return
+        await asyncio.gather(
+            *(self._send(websocket, message) for websocket in websockets),
+            return_exceptions=True,
+        )
 
     async def _send(self, websocket: WebSocket, message: dict) -> None:
         try:
-            await websocket.send_json(message)
+            await asyncio.wait_for(
+                websocket.send_json(message), timeout=self._send_timeout_seconds
+            )
         except Exception:  # noqa: BLE001
             await self.disconnect(websocket)
 

@@ -92,7 +92,10 @@ class StockRepository(IStockRepository):
         return list(stocks), total
 
     async def get_active_stocks(
-        self, db: AsyncSession, market: Optional[str] = None, limit: int = 100
+        self,
+        db: AsyncSession,
+        market: Optional[str] = None,
+        limit: Optional[int] = None,
     ):
         """取得活躍股票清單"""
         query = select(Stock).where(Stock.is_active == True)
@@ -100,7 +103,9 @@ class StockRepository(IStockRepository):
         if market:
             query = query.where(Stock.market == market)
 
-        query = query.order_by(Stock.symbol).limit(limit)
+        query = query.order_by(Stock.symbol)
+        if limit is not None:
+            query = query.limit(limit)
 
         result = await db.execute(query)
         return result.scalars().all()

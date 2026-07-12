@@ -11,7 +11,7 @@
 #
 ###############################################################################
 
-set -e
+set -euo pipefail
 
 # ============================================================================
 # 配置變數 - 請修改這些值
@@ -19,6 +19,17 @@ set -e
 DOMAIN="yourdomain.com"          # 您的主域名
 DOMAIN_WWW="www.yourdomain.com"  # WWW 子域名 (可選)
 EMAIL="admin@yourdomain.com"     # Let's Encrypt 通知郵箱
+IMAGE_ENV_FILE="${IMAGE_ENV_FILE:-.env.images}"
+STACK_WAS_STOPPED=0
+
+compose_prod() {
+    local args=(
+        docker compose -p kiro-stock-platform
+        --env-file .env.production
+        --env-file "$IMAGE_ENV_FILE"
+    )
+    "${args[@]}" -f docker-compose.prod.yml "$@"
+}
 
 # ============================================================================
 # 檢查配置
@@ -50,7 +61,28 @@ fi
 echo ""
 echo "🛑 停止現有服務..."
 cd /home/opc/projects/kiro-stock-platform
-docker-compose -f docker-compose.prod.yml down 2>/dev/null || true
+python3 scripts/validate-production-env.py .env.production
+if [ -s "$IMAGE_ENV_FILE" ]; then
+    python3 scripts/validate-production-env.py --images "$IMAGE_ENV_FILE"
+    compose_prod down
+    STACK_WAS_STOPPED=1
+elif [ -n "$(docker ps -q --filter label=com.docker.compose.project=kiro-stock-platform)" ]; then
+    echo "❌ 錯誤：現有 production stack 缺少 immutable image manifest，拒絕停止服務。"
+    exit 1
+else
+    echo "ℹ️ 首次 TLS bootstrap：尚無 image manifest，憑證完成後由正式部署啟動服務。"
+fi
+
+cleanup_certbot() {
+    status=$?
+    docker rm -f nginx-certbot >/dev/null 2>&1 || true
+    rm -f /tmp/nginx-certbot.conf
+    if [ "$status" -ne 0 ] && [ "$STACK_WAS_STOPPED" -eq 1 ]; then
+        compose_prod up -d >/dev/null 2>&1 || true
+    fi
+    exit "$status"
+}
+trap cleanup_certbot EXIT
 
 # ============================================================================
 # 3. 創建 Certbot 工作目錄
@@ -112,13 +144,7 @@ sudo certbot certonly \
     -d $DOMAIN \
     -d $DOMAIN_WWW
 
-if [ $? -eq 0 ]; then
-    echo "✅ SSL 證書獲取成功！"
-else
-    echo "❌ SSL 證書獲取失敗！"
-    docker rm -f nginx-certbot
-    exit 1
-fi
+echo "✅ SSL 證書獲取成功！"
 
 # ============================================================================
 # 6. 複製證書到 Nginx 目錄
@@ -127,7 +153,8 @@ echo ""
 echo "📋 複製證書..."
 sudo cp /etc/letsencrypt/live/$DOMAIN/fullchain.pem nginx/ssl/
 sudo cp /etc/letsencrypt/live/$DOMAIN/privkey.pem nginx/ssl/
-sudo chmod 644 nginx/ssl/*.pem
+sudo chmod 644 nginx/ssl/fullchain.pem
+sudo chmod 600 nginx/ssl/privkey.pem
 
 echo "✅ 證書已複製到 nginx/ssl/"
 
@@ -137,7 +164,7 @@ echo "✅ 證書已複製到 nginx/ssl/"
 echo ""
 echo "🛑 停止臨時 Nginx..."
 docker rm -f nginx-certbot
-rm /tmp/nginx-certbot.conf
+rm -f /tmp/nginx-certbot.conf
 
 # ============================================================================
 # 8. 設置自動續期
@@ -156,31 +183,46 @@ echo "$(date): 開始續期 SSL 證書..."
 certbot renew --quiet --webroot --webroot-path=/var/www/certbot
 
 # 複製新證書
-if [ -d "/etc/letsencrypt/live" ]; then
-    DOMAIN=$(ls /etc/letsencrypt/live | grep -v README | head -1)
-    if [ -n "$DOMAIN" ]; then
+DOMAIN="__CERT_DOMAIN__"
+if [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
         cp /etc/letsencrypt/live/$DOMAIN/fullchain.pem /home/opc/projects/kiro-stock-platform/nginx/ssl/
         cp /etc/letsencrypt/live/$DOMAIN/privkey.pem /home/opc/projects/kiro-stock-platform/nginx/ssl/
-        chmod 644 /home/opc/projects/kiro-stock-platform/nginx/ssl/*.pem
+        chmod 644 /home/opc/projects/kiro-stock-platform/nginx/ssl/fullchain.pem
+        chmod 600 /home/opc/projects/kiro-stock-platform/nginx/ssl/privkey.pem
 
         # 重啟 Nginx
         cd /home/opc/projects/kiro-stock-platform
-        docker-compose -f docker-compose.prod.yml restart nginx
+        python3 scripts/validate-production-env.py .env.production
+        python3 scripts/validate-production-env.py --images .env.images
+        compose_args=(
+            docker compose -p kiro-stock-platform
+            --env-file .env.production
+            --env-file .env.images
+        )
+        "${compose_args[@]}" -f docker-compose.prod.yml restart nginx
 
         echo "$(date): SSL 證書續期成功並已重啟 Nginx"
-    fi
 fi
 CRONEOF
+
+sudo sed -i "s/__CERT_DOMAIN__/$DOMAIN/g" /etc/cron.monthly/certbot-renew
 
 sudo chmod +x /etc/cron.monthly/certbot-renew
 
 echo "✅ 自動續期腳本已設置（每月執行）"
 
+if [ -s "$IMAGE_ENV_FILE" ]; then
+    compose_prod up -d
+else
+    echo "ℹ️ TLS 憑證已備妥；略過 stack 啟動，等待含 immutable image manifest 的正式部署。"
+fi
+trap - EXIT
+
 # ============================================================================
-# 9. 更新 Nginx 配置啟用 HTTPS
+# 9. 啟動已啟用 HTTPS 的 production stack
 # ============================================================================
 echo ""
-echo "📝 更新 Nginx 配置..."
+echo "📝 驗證 HTTPS 配置..."
 
 # 提示用戶手動更新配置
 cat << 'EOF'
@@ -189,19 +231,9 @@ cat << 'EOF'
 
 📋 下一步：
 
-1. 編輯 nginx/conf.d/default.conf：
-   - 將 server_name 改為您的域名
-   - 取消註釋 HTTPS server 區塊
-   - 在 HTTP server 區塊啟用 HTTPS 重定向
+1. 確認 .env.production 的 PRODUCTION_BASE_URL 與 WSS URLs 使用此憑證域名。
 
-2. 編輯 .env.production：
-   - 將 NEXT_PUBLIC_API_URL 改為 https://yourdomain.com
-   - 將 NEXT_PUBLIC_WS_URL 改為 wss://yourdomain.com/ws
-
-3. 啟動生產環境：
-   docker-compose -f docker-compose.prod.yml up -d
-
-4. 測試 SSL：
+2. 測試 SSL：
    https://www.ssllabs.com/ssltest/analyze.html?d=yourdomain.com
 
 EOF

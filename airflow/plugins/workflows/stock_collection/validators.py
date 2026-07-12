@@ -5,6 +5,26 @@ Airflow DAG 驗證器模塊
 """
 
 
+def _get_trading_day_status(market, session_date):
+    """Ask the backend calendar so Airflow and validation use one rule set."""
+    import os
+    import requests
+
+    backend_url = os.getenv("BACKEND_API_URL", "http://backend:8000/api/v1")
+    internal_token = os.getenv("INTERNAL_API_TOKEN", "dev-internal-token")
+    response = requests.get(
+        f"{backend_url.rstrip('/')}/stocks/market-data/trading-day",
+        params={"market": market, "session_date": session_date.isoformat()},
+        headers={"X-Internal-Token": internal_token},
+        timeout=10,
+    )
+    response.raise_for_status()
+    result = response.json()
+    if "is_trading_day" not in result or "previous_trading_day" not in result:
+        raise ValueError(f"Invalid trading-day response: {result}")
+    return result
+
+
 def check_trading_day_tw(**context):
     """檢查是否為台股交易日 - 使用台北時區，返回分支決策而不拋出異常
 
@@ -14,67 +34,77 @@ def check_trading_day_tw(**context):
        - 如果數據不存在 → 補抓最近交易日的數據
        - 如果數據存在 → 跳過收集
     """
-    from plugins.common.date_utils import is_trading_day, get_taipei_today, get_last_trading_day
+    from datetime import date
+    from plugins.common.date_utils import context_interval_date
     import os
     import requests
 
-    # 使用 context 中的執行日期，或台北時區的當前日期
-    execution_date = context.get('execution_date')
-    if execution_date:
-        # 轉換為台北時區的日期
-        check_date = execution_date.in_timezone('Asia/Taipei').date()
-    else:
-        check_date = get_taipei_today()
+    check_date = context_interval_date(context, "Asia/Taipei")
 
-    trading_day = is_trading_day(check_date)
+    trading_status = _get_trading_day_status("TW", check_date)
+    trading_day = bool(trading_status["is_trading_day"])
 
     # 將結果推送到 XCom 供後續任務使用
-    context['ti'].xcom_push(key='is_trading_day', value=trading_day)
-    context['ti'].xcom_push(key='check_date', value=check_date.isoformat())
-    context['ti'].xcom_push(key='market', value='TW')
+    context["ti"].xcom_push(key="is_trading_day", value=trading_day)
+    context["ti"].xcom_push(key="check_date", value=check_date.isoformat())
+    context["ti"].xcom_push(key="market", value="TW")
 
     if trading_day:
         print(f"✓ 今天是台股交易日: {check_date}，繼續執行數據收集")
-        return 'check_market_status'  # 繼續下一步
+        return "check_market_status"  # 繼續下一步
     else:
         # 今天不是交易日，檢查最近交易日的數據
-        last_trading_day = get_last_trading_day(check_date)
+        last_trading_day = date.fromisoformat(trading_status["previous_trading_day"])
         print(f"✗ 今天不是台股交易日: {check_date}")
         print(f"ℹ 最近的交易日: {last_trading_day}")
 
         # 檢查最近交易日的數據是否存在
         try:
-            backend_url = os.getenv('BACKEND_API_URL', 'http://backend:8000/api/v1')
+            backend_url = os.getenv("BACKEND_API_URL", "http://backend:8000/api/v1")
 
             # 查詢是否有該日期的台股價格數據
             response = requests.get(
                 f"{backend_url}/stocks/prices/data-exists",
-                params={'date': last_trading_day.isoformat(), 'market': 'TW'},
-                timeout=10
+                params={
+                    "date": last_trading_day.isoformat(),
+                    "market": "TW",
+                    "min_coverage": 0.9,
+                },
+                timeout=10,
             )
 
             if response.status_code == 200:
                 data = response.json()
-                has_data = data.get('has_data', False)
-                stock_count = data.get('stock_count', 0)
+                has_data = data.get("has_data", False)
+                stock_count = data.get("stock_count", 0)
 
                 if has_data and stock_count > 0:
-                    print(f"✓ 最近交易日 {last_trading_day} 已有 {stock_count} 筆台股價格數據，跳過收集")
-                    return 'skip_collection'
+                    print(
+                        f"✓ 最近交易日 {last_trading_day} 已有 {stock_count} 筆台股價格數據，跳過收集"
+                    )
+                    return "skip_collection"
                 else:
                     print(f"✗ 最近交易日 {last_trading_day} 沒有台股價格數據，需要補抓")
                     # 將最近交易日推送到 XCom，供收集任務使用
-                    context['ti'].xcom_push(key='collection_date', value=last_trading_day.isoformat())
-                    return 'check_market_status'  # 執行數據收集
+                    context["ti"].xcom_push(
+                        key="collection_date", value=last_trading_day.isoformat()
+                    )
+                    return "check_market_status"  # 執行數據收集
             else:
-                print(f"⚠ 無法檢查數據狀態 (HTTP {response.status_code})，為安全起見執行數據收集")
-                context['ti'].xcom_push(key='collection_date', value=last_trading_day.isoformat())
-                return 'check_market_status'
+                print(
+                    f"⚠ 無法檢查數據狀態 (HTTP {response.status_code})，為安全起見執行數據收集"
+                )
+                context["ti"].xcom_push(
+                    key="collection_date", value=last_trading_day.isoformat()
+                )
+                return "check_market_status"
 
         except Exception as e:
             print(f"⚠ 檢查數據時發生錯誤: {e}，為安全起見執行數據收集")
-            context['ti'].xcom_push(key='collection_date', value=last_trading_day.isoformat())
-            return 'check_market_status'
+            context["ti"].xcom_push(
+                key="collection_date", value=last_trading_day.isoformat()
+            )
+            return "check_market_status"
 
 
 def check_trading_day_us(**context):
@@ -88,77 +118,80 @@ def check_trading_day_us(**context):
 
     注意：美股交易日檢查使用美東時區，週一到週五為交易日（不含美國聯邦假日）
     """
-    from plugins.common.date_utils import get_taipei_today, get_last_trading_day
+    from datetime import date
+    from plugins.common.date_utils import context_interval_date
     import os
     import requests
-    from datetime import timedelta
 
-    # 使用 context 中的執行日期，或台北時區的當前日期
-    execution_date = context.get('execution_date')
-    if execution_date:
-        # 轉換為台北時區的日期
-        check_date = execution_date.in_timezone('Asia/Taipei').date()
-    else:
-        check_date = get_taipei_today()
+    us_check_date = context_interval_date(context, "America/New_York")
 
-    # 美股交易日檢查：台北時間週二到週六早上5點 對應 美東週一到週五收盤
-    # 因此需要檢查前一天是否為美股交易日
-    # 台北週二早上 = 美東週一收盤，所以檢查的是美東週一
-    us_check_date = check_date - timedelta(days=1)
-
-    # 簡化版美股交易日檢查：週一到週五（不考慮美國假日）
-    is_weekday = us_check_date.weekday() < 5  # 0-4 表示週一到週五
+    trading_status = _get_trading_day_status("US", us_check_date)
+    is_weekday = bool(trading_status["is_trading_day"])
 
     # 將結果推送到 XCom 供後續任務使用
-    context['ti'].xcom_push(key='is_trading_day', value=is_weekday)
-    context['ti'].xcom_push(key='check_date', value=us_check_date.isoformat())
-    context['ti'].xcom_push(key='market', value='US')
+    context["ti"].xcom_push(key="is_trading_day", value=is_weekday)
+    context["ti"].xcom_push(key="check_date", value=us_check_date.isoformat())
+    context["ti"].xcom_push(key="market", value="US")
 
     if is_weekday:
-        print(f"✓ 美東 {us_check_date} 是美股交易日 (台北時間 {check_date})，繼續執行數據收集")
-        return 'check_market_status'  # 繼續下一步
+        print(f"✓ 美東 {us_check_date} 是美股交易日，繼續執行數據收集")
+        return "check_market_status"  # 繼續下一步
     else:
         # 今天不是交易日，檢查最近交易日的數據
-        # 找到上一個工作日
-        days_back = 1 if us_check_date.weekday() == 5 else 2  # 週六往回1天，週日往回2天
-        last_us_trading_day = us_check_date - timedelta(days=days_back)
+        last_us_trading_day = date.fromisoformat(trading_status["previous_trading_day"])
 
         print(f"✗ 美東 {us_check_date} 不是美股交易日")
         print(f"ℹ 最近的美股交易日: {last_us_trading_day}")
 
         # 檢查最近交易日的數據是否存在
         try:
-            backend_url = os.getenv('BACKEND_API_URL', 'http://backend:8000/api/v1')
+            backend_url = os.getenv("BACKEND_API_URL", "http://backend:8000/api/v1")
 
             # 查詢是否有該日期的美股價格數據
             response = requests.get(
                 f"{backend_url}/stocks/prices/data-exists",
-                params={'date': last_us_trading_day.isoformat(), 'market': 'US'},
-                timeout=10
+                params={
+                    "date": last_us_trading_day.isoformat(),
+                    "market": "US",
+                    "min_coverage": 0.9,
+                },
+                timeout=10,
             )
 
             if response.status_code == 200:
                 data = response.json()
-                has_data = data.get('has_data', False)
-                stock_count = data.get('stock_count', 0)
+                has_data = data.get("has_data", False)
+                stock_count = data.get("stock_count", 0)
 
                 if has_data and stock_count > 0:
-                    print(f"✓ 最近交易日 {last_us_trading_day} 已有 {stock_count} 筆美股價格數據，跳過收集")
-                    return 'skip_collection'
+                    print(
+                        f"✓ 最近交易日 {last_us_trading_day} 已有 {stock_count} 筆美股價格數據，跳過收集"
+                    )
+                    return "skip_collection"
                 else:
-                    print(f"✗ 最近交易日 {last_us_trading_day} 沒有美股價格數據，需要補抓")
+                    print(
+                        f"✗ 最近交易日 {last_us_trading_day} 沒有美股價格數據，需要補抓"
+                    )
                     # 將最近交易日推送到 XCom，供收集任務使用
-                    context['ti'].xcom_push(key='collection_date', value=last_us_trading_day.isoformat())
-                    return 'check_market_status'  # 執行數據收集
+                    context["ti"].xcom_push(
+                        key="collection_date", value=last_us_trading_day.isoformat()
+                    )
+                    return "check_market_status"  # 執行數據收集
             else:
-                print(f"⚠ 無法檢查數據狀態 (HTTP {response.status_code})，為安全起見執行數據收集")
-                context['ti'].xcom_push(key='collection_date', value=last_us_trading_day.isoformat())
-                return 'check_market_status'
+                print(
+                    f"⚠ 無法檢查數據狀態 (HTTP {response.status_code})，為安全起見執行數據收集"
+                )
+                context["ti"].xcom_push(
+                    key="collection_date", value=last_us_trading_day.isoformat()
+                )
+                return "check_market_status"
 
         except Exception as e:
             print(f"⚠ 檢查數據時發生錯誤: {e}，為安全起見執行數據收集")
-            context['ti'].xcom_push(key='collection_date', value=last_us_trading_day.isoformat())
-            return 'check_market_status'
+            context["ti"].xcom_push(
+                key="collection_date", value=last_us_trading_day.isoformat()
+            )
+            return "check_market_status"
 
 
 def check_trading_day(**context):
@@ -170,27 +203,25 @@ def check_trading_day(**context):
        - 如果數據不存在 → 補抓最近交易日的數據
        - 如果數據存在 → 跳過收集
     """
-    from plugins.common.date_utils import is_trading_day, get_taipei_today, get_last_trading_day
+    from plugins.common.date_utils import (
+        context_interval_date,
+        get_last_trading_day,
+        is_trading_day,
+    )
     import os
     import requests
 
-    # 使用 context 中的執行日期，或台北時區的當前日期
-    execution_date = context.get('execution_date')
-    if execution_date:
-        # 轉換為台北時區的日期
-        check_date = execution_date.in_timezone('Asia/Taipei').date()
-    else:
-        check_date = get_taipei_today()
+    check_date = context_interval_date(context, "Asia/Taipei")
 
     trading_day = is_trading_day(check_date)
 
     # 將結果推送到 XCom 供後續任務使用
-    context['ti'].xcom_push(key='is_trading_day', value=trading_day)
-    context['ti'].xcom_push(key='check_date', value=check_date.isoformat())
+    context["ti"].xcom_push(key="is_trading_day", value=trading_day)
+    context["ti"].xcom_push(key="check_date", value=check_date.isoformat())
 
     if trading_day:
         print(f"✓ 今天是交易日: {check_date}，繼續執行數據收集")
-        return 'check_market_status'  # 繼續下一步
+        return "check_market_status"  # 繼續下一步
     else:
         # 今天不是交易日，檢查最近交易日的數據
         last_trading_day = get_last_trading_day(check_date)
@@ -199,37 +230,47 @@ def check_trading_day(**context):
 
         # 檢查最近交易日的數據是否存在
         try:
-            backend_url = os.getenv('BACKEND_API_URL', 'http://backend:8000/api/v1')
+            backend_url = os.getenv("BACKEND_API_URL", "http://backend:8000/api/v1")
 
             # 查詢是否有該日期的價格數據
             response = requests.get(
                 f"{backend_url}/stocks/prices/data-exists",
-                params={'date': last_trading_day.isoformat()},
-                timeout=10
+                params={"date": last_trading_day.isoformat()},
+                timeout=10,
             )
 
             if response.status_code == 200:
                 data = response.json()
-                has_data = data.get('has_data', False)
-                stock_count = data.get('stock_count', 0)
+                has_data = data.get("has_data", False)
+                stock_count = data.get("stock_count", 0)
 
                 if has_data and stock_count > 0:
-                    print(f"✓ 最近交易日 {last_trading_day} 已有 {stock_count} 筆價格數據，跳過收集")
-                    return 'skip_collection'
+                    print(
+                        f"✓ 最近交易日 {last_trading_day} 已有 {stock_count} 筆價格數據，跳過收集"
+                    )
+                    return "skip_collection"
                 else:
                     print(f"✗ 最近交易日 {last_trading_day} 沒有價格數據，需要補抓")
                     # 將最近交易日推送到 XCom，供收集任務使用
-                    context['ti'].xcom_push(key='collection_date', value=last_trading_day.isoformat())
-                    return 'check_market_status'  # 執行數據收集
+                    context["ti"].xcom_push(
+                        key="collection_date", value=last_trading_day.isoformat()
+                    )
+                    return "check_market_status"  # 執行數據收集
             else:
-                print(f"⚠ 無法檢查數據狀態 (HTTP {response.status_code})，為安全起見執行數據收集")
-                context['ti'].xcom_push(key='collection_date', value=last_trading_day.isoformat())
-                return 'check_market_status'
+                print(
+                    f"⚠ 無法檢查數據狀態 (HTTP {response.status_code})，為安全起見執行數據收集"
+                )
+                context["ti"].xcom_push(
+                    key="collection_date", value=last_trading_day.isoformat()
+                )
+                return "check_market_status"
 
         except Exception as e:
             print(f"⚠ 檢查數據時發生錯誤: {e}，為安全起見執行數據收集")
-            context['ti'].xcom_push(key='collection_date', value=last_trading_day.isoformat())
-            return 'check_market_status'
+            context["ti"].xcom_push(
+                key="collection_date", value=last_trading_day.isoformat()
+            )
+            return "check_market_status"
 
 
 def check_market_status(**context):
@@ -239,14 +280,14 @@ def check_market_status(**context):
     taipei_now = get_taipei_now()
 
     # 使用統一的市場時間檢查函數
-    tw_market_hours = is_market_hours('TW', taipei_now)
-    us_market_hours = is_market_hours('US', taipei_now)
+    tw_market_hours = is_market_hours("TW", taipei_now)
+    us_market_hours = is_market_hours("US", taipei_now)
 
     return {
-        'tw_market_hours': tw_market_hours,
-        'us_market_hours': us_market_hours,
-        'check_time': taipei_now.isoformat(),
-        'timezone': 'Asia/Taipei'
+        "tw_market_hours": tw_market_hours,
+        "us_market_hours": us_market_hours,
+        "check_time": taipei_now.isoformat(),
+        "timezone": "Asia/Taipei",
     }
 
 
@@ -255,24 +296,26 @@ def verify_task_dependencies(**context):
     from plugins.common.date_utils import get_taipei_now
     from plugins.services.storage_service import retrieve_large_data
 
-    ti = context['ti']
+    ti = context["ti"]
     taipei_now = get_taipei_now()
 
     # 檢查收集任務結果
-    main_result = ti.xcom_pull(task_ids='try_main_collection')
-    fallback_result = ti.xcom_pull(task_ids='execute_fallback_collection')
+    main_result = ti.xcom_pull(task_ids="try_main_collection")
+    fallback_result = ti.xcom_pull(task_ids="execute_fallback_collection")
 
     # 確定使用的收集策略和結果
-    if main_result and main_result.get('status') == 'success':
+    if main_result and main_result.get("status") == "success":
         active_collection_result = main_result
         collection_source = "main"
         print("使用主要收集任務結果進行驗證")
-    elif fallback_result and fallback_result.get('status') == 'success':
+    elif fallback_result and fallback_result.get("status") == "success":
         active_collection_result = fallback_result
         collection_source = "fallback"
         print("使用備援收集任務結果進行驗證")
     else:
-        raise ValueError("無法獲取數據收集結果（主要和備援策略都失敗），依賴關係驗證失敗")
+        raise ValueError(
+            "無法獲取數據收集結果（主要和備援策略都失敗），依賴關係驗證失敗"
+        )
 
     # 由於新架構中不再單獨獲取股票清單，直接使用收集結果進行驗證
     if not active_collection_result:
@@ -288,22 +331,26 @@ def verify_task_dependencies(**context):
 
     if collection_source == "main":
         # 主要策略包含詳細的股票和錯誤信息
-        stock_count = active_collection_result.get('stocks_fetched', 0)
-        collected_count = active_collection_result.get('total_stocks', 0)
-        api_success = active_collection_result.get('api_success', False)
-        error_count = active_collection_result.get('error_count', 0)
-        success_count = active_collection_result.get('success_count', 0)
+        stock_count = active_collection_result.get("stocks_fetched", 0)
+        collected_count = active_collection_result.get("total_stocks", 0)
+        api_success = active_collection_result.get("api_success", False)
+        error_count = active_collection_result.get("error_count", 0)
+        success_count = active_collection_result.get("success_count", 0)
         total_available = stock_count
-        print(f"主要策略驗證: 獲取 {stock_count} 支股票，收集 {collected_count} 支，API成功: {api_success}，錯誤: {error_count}，成功: {success_count}")
+        print(
+            f"主要策略驗證: 獲取 {stock_count} 支股票，收集 {collected_count} 支，API成功: {api_success}，錯誤: {error_count}，成功: {success_count}"
+        )
     elif collection_source == "fallback":
         # 備援策略使用 collect_all，包含完整的錯誤統計
-        collected_count = active_collection_result.get('total_stocks', 0)
-        api_success = active_collection_result.get('api_success', False)
-        error_count = active_collection_result.get('error_count', 0)
-        success_count = active_collection_result.get('success_count', 0)
+        collected_count = active_collection_result.get("total_stocks", 0)
+        api_success = active_collection_result.get("api_success", False)
+        error_count = active_collection_result.get("error_count", 0)
+        success_count = active_collection_result.get("success_count", 0)
         stock_count = collected_count  # 備援策略中，獲取的就是收集的
         total_available = collected_count
-        print(f"備援策略驗證: 收集 {collected_count} 支股票，API成功: {api_success}，錯誤: {error_count}，成功: {success_count}")
+        print(
+            f"備援策略驗證: 收集 {collected_count} 支股票，API成功: {api_success}，錯誤: {error_count}，成功: {success_count}"
+        )
 
     # 嚴格的依賴鏈健康檢查：必須有數據且API成功且無錯誤
     basic_health = stock_count > 0 and collected_count > 0
@@ -313,33 +360,66 @@ def verify_task_dependencies(**context):
     # 如果有錯誤，記錄詳細信息以便排查
     if error_count > 0:
         print(f"警告: 收集過程中發現 {error_count} 個錯誤，依賴鏈標記為不健康")
-        print(f"成功率: {success_count}/{collected_count} = {(success_count/collected_count*100) if collected_count > 0 else 0:.1f}%")
+        print(
+            f"成功率: {success_count}/{collected_count} = {(success_count/collected_count*100) if collected_count > 0 else 0:.1f}%"
+        )
 
     # 設置外部存儲相關變數（新架構下可能不使用，但保持兼容）
     external_storage_used = False
 
-    return {
-        'dependency_verified': dependency_chain_healthy,
-        'stocks_fetched': stock_count,
-        'total_available': total_available,
-        'stocks_collected': collected_count,
-        'dependency_chain_healthy': dependency_chain_healthy,
-        'api_success': api_success,
-        'error_count': error_count,
-        'success_count': success_count,
-        'success_rate': (success_count/collected_count*100) if collected_count > 0 else 0,
-        'external_storage_used': external_storage_used,
-        'verification_time': taipei_now.isoformat()
+    result = {
+        "dependency_verified": dependency_chain_healthy,
+        "stocks_fetched": stock_count,
+        "total_available": total_available,
+        "stocks_collected": collected_count,
+        "dependency_chain_healthy": dependency_chain_healthy,
+        "api_success": api_success,
+        "error_count": error_count,
+        "success_count": success_count,
+        "success_rate": (
+            (success_count / collected_count * 100) if collected_count > 0 else 0
+        ),
+        "external_storage_used": external_storage_used,
+        "verification_time": taipei_now.isoformat(),
     }
+    if not dependency_chain_healthy:
+        raise ValueError(
+            "Collection dependency chain is unhealthy: "
+            f"api_success={api_success}, collected={collected_count}, "
+            f"errors={error_count}"
+        )
+    return result
 
 
 def validate_data_quality(**context):
-    """數據品質驗證 - 使用台北時區"""
+    """Fail the DAG unless the canonical market-data pipeline is complete."""
     from plugins.common.date_utils import get_taipei_now
+    from plugins.services.storage_service import retrieve_large_data
 
     taipei_now = get_taipei_now()
+    pipeline_result = context["ti"].xcom_pull(task_ids="run_market_data_pipeline")
+    if isinstance(pipeline_result, dict) and pipeline_result.get("external_storage"):
+        pipeline_result = retrieve_large_data(pipeline_result["reference_id"])
+    if not isinstance(pipeline_result, dict):
+        raise ValueError("Market-data pipeline returned no validation result")
+
+    reports = pipeline_result.get("reports") or []
+    incomplete = [report for report in reports if not report.get("is_complete", False)]
+    if (
+        not pipeline_result.get("success", False)
+        or not pipeline_result.get("validation_success", False)
+        or not reports
+        or incomplete
+    ):
+        raise ValueError(
+            "Market-data quality validation failed: "
+            f"success={pipeline_result.get('success')}, "
+            f"reports={len(reports)}, incomplete={len(incomplete)}"
+        )
     return {
-        'validation_completed': True,
-        'timestamp': taipei_now.isoformat(),
-        'timezone': 'Asia/Taipei'
+        "validation_completed": True,
+        "reports_checked": len(reports),
+        "incomplete_reports": 0,
+        "timestamp": taipei_now.isoformat(),
+        "timezone": "Asia/Taipei",
     }

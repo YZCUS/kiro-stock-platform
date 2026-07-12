@@ -2,7 +2,14 @@
 用戶持倉模型
 """
 
-from sqlalchemy import Column, Integer, Numeric, ForeignKey, UniqueConstraint, CheckConstraint
+from sqlalchemy import (
+    Column,
+    Integer,
+    Numeric,
+    ForeignKey,
+    UniqueConstraint,
+    CheckConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy import func
@@ -46,8 +53,12 @@ class UserPortfolio(BaseModel, TimestampMixin):
             "user_id", "stock_id", name="uq_user_portfolios_user_id_stock_id"
         ),
         CheckConstraint("quantity > 0", name="ck_user_portfolios_quantity_positive"),
-        CheckConstraint("avg_cost >= 0", name="ck_user_portfolios_avg_cost_non_negative"),
-        CheckConstraint("total_cost >= 0", name="ck_user_portfolios_total_cost_non_negative"),
+        CheckConstraint(
+            "avg_cost >= 0", name="ck_user_portfolios_avg_cost_non_negative"
+        ),
+        CheckConstraint(
+            "total_cost >= 0", name="ck_user_portfolios_total_cost_non_negative"
+        ),
         {"comment": "用戶持倉表"},
     )
 
@@ -72,14 +83,21 @@ class UserPortfolio(BaseModel, TimestampMixin):
 
     @classmethod
     def get_portfolio_by_stock(
-        cls, session, user_id: uuid.UUID, stock_id: int
+        cls,
+        session,
+        user_id: uuid.UUID,
+        stock_id: int,
+        for_update: bool = False,
     ) -> Optional["UserPortfolio"]:
         """取得用戶特定股票的持倉"""
-        return (
-            session.query(cls)
-            .filter(cls.user_id == user_id, cls.stock_id == stock_id)
-            .first()
+        query = session.query(cls).filter(
+            cls.user_id == user_id, cls.stock_id == stock_id
         )
+        if for_update:
+            lock_query = getattr(query, "with_for_update", None)
+            if lock_query is not None:
+                query = lock_query()
+        return query.first()
 
     @classmethod
     def create_or_update_position(
@@ -97,7 +115,12 @@ class UserPortfolio(BaseModel, TimestampMixin):
         if price <= 0:
             raise ValueError("交易價格必須大於 0")
 
-        portfolio = cls.get_portfolio_by_stock(session, user_id, stock_id)
+        portfolio = cls.get_portfolio_by_stock(
+            session,
+            user_id,
+            stock_id,
+            for_update=True,
+        )
 
         if transaction_type == "BUY":
             if portfolio:

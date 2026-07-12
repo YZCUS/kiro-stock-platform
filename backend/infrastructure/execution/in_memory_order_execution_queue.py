@@ -8,7 +8,11 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
-from domain.execution import IOrderExecutionQueue, OrderExecutionCommand
+from domain.execution import (
+    IOrderExecutionQueue,
+    OrderExecutionCommand,
+    OrderQueueFailureDisposition,
+)
 
 
 class InMemoryOrderExecutionQueue(IOrderExecutionQueue):
@@ -49,9 +53,11 @@ class InMemoryOrderExecutionQueue(IOrderExecutionQueue):
     async def ack(self, command: OrderExecutionCommand) -> None:
         return None
 
-    async def fail(self, command: OrderExecutionCommand, error: Exception) -> None:
+    async def fail(
+        self, command: OrderExecutionCommand, error: Exception
+    ) -> OrderQueueFailureDisposition:
         if command.attempt >= self.max_attempts:
-            return None
+            return OrderQueueFailureDisposition.DEAD_LETTERED
 
         retry_metadata = {
             **command.metadata,
@@ -65,5 +71,29 @@ class InMemoryOrderExecutionQueue(IOrderExecutionQueue):
                 idempotency_key=command.idempotency_key,
                 attempt=command.attempt + 1,
                 metadata=retry_metadata,
+            )
+        )
+        return OrderQueueFailureDisposition.REQUEUED
+
+    async def quarantine(
+        self, command: OrderExecutionCommand, error: Exception
+    ) -> None:
+        metadata = {
+            **command.metadata,
+            "reconciliation_required": True,
+            "reconciliation_error": str(error),
+            "reconciliation_requested_at": datetime.now(timezone.utc).isoformat(),
+        }
+        broker_order_ref = getattr(error, "broker_order_ref", None)
+        if broker_order_ref:
+            metadata["broker_order_ref"] = str(broker_order_ref)
+        await self.enqueue(
+            OrderExecutionCommand(
+                order_intent_id=command.order_intent_id,
+                user_id=command.user_id,
+                idempotency_key=command.idempotency_key,
+                attempt=command.attempt,
+                requested_at=command.requested_at,
+                metadata=metadata,
             )
         )

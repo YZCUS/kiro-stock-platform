@@ -2,7 +2,7 @@
 Price alert API routes.
 """
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas.price_alerts import (
@@ -14,10 +14,9 @@ from api.schemas.price_alerts import (
 from app.dependencies import (
     get_database_session,
     get_price_alert_service,
-    get_settings,
 )
-from app.settings import Settings
 from core.auth_dependencies import get_current_active_user
+from core.internal_auth import require_internal_token
 from domain.models.price_alert import PriceAlert
 from domain.models.user import User
 from domain.services.price_alert_service import PriceAlertService
@@ -46,19 +45,6 @@ def serialize_price_alert(alert: PriceAlert) -> PriceAlertResponse:
         created_at=alert.created_at,
         updated_at=alert.updated_at,
     )
-
-
-def require_internal_token(
-    x_internal_token: str | None = Header(default=None),
-    settings: Settings = Depends(get_settings),
-) -> None:
-    expected = (
-        settings.INTERNAL_API_TOKEN
-        or settings.QLIB_INTERNAL_TOKEN
-        or "dev-internal-token"
-    )
-    if x_internal_token != expected:
-        raise HTTPException(status_code=401, detail="invalid internal token")
 
 
 @router.get("/", response_model=list[PriceAlertResponse])

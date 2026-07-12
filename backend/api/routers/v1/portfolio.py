@@ -17,7 +17,10 @@ from domain.models.user import User
 from domain.models.user_portfolio import UserPortfolio
 from domain.models.transaction import Transaction
 from domain.models.stock import Stock
-from domain.market_data.daily_prices import fetch_latest_daily_price
+from domain.market_data.daily_prices import (
+    fetch_latest_daily_price,
+    fetch_latest_daily_price_rows_by_stock,
+)
 
 # Schemas
 from api.schemas.portfolio import (
@@ -58,6 +61,11 @@ async def get_user_portfolio(
         )
         result = await db.execute(query)
         portfolios = result.scalars().all()
+        latest_prices = await fetch_latest_daily_price_rows_by_stock(
+            db,
+            [portfolio.stock_id for portfolio in portfolios],
+            rows_per_stock=1,
+        )
 
         # 獲取每個持倉的詳細資訊
         portfolio_responses = []
@@ -71,7 +79,8 @@ async def get_user_portfolio(
             if not stock:
                 continue
 
-            latest_price = await fetch_latest_daily_price(db, stock.id)
+            latest_rows = latest_prices.get(stock.id, [])
+            latest_price = latest_rows[0] if latest_rows else None
 
             current_price = None
             current_value = None
@@ -79,7 +88,7 @@ async def get_user_portfolio(
             profit_loss_percent = None
 
             if latest_price:
-                current_price = float(latest_price.close_price)
+                current_price = float(latest_price["close_price"])
                 profit_loss_data = portfolio.calculate_profit_loss(
                     Decimal(str(current_price))
                 )
@@ -149,6 +158,11 @@ async def get_portfolio_summary(
         )
         result = await db.execute(query)
         portfolios = result.scalars().all()
+        latest_prices = await fetch_latest_daily_price_rows_by_stock(
+            db,
+            [portfolio.stock_id for portfolio in portfolios],
+            rows_per_stock=1,
+        )
 
         total_cost = Decimal(0)
         total_current_value = Decimal(0)
@@ -158,10 +172,11 @@ async def get_portfolio_summary(
             if not stock:
                 continue
 
-            latest_price = await fetch_latest_daily_price(db, stock.id)
+            latest_rows = latest_prices.get(stock.id, [])
+            latest_price = latest_rows[0] if latest_rows else None
 
             if latest_price:
-                current_price = Decimal(str(latest_price.close_price))
+                current_price = Decimal(str(latest_price["close_price"]))
                 total_cost += portfolio.total_cost
                 total_current_value += portfolio.calculate_current_value(current_price)
 
@@ -412,19 +427,19 @@ async def get_transactions(
         total = total_result.scalar()
 
         # 分頁
+        query = query.add_columns(Stock).outerjoin(
+            Stock,
+            Stock.id == Transaction.stock_id,
+        )
         query = query.order_by(Transaction.transaction_date.desc())
         query = query.offset((page - 1) * per_page).limit(per_page)
 
         result = await db.execute(query)
-        transactions = result.scalars().all()
+        transactions = result.all()
 
         # 構建響應
         transaction_responses = []
-        for txn in transactions:
-            stock_query = select(Stock).where(Stock.id == txn.stock_id)
-            stock_result = await db.execute(stock_query)
-            stock = stock_result.scalar_one_or_none()
-
+        for txn, stock in transactions:
             transaction_responses.append(
                 TransactionResponse(
                     id=txn.id,

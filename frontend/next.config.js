@@ -22,6 +22,11 @@ const devDocumentCacheHeaders =
         },
       ];
 
+const apiRewriteBaseUrl =
+  process.env.NEXT_PUBLIC_API_URL === 'same-origin'
+    ? process.env.INTERNAL_API_BASE_URL || 'http://localhost:8000'
+    : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 const nextConfig = {
   // Enable static optimization
   output: 'standalone',
@@ -178,7 +183,7 @@ const nextConfig = {
     return [
       {
         source: '/api/proxy/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/:path*`,
+        destination: `${apiRewriteBaseUrl}/:path*`,
       },
     ];
   },

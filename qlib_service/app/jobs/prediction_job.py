@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 from pathlib import Path
-from uuid import uuid4
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,17 +34,31 @@ class PredictionJob:
         self, db: AsyncSession, request: DailyPredictionRequest
     ) -> JobResponse:
         model_config = self._validate_request(request)
-        run_id = self._build_run_id(request)
-        model_run_id = await self._upsert_model_run(
-            db, run_id, request, model_config, None, "running"
+        artifact_ref = await self._find_latest_training_artifact(
+            db, request, model_config
         )
+        training_run_id = artifact_ref[0] if artifact_ref is not None else None
+        run_id = self._build_run_id(request, training_run_id=training_run_id)
+        model_run_id = await self._claim_model_run(
+            db,
+            run_id,
+            request,
+            model_config,
+            training_run_id,
+            "running",
+        )
+        if model_run_id is None:
+            return await self._existing_job_response(db, run_id)
         try:
-            trained_artifact = await self._load_latest_training_artifact(
-                db, request, model_config
+            trained_artifact = await self._load_training_artifact(
+                artifact_ref, model_config
             )
             price_rows = await self._load_price_rows(db, request)
-            artifact_uri = self._export_input_rows(run_id, price_rows)
-            predictions = self._build_predictions(
+            artifact_uri = await asyncio.to_thread(
+                self._export_input_rows, run_id, price_rows
+            )
+            predictions = await asyncio.to_thread(
+                self._build_predictions,
                 run_id,
                 model_run_id,
                 request,
@@ -90,26 +105,36 @@ class PredictionJob:
             )
         return model_config
 
-    def _build_run_id(self, request: DailyPredictionRequest) -> str:
-        suffix = uuid4().hex[:8]
+    def _build_run_id(
+        self,
+        request: DailyPredictionRequest,
+        training_run_id: str | None = None,
+    ) -> str:
+        payload = json.dumps(
+            {
+                "request": request.model_dump(mode="json"),
+                "training_run_id": training_run_id,
+            },
+            sort_keys=True,
+        )
+        digest = sha256(payload.encode("utf-8")).hexdigest()[:16]
         return (
-            f"qlib-{request.market.lower()}-{request.prediction_date.isoformat()}"
-            f"-{request.model_name}-{suffix}"
-        )[:64]
+            f"qlib-infer-{request.market.lower()}-"
+            f"{request.prediction_date.isoformat()}-{digest}"
+        )
 
-    async def _upsert_model_run(
+    async def _claim_model_run(
         self,
         db: AsyncSession,
         run_id: str,
         request: DailyPredictionRequest,
         model_config: QlibModelConfig,
-        trained_artifact: ModelArtifact | None,
+        training_run_id: str | None,
         status: str,
-    ) -> int:
+    ) -> int | None:
         now = datetime.now(timezone.utc)
         result = await db.execute(
-            text(
-                """
+            text("""
                 INSERT INTO qlib_model_runs (
                     run_id, market, universe, model_name, feature_set, mode, status,
                     prediction_date, horizon, metrics, artifact_uri, config_uri,
@@ -126,10 +151,16 @@ class PredictionJob:
                     metrics = EXCLUDED.metrics,
                     config_uri = EXCLUDED.config_uri,
                     started_at = EXCLUDED.started_at,
+                    finished_at = NULL,
+                    error_message = NULL,
                     updated_at = NOW()
+                WHERE qlib_model_runs.status = 'failed'
+                   OR (
+                       qlib_model_runs.status = 'running'
+                       AND qlib_model_runs.started_at < NOW() - make_interval(secs => :stale_seconds)
+                   )
                 RETURNING id
-                """
-            ),
+                """),
             {
                 "run_id": run_id,
                 "market": request.market,
@@ -140,65 +171,109 @@ class PredictionJob:
                 "prediction_date": request.prediction_date,
                 "horizon": request.horizon,
                 "metrics": json.dumps(
-                    self._build_metrics(model_config, trained_artifact)
+                    self._build_metrics(
+                        model_config,
+                        training_run_id=training_run_id,
+                    )
                 ),
                 "config_uri": model_config.config_uri,
                 "started_at": now,
+                "stale_seconds": self.settings.stale_job_seconds,
             },
         )
         await db.commit()
-        return int(result.scalar_one())
+        claimed_id = result.scalar_one_or_none()
+        return int(claimed_id) if claimed_id is not None else None
+
+    async def _existing_job_response(
+        self, db: AsyncSession, run_id: str
+    ) -> JobResponse:
+        result = await db.execute(
+            text("""
+                SELECT status, artifact_uri, error_message,
+                       (SELECT COUNT(*) FROM qlib_predictions p
+                        WHERE p.run_id = qlib_model_runs.run_id) AS prediction_count
+                FROM qlib_model_runs
+                WHERE run_id = :run_id
+                """),
+            {"run_id": run_id},
+        )
+        row = result.mappings().one()
+        return JobResponse(
+            run_id=run_id,
+            status=row["status"],
+            artifact_uri=row["artifact_uri"],
+            prediction_count=int(row["prediction_count"] or 0),
+            message=row["error_message"] or "idempotent existing run",
+        )
 
     async def _load_price_rows(
         self, db: AsyncSession, request: DailyPredictionRequest
     ) -> list[dict]:
         limit = request.limit or self.settings.max_universe_size
         result = await db.execute(
-            text(
-                """
-                SELECT
-                    s.id AS stock_id,
-                    s.symbol,
-                    s.market,
-                    b.timestamp,
-                    b.open_price,
-                    b.high_price,
-                    b.low_price,
-                    b.close_price,
-                    b.volume,
-                    b.is_adjusted,
-                    b.close_price AS adjusted_close
-                FROM stocks s
-                JOIN market_data_bars b ON b.stock_id = s.id
-                WHERE s.market = :market
-                  AND s.is_active = TRUE
-                  AND b.timeframe = '1d'
-                  AND (
-                    CASE
-                      WHEN b.market = 'TW' THEN (b.timestamp AT TIME ZONE 'Asia/Taipei')::date
-                      ELSE (b.timestamp AT TIME ZONE 'America/New_York')::date
-                    END
-                  ) <= :prediction_date
-                ORDER BY s.symbol ASC, b.timestamp DESC
-                """
-            ),
+            text("""
+                WITH stock_universe AS (
+                    SELECT id, symbol, market
+                    FROM stocks
+                    WHERE market = :market AND is_active = TRUE
+                    ORDER BY symbol
+                    LIMIT :limit
+                ), canonical_daily AS (
+                    SELECT
+                        s.id AS stock_id,
+                        s.symbol,
+                        s.market,
+                        b.timestamp,
+                        b.open_price,
+                        b.high_price,
+                        b.low_price,
+                        b.close_price,
+                        b.volume,
+                        b.is_adjusted,
+                        b.close_price AS adjusted_close,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY s.id,
+                                CASE
+                                  WHEN b.market = 'TW' THEN (b.timestamp AT TIME ZONE 'Asia/Taipei')::date
+                                  ELSE (b.timestamp AT TIME ZONE 'America/New_York')::date
+                                END
+                            ORDER BY b.is_adjusted DESC,
+                                     CASE WHEN b.source = 'yahoo_finance' THEN 0 ELSE 1 END,
+                                     b.updated_at DESC,
+                                     b.id DESC
+                        ) AS canonical_rank
+                    FROM stock_universe s
+                    JOIN market_data_bars b ON b.stock_id = s.id
+                    WHERE b.timeframe = '1d'
+                      AND (
+                        CASE
+                          WHEN b.market = 'TW' THEN (b.timestamp AT TIME ZONE 'Asia/Taipei')::date
+                          ELSE (b.timestamp AT TIME ZONE 'America/New_York')::date
+                        END
+                      ) <= :prediction_date
+                ), recent_daily AS (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY stock_id ORDER BY timestamp DESC
+                    ) AS history_rank
+                    FROM canonical_daily
+                    WHERE canonical_rank = 1
+                )
+                SELECT stock_id, symbol, market, timestamp, open_price,
+                       high_price, low_price, close_price, volume,
+                       is_adjusted, adjusted_close
+                FROM recent_daily
+                WHERE history_rank <= :lookback_days
+                ORDER BY symbol ASC, timestamp ASC
+                """),
             {
                 "market": request.market,
                 "prediction_date": request.prediction_date,
+                "limit": limit,
+                "lookback_days": request.lookback_days,
             },
         )
-        rows_by_symbol: dict[str, list[dict]] = {}
-        for row in result.mappings().all():
-            symbol = row["symbol"]
-            if len(rows_by_symbol) >= limit and symbol not in rows_by_symbol:
-                continue
-            symbol_rows = rows_by_symbol.setdefault(symbol, [])
-            if len(symbol_rows) < request.lookback_days:
-                symbol_rows.append(dict(row))
-
-        price_rows = []
-        for rows in rows_by_symbol.values():
-            price_rows.extend(reversed(rows))
+        price_rows = [dict(row) for row in result.mappings().all()]
         if not price_rows:
             raise ValueError(
                 f"No {request.market} daily market data found for "
@@ -227,8 +302,7 @@ class PredictionJob:
         scored = []
         for rows in rows_by_stock.values():
             closes = [
-                float(row["adjusted_close"] or row["close_price"])
-                for row in rows
+                float(row["adjusted_close"] or row["close_price"]) for row in rows
             ]
             if len(closes) < model_config.min_lookback_days:
                 continue
@@ -301,38 +375,39 @@ class PredictionJob:
             text("DELETE FROM qlib_predictions WHERE run_id = :run_id"),
             {"run_id": run_id},
         )
-        for prediction in predictions:
-            await db.execute(
-                text(
-                    """
-                    INSERT INTO qlib_predictions (
-                        model_run_id, run_id, stock_id, symbol, market,
-                        prediction_date, horizon, score, rank, percentile,
-                        signal_direction, model_name, feature_set, metadata_json,
-                        created_at, updated_at
-                    )
-                    VALUES (
-                        :model_run_id, :run_id, :stock_id, :symbol, :market,
-                        :prediction_date, :horizon, :score, :rank, :percentile,
-                        :signal_direction, :model_name, :feature_set,
-                        CAST(:metadata_json AS JSON), NOW(), NOW()
-                    )
-                    ON CONFLICT (
-                        run_id, stock_id, prediction_date, horizon
-                    ) DO UPDATE SET
-                        score = EXCLUDED.score,
-                        rank = EXCLUDED.rank,
-                        percentile = EXCLUDED.percentile,
-                        signal_direction = EXCLUDED.signal_direction,
-                        metadata_json = EXCLUDED.metadata_json,
-                        updated_at = NOW()
-                    """
-                ),
+        statement = text("""
+            INSERT INTO qlib_predictions (
+                model_run_id, run_id, stock_id, symbol, market,
+                prediction_date, horizon, score, rank, percentile,
+                signal_direction, model_name, feature_set, metadata_json,
+                created_at, updated_at
+            )
+            VALUES (
+                :model_run_id, :run_id, :stock_id, :symbol, :market,
+                :prediction_date, :horizon, :score, :rank, :percentile,
+                :signal_direction, :model_name, :feature_set,
+                CAST(:metadata_json AS JSON), NOW(), NOW()
+            )
+            ON CONFLICT (
+                run_id, stock_id, prediction_date, horizon
+            ) DO UPDATE SET
+                score = EXCLUDED.score,
+                rank = EXCLUDED.rank,
+                percentile = EXCLUDED.percentile,
+                signal_direction = EXCLUDED.signal_direction,
+                metadata_json = EXCLUDED.metadata_json,
+                updated_at = NOW()
+            """)
+        await db.execute(
+            statement,
+            [
                 {
                     **prediction,
                     "metadata_json": json.dumps(prediction["metadata_json"]),
-                },
-            )
+                }
+                for prediction in predictions
+            ],
+        )
         await db.commit()
 
     async def _mark_run_succeeded(
@@ -345,8 +420,7 @@ class PredictionJob:
         trained_artifact: ModelArtifact | None,
     ) -> None:
         await db.execute(
-            text(
-                """
+            text("""
                 UPDATE qlib_model_runs
                 SET status = 'succeeded',
                     artifact_uri = :artifact_uri,
@@ -354,8 +428,7 @@ class PredictionJob:
                     finished_at = :finished_at,
                     updated_at = NOW()
                 WHERE run_id = :run_id
-                """
-            ),
+                """),
             {
                 "run_id": run_id,
                 "artifact_uri": artifact_uri,
@@ -376,16 +449,24 @@ class PredictionJob:
         model_config: QlibModelConfig,
         trained_artifact: ModelArtifact | None = None,
         extra_metrics: dict | None = None,
+        training_run_id: str | None = None,
     ) -> dict:
+        effective_training_run_id = (
+            trained_artifact.run_id if trained_artifact else training_run_id
+        )
         metrics = {
-            "engine": self._engine_name(trained_artifact),
+            "engine": (
+                "cpu_model_artifact"
+                if effective_training_run_id is not None
+                else "bootstrap_model_registry"
+            ),
             "model_type": model_config.model_type,
             "model_status": model_config.status,
             "feature_set": model_config.feature_set,
             "horizon": model_config.horizon,
             "min_lookback_days": model_config.min_lookback_days,
             "portfolio_strategy": model_config.portfolio_strategy,
-            "training_run_id": trained_artifact.run_id if trained_artifact else None,
+            "training_run_id": effective_training_run_id,
         }
         if extra_metrics:
             metrics.update(extra_metrics)
@@ -396,15 +477,14 @@ class PredictionJob:
             return "cpu_model_artifact"
         return "bootstrap_model_registry"
 
-    async def _load_latest_training_artifact(
+    async def _find_latest_training_artifact(
         self,
         db: AsyncSession,
         request: DailyPredictionRequest,
         model_config: QlibModelConfig,
-    ) -> ModelArtifact | None:
+    ) -> tuple[str, str] | None:
         result = await db.execute(
-            text(
-                """
+            text("""
                 SELECT run_id, artifact_uri
                 FROM qlib_model_runs
                 WHERE market = :market
@@ -423,8 +503,7 @@ class PredictionJob:
                   AND train_end <= :prediction_date
                 ORDER BY promoted_at DESC NULLS LAST, train_end DESC, finished_at DESC
                 LIMIT 1
-                """
-            ),
+                """),
             {
                 "market": request.market,
                 "universe": request.universe,
@@ -444,10 +523,21 @@ class PredictionJob:
                 )
             return None
 
-        artifact = load_model_artifact(row["artifact_uri"])
+        return str(row["run_id"]), str(row["artifact_uri"])
+
+    async def _load_training_artifact(
+        self,
+        artifact_ref: tuple[str, str] | None,
+        model_config: QlibModelConfig,
+    ) -> ModelArtifact | None:
+        if artifact_ref is None:
+            return None
+
+        run_id, artifact_uri = artifact_ref
+        artifact = await asyncio.to_thread(load_model_artifact, artifact_uri)
         if artifact.model_name != model_config.name:
             raise ValueError(
-                f"Training artifact {row['run_id']} is for {artifact.model_name}, "
+                f"Training artifact {run_id} is for {artifact.model_name}, "
                 f"not {model_config.name}"
             )
         return artifact
@@ -456,16 +546,14 @@ class PredictionJob:
         self, db: AsyncSession, run_id: str, error_message: str
     ) -> None:
         await db.execute(
-            text(
-                """
+            text("""
                 UPDATE qlib_model_runs
                 SET status = 'failed',
                     error_message = :error_message,
                     finished_at = :finished_at,
                     updated_at = NOW()
                 WHERE run_id = :run_id
-                """
-            ),
+                """),
             {
                 "run_id": run_id,
                 "error_message": error_message[:4000],

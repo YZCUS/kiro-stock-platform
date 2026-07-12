@@ -4,16 +4,15 @@
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 from datetime import date
 import uuid
 
-from app.dependencies import get_settings
-from app.settings import Settings
 from core.database import AsyncSessionLocal, get_db
 from core.auth_dependencies import get_current_active_user
+from core.internal_auth import require_internal_token
 from domain.models.user import User
 from domain.services.strategy_evaluation_service import StrategyEvaluationService
 from domain.services.strategy_subscription_service import StrategySubscriptionService
@@ -36,7 +35,6 @@ from api.schemas.strategy import (
     StrategyReliabilityScoreResponse,
     UpdateSignalStatusRequest,
 )
-
 
 router = APIRouter(prefix="/strategies", tags=["strategies"])
 internal_router = APIRouter(prefix="/internal/strategies", tags=["internal"])
@@ -63,19 +61,6 @@ async def _generate_signals_for_subscription(subscription_id: int) -> None:
             "Failed to generate strategy signals for subscription %s",
             subscription_id,
         )
-
-
-def require_internal_token(
-    x_internal_token: str | None = Header(default=None),
-    settings: Settings = Depends(get_settings),
-) -> None:
-    expected = (
-        settings.INTERNAL_API_TOKEN
-        or settings.QLIB_INTERNAL_TOKEN
-        or "dev-internal-token"
-    )
-    if x_internal_token != expected:
-        raise HTTPException(status_code=401, detail="invalid internal token")
 
 
 def build_subscription_response(subscription) -> SubscriptionResponse:
@@ -670,17 +655,24 @@ async def generate_signals(
 )
 async def generate_signals_internal(
     user_id: Optional[uuid.UUID] = Query(None, description="用戶 ID（可選）"),
+    market: str = Query("US", pattern="^(TW|US)$"),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Airflow/internal trigger for cached strategy signal generation.
     """
     result = await signal_service.batch_generate_signals(db=db, user_id=user_id)
+    canonical_result = await signal_service.generate_canonical_signals(
+        db=db,
+        market=market,
+    )
     return {
         "message": "Signal generation completed",
         "processed_subscriptions": result["processed_subscriptions"],
         "generated_signals": result["generated_signals"],
-        "errors": result["errors"],
+        "canonical_processed_strategies": canonical_result["processed_strategies"],
+        "canonical_generated_signals": canonical_result["generated_signals"],
+        "errors": [*result["errors"], *canonical_result["errors"]],
     }
 
 

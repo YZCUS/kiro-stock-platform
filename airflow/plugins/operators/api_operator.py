@@ -1,6 +1,7 @@
 """
 API調用操作器 - 支援外部存儲的版本
 """
+
 import json
 import os
 import logging
@@ -16,7 +17,9 @@ from plugins.services.storage_service import store_large_data, retrieve_large_da
 logger = logging.getLogger(__name__)
 
 # 常量定義
-DEFAULT_BACKEND_API_URL = os.environ.get('BACKEND_API_URL', 'http://backend:8000/api/v1')
+DEFAULT_BACKEND_API_URL = os.environ.get(
+    "BACKEND_API_URL", "http://backend:8000/api/v1"
+)
 DEFAULT_MAX_XCOM_SIZE = 40960  # 40KB
 DEFAULT_API_TIMEOUT = 300  # 秒
 
@@ -28,12 +31,12 @@ class APICallOperator(BaseOperator):
     支援自動檢測大數據並使用外部存儲（Redis）
     """
 
-    template_fields = ['endpoint', 'method', 'payload', 'query_params']
+    template_fields = ["endpoint", "method", "payload", "query_params"]
 
     def __init__(
         self,
         endpoint: str,
-        method: str = 'GET',
+        method: str = "GET",
         payload: Optional[Dict[str, Any]] = None,
         query_params: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, Any]] = None,
@@ -41,7 +44,8 @@ class APICallOperator(BaseOperator):
         timeout: int = DEFAULT_API_TIMEOUT,
         use_external_storage: bool = True,
         max_xcom_size: int = DEFAULT_MAX_XCOM_SIZE,
-        **kwargs
+        internal_token: Optional[str] = None,
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.endpoint = endpoint
@@ -50,34 +54,58 @@ class APICallOperator(BaseOperator):
         # Do not store HTTP query params on `self.params`; Airflow reserves that
         # attribute for DAG/task Params and converts values into Param objects.
         self.query_params = query_params if query_params is not None else (params or {})
-        self.base_url = base_url or os.getenv('BACKEND_API_URL', DEFAULT_BACKEND_API_URL)
+        self.base_url = base_url or os.getenv(
+            "BACKEND_API_URL", DEFAULT_BACKEND_API_URL
+        )
         self.timeout = timeout
         self.use_external_storage = use_external_storage
         self.max_xcom_size = max_xcom_size
+        self.internal_token = internal_token or os.getenv(
+            "INTERNAL_API_TOKEN", "dev-internal-token"
+        )
 
     def execute(self, context: Context) -> Dict[str, Any]:
         """執行同步的API調用，支援外部存儲"""
         # 構建完整的 URL，確保 endpoint 以 '/' 開頭並避免雙斜槓
-        endpoint = self.endpoint if self.endpoint.startswith('/') else f'/{self.endpoint}'
-        clean_base_url = self.base_url.rstrip('/')
+        endpoint = (
+            self.endpoint if self.endpoint.startswith("/") else f"/{self.endpoint}"
+        )
+        clean_base_url = self.base_url.rstrip("/")
         url = f"{clean_base_url}{endpoint}"
+        headers = {"X-Internal-Token": self.internal_token}
 
         try:
             response = None
-            if self.method == 'GET':
+            if self.method == "GET":
                 response = requests.get(
-                    url, params=self.query_params or self.payload, timeout=self.timeout
+                    url,
+                    params=self.query_params or self.payload,
+                    headers=headers,
+                    timeout=self.timeout,
                 )
-            elif self.method == 'POST':
+            elif self.method == "POST":
                 response = requests.post(
-                    url, params=self.query_params or None, json=self.payload, timeout=self.timeout
+                    url,
+                    params=self.query_params or None,
+                    json=self.payload,
+                    headers=headers,
+                    timeout=self.timeout,
                 )
-            elif self.method == 'PUT':
+            elif self.method == "PUT":
                 response = requests.put(
-                    url, params=self.query_params or None, json=self.payload, timeout=self.timeout
+                    url,
+                    params=self.query_params or None,
+                    json=self.payload,
+                    headers=headers,
+                    timeout=self.timeout,
                 )
-            elif self.method == 'DELETE':
-                response = requests.delete(url, params=self.query_params or None, timeout=self.timeout)
+            elif self.method == "DELETE":
+                response = requests.delete(
+                    url,
+                    params=self.query_params or None,
+                    headers=headers,
+                    timeout=self.timeout,
+                )
             else:
                 raise ValueError(f"不支援的HTTP方法: {self.method}")
 
@@ -93,13 +121,17 @@ class APICallOperator(BaseOperator):
 
             # 檢查數據大小是否需要外部存儲
             if self.use_external_storage:
-                serialized_size = len(json.dumps(result_data, ensure_ascii=False).encode('utf-8'))
+                serialized_size = len(
+                    json.dumps(result_data, ensure_ascii=False).encode("utf-8")
+                )
 
                 if serialized_size > self.max_xcom_size:
-                    self.log.info(f"數據大小 {serialized_size} bytes 超過XCom限制，使用外部存儲")
+                    self.log.info(
+                        f"數據大小 {serialized_size} bytes 超過XCom限制，使用外部存儲"
+                    )
 
                     # 生成引用ID
-                    task_instance = context['task_instance']
+                    task_instance = context["task_instance"]
                     reference_id = f"{task_instance.dag_id}_{task_instance.task_id}_{task_instance.execution_date.strftime('%Y%m%d_%H%M%S')}"
 
                     # 存儲到外部存儲
@@ -108,35 +140,39 @@ class APICallOperator(BaseOperator):
 
                         # 返回引用而非完整數據
                         return {
-                            'external_storage': True,
-                            'reference_id': stored_ref_id,
-                            'data_size': serialized_size,
-                            'storage_type': 'redis',
-                            'summary': self._create_data_summary(result_data)
+                            "external_storage": True,
+                            "reference_id": stored_ref_id,
+                            "data_size": serialized_size,
+                            "storage_type": "redis",
+                            "summary": self._create_data_summary(result_data),
                         }
                     except Exception as e:
                         self.log.warning(f"外部存儲失敗，回退到直接XCom: {e}")
                         # 如果外部存儲失敗，仍然嘗試直接返回
                         return result_data
                 else:
-                    self.log.info(f"數據大小 {serialized_size} bytes 在XCom限制內，直接返回")
+                    self.log.info(
+                        f"數據大小 {serialized_size} bytes 在XCom限制內，直接返回"
+                    )
 
             return result_data
 
         except requests.exceptions.RequestException as e:
-            self.log.error(f"API調用失敗: {self.method} {self.endpoint}, 錯誤: {str(e)}")
+            self.log.error(
+                f"API調用失敗: {self.method} {self.endpoint}, 錯誤: {str(e)}"
+            )
             raise
 
     def _validate_api_response(self, result_data: Dict[str, Any]) -> None:
         """驗證API響應的應用層狀態，如果有錯誤則拋出異常"""
 
         # 檢查 success 欄位（常見於所有收集端點）
-        if isinstance(result_data, dict) and 'success' in result_data:
-            if not result_data.get('success', True):
+        if isinstance(result_data, dict) and "success" in result_data:
+            if not result_data.get("success", True):
                 # 提取錯誤信息用於異常消息
-                message = result_data.get('message', '未知錯誤')
-                error_count = result_data.get('error_count', 0)
-                errors = result_data.get('errors', [])
+                message = result_data.get("message", "未知錯誤")
+                error_count = result_data.get("error_count", 0)
+                errors = result_data.get("errors", [])
 
                 # 構建詳細的錯誤消息
                 error_details = []
@@ -157,12 +193,12 @@ class APICallOperator(BaseOperator):
                 raise Exception(error_msg)
 
         # 檢查 error_count 欄位（即使沒有 success 欄位）
-        elif isinstance(result_data, dict) and 'error_count' in result_data:
-            error_count = result_data.get('error_count', 0)
+        elif isinstance(result_data, dict) and "error_count" in result_data:
+            error_count = result_data.get("error_count", 0)
             if error_count > 0:
-                errors = result_data.get('errors', [])
-                total_stocks = result_data.get('total_stocks', 0)
-                success_count = result_data.get('success_count', 0)
+                errors = result_data.get("errors", [])
+                total_stocks = result_data.get("total_stocks", 0)
+                success_count = result_data.get("success_count", 0)
 
                 error_msg = f"數據收集部分失敗: {error_count}/{total_stocks} 失敗"
                 if errors:
@@ -174,20 +210,18 @@ class APICallOperator(BaseOperator):
 
     def _create_data_summary(self, data: Any) -> Dict[str, Any]:
         """創建數據摘要以便在XCom中顯示"""
-        summary = {
-            'type': type(data).__name__
-        }
+        summary = {"type": type(data).__name__}
 
         if isinstance(data, dict):
-            summary['keys'] = list(data.keys())
-            if 'items' in data and isinstance(data['items'], list):
-                summary['items_count'] = len(data['items'])
-            if 'total' in data:
-                summary['total'] = data['total']
+            summary["keys"] = list(data.keys())
+            if "items" in data and isinstance(data["items"], list):
+                summary["items_count"] = len(data["items"])
+            if "total" in data:
+                summary["total"] = data["total"]
         elif isinstance(data, list):
-            summary['length'] = len(data)
+            summary["length"] = len(data)
             if data and isinstance(data[0], dict):
-                summary['sample_keys'] = list(data[0].keys()) if data else []
+                summary["sample_keys"] = list(data[0].keys()) if data else []
 
         return summary
 
@@ -202,7 +236,7 @@ class StockDataCollectionOperator(BaseOperator):
     3. 使用上游任務的股票清單 (use_upstream_stocks=True)
     """
 
-    template_fields = ['symbol', 'market']
+    template_fields = ["symbol", "market"]
 
     def __init__(
         self,
@@ -214,7 +248,7 @@ class StockDataCollectionOperator(BaseOperator):
         use_upstream_stocks: bool = False,
         upstream_task_id: Optional[str] = None,
         base_url: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.symbol = symbol
@@ -224,27 +258,39 @@ class StockDataCollectionOperator(BaseOperator):
         self.collect_all = collect_all
         self.use_upstream_stocks = use_upstream_stocks
         self.upstream_task_id = upstream_task_id
-        self.base_url = base_url or os.getenv('BACKEND_API_URL', DEFAULT_BACKEND_API_URL)
-    
+        self.base_url = base_url or os.getenv(
+            "BACKEND_API_URL", DEFAULT_BACKEND_API_URL
+        )
+
     def execute(self, context: Context) -> Dict[str, Any]:
         """執行股票數據收集"""
         # 檢查是否需要使用上游任務的股票清單
         if self.use_upstream_stocks and self.upstream_task_id:
             try:
                 # 從上游任務獲取股票清單
-                ti = context['ti']
+                ti = context["ti"]
                 upstream_result = ti.xcom_pull(task_ids=self.upstream_task_id)
 
                 if not upstream_result:
-                    raise ValueError(f"無法從上游任務 '{self.upstream_task_id}' 獲取股票清單")
+                    raise ValueError(
+                        f"無法從上游任務 '{self.upstream_task_id}' 獲取股票清單"
+                    )
 
                 # 檢查是否為外部存儲引用
                 actual_data = upstream_result
-                if isinstance(upstream_result, dict) and upstream_result.get('external_storage'):
-                    self.log.info(f"檢測到外部存儲引用: {upstream_result.get('reference_id')}")
+                if isinstance(upstream_result, dict) and upstream_result.get(
+                    "external_storage"
+                ):
+                    self.log.info(
+                        f"檢測到外部存儲引用: {upstream_result.get('reference_id')}"
+                    )
                     try:
-                        actual_data = retrieve_large_data(upstream_result['reference_id'])
-                        self.log.info(f"成功從外部存儲檢索數據，大小: {upstream_result.get('data_size')} bytes")
+                        actual_data = retrieve_large_data(
+                            upstream_result["reference_id"]
+                        )
+                        self.log.info(
+                            f"成功從外部存儲檢索數據，大小: {upstream_result.get('data_size')} bytes"
+                        )
                     except Exception as e:
                         self.log.error(f"從外部存儲檢索數據失敗: {e}")
                         raise ValueError(f"無法從外部存儲檢索股票清單: {e}")
@@ -252,12 +298,12 @@ class StockDataCollectionOperator(BaseOperator):
                 # 提取股票清單，支援不同的響應格式
                 stocks_list = []
                 if isinstance(actual_data, dict):
-                    if 'items' in actual_data:
+                    if "items" in actual_data:
                         # 分頁格式：{'items': [...], 'total': N}
-                        stocks_list = actual_data['items']
-                    elif 'data' in actual_data:
+                        stocks_list = actual_data["items"]
+                    elif "data" in actual_data:
                         # 包裝格式：{'data': [...]}
-                        stocks_list = actual_data['data']
+                        stocks_list = actual_data["data"]
                     else:
                         # 假設整個結果就是股票清單
                         stocks_list = actual_data
@@ -265,36 +311,35 @@ class StockDataCollectionOperator(BaseOperator):
                     # 直接是股票清單
                     stocks_list = actual_data
                 else:
-                    raise ValueError(f"上游任務返回的數據格式不支援: {type(actual_data)}")
+                    raise ValueError(
+                        f"上游任務返回的數據格式不支援: {type(actual_data)}"
+                    )
 
                 if not stocks_list:
                     self.log.warning("上游任務返回的股票清單為空")
                     return {
-                        'total_stocks': 0,
-                        'success_count': 0,
-                        'error_count': 0,
-                        'total_data_saved': 0,
-                        'message': '沒有股票需要收集'
+                        "total_stocks": 0,
+                        "success_count": 0,
+                        "error_count": 0,
+                        "total_data_saved": 0,
+                        "message": "沒有股票需要收集",
                     }
 
                 self.log.info(f"從上游任務獲取到 {len(stocks_list)} 支股票")
 
                 # 使用指定股票清單調用收集API
-                payload = {
-                    'stocks': stocks_list,
-                    'use_stock_list': True
-                }
+                payload = {"stocks": stocks_list, "use_stock_list": True}
                 if self.start_date:
-                    payload['start_date'] = self.start_date
+                    payload["start_date"] = self.start_date
                 if self.end_date:
-                    payload['end_date'] = self.end_date
+                    payload["end_date"] = self.end_date
 
                 api_operator = APICallOperator(
                     task_id=f"{self.task_id}_api_call",
                     endpoint="/stocks/collect-batch",
                     method="POST",
                     payload=payload,
-                    base_url=self.base_url
+                    base_url=self.base_url,
                 )
 
                 return api_operator.execute(context)
@@ -309,25 +354,22 @@ class StockDataCollectionOperator(BaseOperator):
                 task_id=f"{self.task_id}_api_call",
                 endpoint="/stocks/collect-all",
                 method="POST",
-                base_url=self.base_url
+                base_url=self.base_url,
             )
         else:
             # 調用單支股票收集API
-            payload = {
-                'symbol': self.symbol,
-                'market': self.market
-            }
+            payload = {"symbol": self.symbol, "market": self.market}
             if self.start_date:
-                payload['start_date'] = self.start_date
+                payload["start_date"] = self.start_date
             if self.end_date:
-                payload['end_date'] = self.end_date
+                payload["end_date"] = self.end_date
 
             api_operator = APICallOperator(
                 task_id=f"{self.task_id}_api_call",
                 endpoint="/stocks/collect",
                 method="POST",
                 payload=payload,
-                base_url=self.base_url
+                base_url=self.base_url,
             )
 
         return api_operator.execute(context)
@@ -340,17 +382,17 @@ class TechnicalAnalysisOperator(BaseOperator):
     支援單支股票或批次技術指標分析
     """
 
-    template_fields = ['stock_id', 'indicator', 'days']
+    template_fields = ["stock_id", "indicator", "days"]
 
     def __init__(
         self,
         stock_id: Optional[int] = None,
-        indicator: str = 'RSI',
+        indicator: str = "RSI",
         days: int = 30,
         batch_analysis: bool = False,
         market: Optional[str] = None,
         base_url: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.stock_id = stock_id
@@ -358,25 +400,24 @@ class TechnicalAnalysisOperator(BaseOperator):
         self.days = days
         self.batch_analysis = batch_analysis
         self.market = market
-        self.base_url = base_url or os.getenv('BACKEND_API_URL', DEFAULT_BACKEND_API_URL)
-    
+        self.base_url = base_url or os.getenv(
+            "BACKEND_API_URL", DEFAULT_BACKEND_API_URL
+        )
+
     def execute(self, context: Context) -> Dict[str, Any]:
         """執行技術分析"""
         if self.batch_analysis:
             # 調用批次分析API
-            params = {
-                'indicator': self.indicator,
-                'days': self.days
-            }
+            params = {"indicator": self.indicator, "days": self.days}
             if self.market:
-                params['market'] = self.market
-            
+                params["market"] = self.market
+
             api_operator = APICallOperator(
                 task_id=f"{self.task_id}_api_call",
                 endpoint="/analysis/batch-analysis",
                 method="GET",
                 payload=params,
-                base_url=self.base_url
+                base_url=self.base_url,
             )
         else:
             # 調用單支股票分析API
@@ -384,10 +425,10 @@ class TechnicalAnalysisOperator(BaseOperator):
                 task_id=f"{self.task_id}_api_call",
                 endpoint=f"/analysis/technical-analysis/{self.stock_id}",
                 method="GET",
-                payload={'days': self.days},
-                base_url=self.base_url
+                payload={"days": self.days},
+                base_url=self.base_url,
             )
-        
+
         return api_operator.execute(context)
 
 
@@ -398,35 +439,34 @@ class SignalDetectionOperator(BaseOperator):
     偵測股票的買賣信號（金叉、死叉等）
     """
 
-    template_fields = ['stock_id', 'signal_types']
+    template_fields = ["stock_id", "signal_types"]
 
     def __init__(
         self,
         stock_id: Optional[int] = None,
         signal_types: Optional[List[str]] = None,
         base_url: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.stock_id = stock_id
-        self.signal_types = signal_types or ['BUY', 'SELL']
-        self.base_url = base_url or os.getenv('BACKEND_API_URL', DEFAULT_BACKEND_API_URL)
-    
+        self.signal_types = signal_types or ["BUY", "SELL"]
+        self.base_url = base_url or os.getenv(
+            "BACKEND_API_URL", DEFAULT_BACKEND_API_URL
+        )
+
     def execute(self, context: Context) -> Dict[str, Any]:
         """執行信號偵測"""
-        payload = {
-            'stock_id': self.stock_id,
-            'signal_types': self.signal_types
-        }
-        
+        payload = {"stock_id": self.stock_id, "signal_types": self.signal_types}
+
         api_operator = APICallOperator(
             task_id=f"{self.task_id}_api_call",
             endpoint="/analysis/signals",
             method="POST",
             payload=payload,
-            base_url=self.base_url
+            base_url=self.base_url,
         )
-        
+
         return api_operator.execute(context)
 
 
@@ -437,28 +477,26 @@ class DataValidationOperator(BaseOperator):
     驗證股票數據的完整性和正確性
     """
 
-    template_fields = ['stock_id']
+    template_fields = ["stock_id"]
 
     def __init__(
-        self,
-        stock_id: int,
-        days: int = 30,
-        base_url: Optional[str] = None,
-        **kwargs
+        self, stock_id: int, days: int = 30, base_url: Optional[str] = None, **kwargs
     ):
         super().__init__(**kwargs)
         self.stock_id = stock_id
         self.days = days
-        self.base_url = base_url or os.getenv('BACKEND_API_URL', DEFAULT_BACKEND_API_URL)
-    
+        self.base_url = base_url or os.getenv(
+            "BACKEND_API_URL", DEFAULT_BACKEND_API_URL
+        )
+
     def execute(self, context: Context) -> Dict[str, Any]:
         """執行數據驗證"""
         api_operator = APICallOperator(
             task_id=f"{self.task_id}_api_call",
             endpoint=f"/stocks/{self.stock_id}/validate",
             method="GET",
-            payload={'days': self.days},
-            base_url=self.base_url
+            payload={"days": self.days},
+            base_url=self.base_url,
         )
-        
+
         return api_operator.execute(context)

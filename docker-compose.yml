@@ -1,4 +1,4 @@
-version: '3.8'
+name: kiro-stock-platform
 
 x-backend-worker-common: &backend-worker-common
   build:
@@ -14,6 +14,8 @@ x-backend-worker-common: &backend-worker-common
     - FINNHUB_BASE_URL=${FINNHUB_BASE_URL:-https://finnhub.io/api/v1}
     - FINNHUB_WS_URL=${FINNHUB_WS_URL:-wss://ws.finnhub.io}
     - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:-dev-internal-token}
+    - DATABASE_POOL_SIZE=${WORKER_DATABASE_POOL_SIZE:-2}
+    - DATABASE_MAX_OVERFLOW=${WORKER_DATABASE_MAX_OVERFLOW:-1}
     - PYTHONPATH=/app
   depends_on:
     - postgres
@@ -71,6 +73,8 @@ services:
       - FINNHUB_BASE_URL=${FINNHUB_BASE_URL:-https://finnhub.io/api/v1}
       - FINNHUB_WS_URL=${FINNHUB_WS_URL:-wss://ws.finnhub.io}
       - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:-dev-internal-token}
+      - DATABASE_POOL_SIZE=${BACKEND_DATABASE_POOL_SIZE:-5}
+      - DATABASE_MAX_OVERFLOW=${BACKEND_DATABASE_MAX_OVERFLOW:-5}
       - PYTHONPATH=/app
     depends_on:
       - postgres
@@ -89,6 +93,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - PYTHONPATH=/app
       - ORDER_EXECUTION_QUEUE_CONSUMER_NAME=order-execution-worker
+      - DATABASE_POOL_SIZE=${WORKER_DATABASE_POOL_SIZE:-2}
+      - DATABASE_MAX_OVERFLOW=${WORKER_DATABASE_MAX_OVERFLOW:-1}
     command: python -m scripts.run_worker order-execution
 
   broker-sync-worker:
@@ -137,6 +143,8 @@ services:
       - QLIB_INTERNAL_TOKEN=${QLIB_INTERNAL_TOKEN:-dev-qlib-token}
       - QLIB_ARTIFACT_ROOT=/app/artifacts
       - QLIB_PROVIDER_URI=/app/artifacts/provider
+      - QLIB_DATABASE_POOL_SIZE=${QLIB_DATABASE_POOL_SIZE:-2}
+      - QLIB_DATABASE_MAX_OVERFLOW=${QLIB_DATABASE_MAX_OVERFLOW:-1}
     depends_on:
       - postgres
     volumes:
@@ -144,8 +152,21 @@ services:
       - qlib_artifacts:/app/artifacts
     networks:
       - stock_network
-    profiles:
-      - qlib
+
+  airflow-db-prepare:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - AIRFLOW_DB=airflow
+      - AIRFLOW_DB_PREPARE_MAX_ATTEMPTS=60
+    volumes:
+      - ./scripts/ensure-airflow-db.sh:/scripts/ensure-airflow-db.sh:ro
+    command: ["sh", "/scripts/ensure-airflow-db.sh"]
+    depends_on:
+      - postgres
+    networks:
+      - stock_network
 
   # React 前端應用
   frontend:
@@ -177,11 +198,15 @@ services:
     container_name: stock_analysis_airflow_webserver
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:postgres@postgres:5432/stock_analysis
-      - AIRFLOW__CORE__FERNET_KEY=your-fernet-key-here-32-chars-long
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:postgres@postgres:5432/airflow
+      - AIRFLOW__CORE__FERNET_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
       - AIRFLOW__WEBSERVER__SECRET_KEY=your-secret-key-here
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - AIRFLOW__CORE__PARALLELISM=${AIRFLOW_PARALLELISM:-4}
+      - AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG=${AIRFLOW_MAX_ACTIVE_TASKS_PER_DAG:-4}
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE=${AIRFLOW_DATABASE_POOL_SIZE:-5}
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW=${AIRFLOW_DATABASE_MAX_OVERFLOW:-5}
       - AIRFLOW__CORE__DEFAULT_TIMEZONE=Asia/Taipei
       - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true
       - AIRFLOW__WEBSERVER__WARN_DEPLOYMENT_EXPOSURE=False
@@ -191,24 +216,29 @@ services:
       - QLIB_PREDICTION_URL=http://qlib-prediction-service:8090
       - QLIB_INTERNAL_TOKEN=${QLIB_INTERNAL_TOKEN:-dev-qlib-token}
       - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:-dev-internal-token}
-      - PYTHONPATH=/opt/airflow/dags:/opt/airflow:/opt/airflow/backend
+      - PYTHONPATH=/opt/airflow
     ports:
       - "8080:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
-      - ./backend:/opt/airflow/backend
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+      airflow-db-prepare:
+        condition: service_completed_successfully
+      qlib-prediction-service:
+        condition: service_started
     networks:
       - stock_network
     command: >
-      bash -c "
-        airflow db init &&
-        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true &&
-        airflow webserver --port 8080
+      bash -ec "
+        airflow db migrate &&
+        (airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || airflow users list | grep -F admin) &&
+        exec airflow webserver --port 8080
       "
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
@@ -224,10 +254,14 @@ services:
     container_name: stock_analysis_airflow_scheduler
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:postgres@postgres:5432/stock_analysis
-      - AIRFLOW__CORE__FERNET_KEY=your-fernet-key-here-32-chars-long
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:postgres@postgres:5432/airflow
+      - AIRFLOW__CORE__FERNET_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - AIRFLOW__CORE__PARALLELISM=${AIRFLOW_PARALLELISM:-4}
+      - AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG=${AIRFLOW_MAX_ACTIVE_TASKS_PER_DAG:-4}
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE=${AIRFLOW_DATABASE_POOL_SIZE:-5}
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW=${AIRFLOW_DATABASE_MAX_OVERFLOW:-5}
       - AIRFLOW__CORE__DEFAULT_TIMEZONE=Asia/Taipei
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/stock_analysis}
       - REDIS_URL=redis://redis:6379
@@ -235,12 +269,11 @@ services:
       - QLIB_PREDICTION_URL=http://qlib-prediction-service:8090
       - QLIB_INTERNAL_TOKEN=${QLIB_INTERNAL_TOKEN:-dev-qlib-token}
       - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:-dev-internal-token}
-      - PYTHONPATH=/opt/airflow/dags:/opt/airflow:/opt/airflow/backend
+      - PYTHONPATH=/opt/airflow
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
-      - ./backend:/opt/airflow/backend
     depends_on:
       - postgres
       - redis

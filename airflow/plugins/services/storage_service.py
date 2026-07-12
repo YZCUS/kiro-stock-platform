@@ -2,6 +2,7 @@
 XCom 外部存儲管理器
 解決 XCom 48KB 限制問題
 """
+
 import json
 import uuid
 import redis
@@ -19,14 +20,17 @@ try:
 except ImportError:
     # 备用方案：如果导入失败，使用 pendulum
     import pendulum
+
     def get_taipei_now():
-        return pendulum.now('Asia/Taipei')
+        return pendulum.now("Asia/Taipei")
+
 
 logger = logging.getLogger(__name__)
 
 # 导入通知管理器
 try:
     from .notification_service import get_notification_manager
+
     NOTIFICATIONS_ENABLED = True
 except ImportError:
     logger.warning("通知管理器未找到，将禁用通知功能")
@@ -45,20 +49,26 @@ class XComStorageManager:
             redis_url: Redis 連接URL
             ttl_hours: 數據過期時間（小時）
         """
-        self.redis_url = redis_url or os.getenv('REDIS_URL', 'redis://localhost:6379/1')
+        self.redis_url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/1")
         self.ttl_seconds = ttl_hours * 3600
         self.key_prefix = "airflow:xcom:external:"
         self.metrics_key_prefix = "airflow:xcom:metrics:"
 
         # 监控配置
-        self.enable_monitoring = os.getenv('XCOM_STORAGE_MONITORING', 'true').lower() == 'true'
-        self.health_check_interval = int(os.getenv('REDIS_HEALTH_CHECK_INTERVAL', 300))  # 5分钟
+        self.enable_monitoring = (
+            os.getenv("XCOM_STORAGE_MONITORING", "true").lower() == "true"
+        )
+        self.health_check_interval = int(
+            os.getenv("REDIS_HEALTH_CHECK_INTERVAL", 300)
+        )  # 5分钟
         self.last_health_check = 0
         self.consecutive_failures = 0
-        self.max_consecutive_failures = int(os.getenv('MAX_REDIS_FAILURES', 3))
+        self.max_consecutive_failures = int(os.getenv("MAX_REDIS_FAILURES", 3))
 
         # 通知管理器
-        self.notification_manager = get_notification_manager() if NOTIFICATIONS_ENABLED else None
+        self.notification_manager = (
+            get_notification_manager() if NOTIFICATIONS_ENABLED else None
+        )
 
         try:
             self.redis_client = redis.from_url(self.redis_url)
@@ -69,7 +79,10 @@ class XComStorageManager:
 
             # 记录初始化指标
             if self.enable_monitoring:
-                self._record_metric('initialization', {'status': 'success', 'timestamp': get_taipei_now().isoformat()})
+                self._record_metric(
+                    "initialization",
+                    {"status": "success", "timestamp": get_taipei_now().isoformat()},
+                )
 
         except Exception as e:
             logger.error(f"Redis 連接失敗: {e}")
@@ -79,9 +92,9 @@ class XComStorageManager:
             # 发送初始化失败警报
             if self.notification_manager:
                 self.notification_manager.send_storage_failure_alert(
-                    operation='initialization',
+                    operation="initialization",
                     error=str(e),
-                    context={'redis_url': self.redis_url}
+                    context={"redis_url": self.redis_url},
                 )
 
     @contextmanager
@@ -96,12 +109,15 @@ class XComStorageManager:
         except Exception as e:
             # 记录失败指标
             if self.enable_monitoring:
-                self._record_metric('operation_failure', {
-                    'operation': operation,
-                    'reference_id': reference_id,
-                    'error': str(e),
-                    'timestamp': get_taipei_now().isoformat()
-                })
+                self._record_metric(
+                    "operation_failure",
+                    {
+                        "operation": operation,
+                        "reference_id": reference_id,
+                        "error": str(e),
+                        "timestamp": get_taipei_now().isoformat(),
+                    },
+                )
 
             # 发送失败通知
             if self.notification_manager:
@@ -109,7 +125,7 @@ class XComStorageManager:
                     operation=operation,
                     reference_id=reference_id,
                     error=str(e),
-                    context={'duration_seconds': time.time() - start_time}
+                    context={"duration_seconds": time.time() - start_time},
                 )
 
             self.consecutive_failures += 1
@@ -119,13 +135,16 @@ class XComStorageManager:
 
             # 记录性能指标
             if self.enable_monitoring:
-                self._record_metric('operation_performance', {
-                    'operation': operation,
-                    'reference_id': reference_id,
-                    'duration_seconds': duration,
-                    'success': operation_success,
-                    'timestamp': get_taipei_now().isoformat()
-                })
+                self._record_metric(
+                    "operation_performance",
+                    {
+                        "operation": operation,
+                        "reference_id": reference_id,
+                        "duration_seconds": duration,
+                        "success": operation_success,
+                        "timestamp": get_taipei_now().isoformat(),
+                    },
+                )
 
             # 重置失败计数器（如果操作成功）
             if operation_success:
@@ -139,9 +158,9 @@ class XComStorageManager:
         try:
             metric_key = f"{self.metrics_key_prefix}{metric_type}:{get_taipei_now().strftime('%Y%m%d')}"
             metric_data = {
-                'type': metric_type,
-                'data': data,
-                'recorded_at': get_taipei_now().isoformat()
+                "type": metric_type,
+                "data": data,
+                "recorded_at": get_taipei_now().isoformat(),
             }
 
             # 使用 Redis List 存储指标（带过期时间）
@@ -157,15 +176,15 @@ class XComStorageManager:
     def check_redis_health(self) -> Dict[str, Any]:
         """检查 Redis 健康状态"""
         health_data = {
-            'is_healthy': False,
-            'last_check': get_taipei_now().isoformat(),
-            'consecutive_failures': self.consecutive_failures,
-            'error': None
+            "is_healthy": False,
+            "last_check": get_taipei_now().isoformat(),
+            "consecutive_failures": self.consecutive_failures,
+            "error": None,
         }
 
         try:
             if not self.redis_client:
-                health_data['error'] = 'Redis client not initialized'
+                health_data["error"] = "Redis client not initialized"
                 return health_data
 
             # 执行健康检查
@@ -176,30 +195,34 @@ class XComStorageManager:
             # 获取 Redis 信息
             redis_info = self.redis_client.info()
 
-            health_data.update({
-                'is_healthy': True,
-                'response_time_seconds': response_time,
-                'redis_version': redis_info.get('redis_version'),
-                'used_memory_human': redis_info.get('used_memory_human'),
-                'connected_clients': redis_info.get('connected_clients'),
-                'total_commands_processed': redis_info.get('total_commands_processed'),
-                'uptime_in_seconds': redis_info.get('uptime_in_seconds')
-            })
+            health_data.update(
+                {
+                    "is_healthy": True,
+                    "response_time_seconds": response_time,
+                    "redis_version": redis_info.get("redis_version"),
+                    "used_memory_human": redis_info.get("used_memory_human"),
+                    "connected_clients": redis_info.get("connected_clients"),
+                    "total_commands_processed": redis_info.get(
+                        "total_commands_processed"
+                    ),
+                    "uptime_in_seconds": redis_info.get("uptime_in_seconds"),
+                }
+            )
 
             # 重置失败计数
             self.consecutive_failures = 0
 
         except Exception as e:
-            health_data['error'] = str(e)
+            health_data["error"] = str(e)
             self.consecutive_failures += 1
             logger.error(f"Redis 健康检查失败: {e}")
 
         # 记录健康检查指标
         if self.enable_monitoring:
-            self._record_metric('health_check', health_data)
+            self._record_metric("health_check", health_data)
 
         # 发送健康警报（如果需要）
-        if not health_data['is_healthy'] and self.notification_manager:
+        if not health_data["is_healthy"] and self.notification_manager:
             self.notification_manager.send_redis_health_alert(health_data)
 
         self.last_health_check = time.time()
@@ -215,7 +238,9 @@ class XComStorageManager:
 
         # 检查连续失败次数
         if self.consecutive_failures >= self.max_consecutive_failures:
-            logger.warning(f"连续失败次数 ({self.consecutive_failures}) 达到阈值，尝试重新连接 Redis")
+            logger.warning(
+                f"连续失败次数 ({self.consecutive_failures}) 达到阈值，尝试重新连接 Redis"
+            )
 
             try:
                 self.redis_client = redis.from_url(self.redis_url)
@@ -248,16 +273,18 @@ class XComStorageManager:
         # 生成唯一ID
         ref_id = reference_id or f"data_{uuid.uuid4().hex}"
 
-        with self._performance_monitor('store', ref_id):
+        with self._performance_monitor("store", ref_id):
             # 序列化數據
             serialized_data = json.dumps(data, ensure_ascii=False, default=str)
 
             # 檢查數據大小
-            data_size = len(serialized_data.encode('utf-8'))
+            data_size = len(serialized_data.encode("utf-8"))
             logger.info(f"存儲數據大小: {data_size} bytes")
 
             # 检查数据大小警告阈值
-            size_warning_threshold = int(os.getenv('STORAGE_SIZE_WARNING_MB', 10)) * 1024 * 1024
+            size_warning_threshold = (
+                int(os.getenv("STORAGE_SIZE_WARNING_MB", 10)) * 1024 * 1024
+            )
             if data_size > size_warning_threshold:
                 logger.warning(f"存储数据大小 ({data_size} bytes) 超过警告阈值")
                 if self.notification_manager:
@@ -265,42 +292,39 @@ class XComStorageManager:
                         message=f"Large data storage detected: {data_size} bytes for reference {ref_id}",
                         level=self.notification_manager.NotificationLevel.WARNING,
                         title="Large Data Storage Warning",
-                        context={'reference_id': ref_id, 'data_size_bytes': data_size}
+                        context={"reference_id": ref_id, "data_size_bytes": data_size},
                     )
 
             # 構建存儲鍵
             storage_key = f"{self.key_prefix}{ref_id}"
 
             # 存儲到 Redis
-            self.redis_client.setex(
-                storage_key,
-                self.ttl_seconds,
-                serialized_data
-            )
+            self.redis_client.setex(storage_key, self.ttl_seconds, serialized_data)
 
             # 存儲元數據
             metadata = {
-                'created_at': get_taipei_now().isoformat(),
-                'data_size': data_size,
-                'ttl_seconds': self.ttl_seconds,
-                'reference_id': ref_id
+                "created_at": get_taipei_now().isoformat(),
+                "data_size": data_size,
+                "ttl_seconds": self.ttl_seconds,
+                "reference_id": ref_id,
             }
             metadata_key = f"{storage_key}:meta"
             self.redis_client.setex(
-                metadata_key,
-                self.ttl_seconds,
-                json.dumps(metadata)
+                metadata_key, self.ttl_seconds, json.dumps(metadata)
             )
 
             logger.info(f"數據已存儲到外部存儲，引用ID: {ref_id}")
 
             # 记录存储成功指标
             if self.enable_monitoring:
-                self._record_metric('store_success', {
-                    'reference_id': ref_id,
-                    'data_size': data_size,
-                    'timestamp': get_taipei_now().isoformat()
-                })
+                self._record_metric(
+                    "store_success",
+                    {
+                        "reference_id": ref_id,
+                        "data_size": data_size,
+                        "timestamp": get_taipei_now().isoformat(),
+                    },
+                )
 
             return ref_id
 
@@ -320,7 +344,7 @@ class XComStorageManager:
         if not self.redis_client:
             raise RuntimeError("Redis 客戶端未初始化")
 
-        with self._performance_monitor('retrieve', reference_id):
+        with self._performance_monitor("retrieve", reference_id):
             storage_key = f"{self.key_prefix}{reference_id}"
 
             # 檢索數據
@@ -329,24 +353,30 @@ class XComStorageManager:
             if serialized_data is None:
                 # 记录数据不存在的情况
                 if self.enable_monitoring:
-                    self._record_metric('data_not_found', {
-                        'reference_id': reference_id,
-                        'timestamp': get_taipei_now().isoformat()
-                    })
+                    self._record_metric(
+                        "data_not_found",
+                        {
+                            "reference_id": reference_id,
+                            "timestamp": get_taipei_now().isoformat(),
+                        },
+                    )
                 raise ValueError(f"無法找到引用ID為 {reference_id} 的數據")
 
             # 反序列化數據
-            data = json.loads(serialized_data.decode('utf-8'))
+            data = json.loads(serialized_data.decode("utf-8"))
 
             logger.info(f"成功檢索數據，引用ID: {reference_id}")
 
             # 记录检索成功指标
             if self.enable_monitoring:
-                self._record_metric('retrieve_success', {
-                    'reference_id': reference_id,
-                    'data_size': len(serialized_data),
-                    'timestamp': get_taipei_now().isoformat()
-                })
+                self._record_metric(
+                    "retrieve_success",
+                    {
+                        "reference_id": reference_id,
+                        "data_size": len(serialized_data),
+                        "timestamp": get_taipei_now().isoformat(),
+                    },
+                )
 
             return data
 
@@ -367,22 +397,27 @@ class XComStorageManager:
             return False
 
         try:
-            with self._performance_monitor('delete', reference_id):
+            with self._performance_monitor("delete", reference_id):
                 storage_key = f"{self.key_prefix}{reference_id}"
                 metadata_key = f"{storage_key}:meta"
 
                 # 刪除數據和元數據
                 deleted_count = self.redis_client.delete(storage_key, metadata_key)
 
-                logger.info(f"刪除數據，引用ID: {reference_id}, 刪除項目: {deleted_count}")
+                logger.info(
+                    f"刪除數據，引用ID: {reference_id}, 刪除項目: {deleted_count}"
+                )
 
                 # 记录删除指标
                 if self.enable_monitoring:
-                    self._record_metric('delete_success' if deleted_count > 0 else 'delete_not_found', {
-                        'reference_id': reference_id,
-                        'deleted_count': deleted_count,
-                        'timestamp': get_taipei_now().isoformat()
-                    })
+                    self._record_metric(
+                        "delete_success" if deleted_count > 0 else "delete_not_found",
+                        {
+                            "reference_id": reference_id,
+                            "deleted_count": deleted_count,
+                            "timestamp": get_taipei_now().isoformat(),
+                        },
+                    )
 
                 return deleted_count > 0
 
@@ -390,11 +425,14 @@ class XComStorageManager:
             logger.error(f"刪除數據失敗: {e}")
             # 记录删除失败指标
             if self.enable_monitoring:
-                self._record_metric('delete_failure', {
-                    'reference_id': reference_id,
-                    'error': str(e),
-                    'timestamp': get_taipei_now().isoformat()
-                })
+                self._record_metric(
+                    "delete_failure",
+                    {
+                        "reference_id": reference_id,
+                        "error": str(e),
+                        "timestamp": get_taipei_now().isoformat(),
+                    },
+                )
             return False
 
     def get_metadata(self, reference_id: str) -> Optional[Dict]:
@@ -416,7 +454,7 @@ class XComStorageManager:
 
             metadata_str = self.redis_client.get(metadata_key)
             if metadata_str:
-                return json.loads(metadata_str.decode('utf-8'))
+                return json.loads(metadata_str.decode("utf-8"))
 
             return None
 
@@ -435,15 +473,11 @@ class XComStorageManager:
             return 0
 
         try:
-            # 獲取所有存儲鍵
             pattern = f"{self.key_prefix}*"
-            keys = self.redis_client.keys(pattern)
-
-            # 過濾出數據鍵（排除元數據鍵）
-            data_keys = [key for key in keys if not key.decode().endswith(':meta')]
-
             cleanup_count = 0
-            for key in data_keys:
+            for key in self.redis_client.scan_iter(match=pattern, count=500):
+                if key.decode().endswith(":meta"):
+                    continue
                 ttl = self.redis_client.ttl(key)
                 if ttl == -2:  # 鍵已過期
                     cleanup_count += 1
@@ -463,21 +497,26 @@ class XComStorageManager:
             Dict: 統計信息
         """
         if not self.redis_client:
-            return {'error': 'Redis 客戶端未初始化'}
+            return {"error": "Redis 客戶端未初始化"}
 
         try:
             pattern = f"{self.key_prefix}*"
-            all_keys = self.redis_client.keys(pattern)
-
-            # 分類鍵
-            data_keys = [key for key in all_keys if not key.decode().endswith(':meta')]
-            meta_keys = [key for key in all_keys if key.decode().endswith(':meta')]
-
+            total_items = 0
+            metadata_items = 0
             total_size = 0
             expired_count = 0
-            size_distribution = {'small': 0, 'medium': 0, 'large': 0}  # <1MB, 1-10MB, >10MB
+            size_distribution = {
+                "small": 0,
+                "medium": 0,
+                "large": 0,
+            }  # <1MB, 1-10MB, >10MB
 
-            for key in data_keys:
+            for key in self.redis_client.scan_iter(match=pattern, count=500):
+                if key.decode().endswith(":meta"):
+                    metadata_items += 1
+                    continue
+
+                total_items += 1
                 try:
                     size = self.redis_client.memory_usage(key)
                     if size:
@@ -485,11 +524,11 @@ class XComStorageManager:
 
                         # 大小分布统计
                         if size < 1024 * 1024:  # <1MB
-                            size_distribution['small'] += 1
+                            size_distribution["small"] += 1
                         elif size < 10 * 1024 * 1024:  # 1-10MB
-                            size_distribution['medium'] += 1
+                            size_distribution["medium"] += 1
                         else:  # >10MB
-                            size_distribution['large'] += 1
+                            size_distribution["large"] += 1
 
                     # 检查过期状态
                     ttl = self.redis_client.ttl(key)
@@ -500,17 +539,23 @@ class XComStorageManager:
                     logger.warning(f"检查键 {key} 失败: {e}")
 
             stats = {
-                'total_items': len(data_keys),
-                'total_size_bytes': total_size,
-                'total_size_mb': round(total_size / (1024 * 1024), 2),
-                'metadata_items': len(meta_keys),
-                'expired_items': expired_count,
-                'size_distribution': size_distribution,
-                'redis_connected': True,
-                'consecutive_failures': self.consecutive_failures,
-                'last_health_check': pendulum.from_timestamp(self.last_health_check, 'Asia/Taipei').isoformat() if self.last_health_check else None,
-                'monitoring_enabled': self.enable_monitoring,
-                'check_timestamp': get_taipei_now().isoformat()
+                "total_items": total_items,
+                "total_size_bytes": total_size,
+                "total_size_mb": round(total_size / (1024 * 1024), 2),
+                "metadata_items": metadata_items,
+                "expired_items": expired_count,
+                "size_distribution": size_distribution,
+                "redis_connected": True,
+                "consecutive_failures": self.consecutive_failures,
+                "last_health_check": (
+                    pendulum.from_timestamp(
+                        self.last_health_check, "Asia/Taipei"
+                    ).isoformat()
+                    if self.last_health_check
+                    else None
+                ),
+                "monitoring_enabled": self.enable_monitoring,
+                "check_timestamp": get_taipei_now().isoformat(),
             }
 
             # 发送容量警报（如果需要）
@@ -521,8 +566,7 @@ class XComStorageManager:
 
         except Exception as e:
             logger.error(f"獲取存儲統計失敗: {e}")
-            return {'error': str(e), 'check_timestamp': get_taipei_now().isoformat()}
-
+            return {"error": str(e), "check_timestamp": get_taipei_now().isoformat()}
 
     def get_metrics_summary(self, days: int = 7) -> Dict:
         """
@@ -535,31 +579,40 @@ class XComStorageManager:
             Dict: 指标汇总
         """
         if not self.redis_client or not self.enable_monitoring:
-            return {'error': '监控未启用或 Redis 未连接'}
+            return {"error": "监控未启用或 Redis 未连接"}
 
         try:
             summary = {
-                'period_days': days,
-                'operations': {'store': 0, 'retrieve': 0, 'delete': 0},
-                'failures': {'store': 0, 'retrieve': 0, 'delete': 0},
-                'performance': {'avg_store_time': 0, 'avg_retrieve_time': 0, 'avg_delete_time': 0},
-                'data_volume': {'total_stored_mb': 0, 'avg_item_size_kb': 0},
-                'health_checks': {'total': 0, 'failed': 0, 'avg_response_time': 0}
+                "period_days": days,
+                "operations": {"store": 0, "retrieve": 0, "delete": 0},
+                "failures": {"store": 0, "retrieve": 0, "delete": 0},
+                "performance": {
+                    "avg_store_time": 0,
+                    "avg_retrieve_time": 0,
+                    "avg_delete_time": 0,
+                },
+                "data_volume": {"total_stored_mb": 0, "avg_item_size_kb": 0},
+                "health_checks": {"total": 0, "failed": 0, "avg_response_time": 0},
             }
 
             # 查询指定天数的数据
             end_date = get_taipei_now()
             for i in range(days):
-                date_str = (end_date - timedelta(days=i)).strftime('%Y%m%d')
+                date_str = (end_date - timedelta(days=i)).strftime("%Y%m%d")
 
                 # 获取各类指标
-                for metric_type in ['operation_performance', 'operation_failure', 'health_check', 'store_success']:
+                for metric_type in [
+                    "operation_performance",
+                    "operation_failure",
+                    "health_check",
+                    "store_success",
+                ]:
                     metric_key = f"{self.metrics_key_prefix}{metric_type}:{date_str}"
 
                     try:
                         metrics_data = self.redis_client.lrange(metric_key, 0, -1)
                         for metric_json in metrics_data:
-                            metric = json.loads(metric_json.decode('utf-8'))
+                            metric = json.loads(metric_json.decode("utf-8"))
                             self._aggregate_metric(summary, metric)
                     except Exception as e:
                         logger.warning(f"获取指标 {metric_key} 失败: {e}")
@@ -571,74 +624,76 @@ class XComStorageManager:
 
         except Exception as e:
             logger.error(f"获取指标汇总失败: {e}")
-            return {'error': str(e)}
+            return {"error": str(e)}
 
     def _aggregate_metric(self, summary: Dict, metric: Dict) -> None:
         """聚合单个指标数据"""
-        metric_data = metric.get('data', {})
-        metric_type = metric.get('type')
+        metric_data = metric.get("data", {})
+        metric_type = metric.get("type")
 
-        if metric_type == 'operation_performance':
-            operation = metric_data.get('operation')
-            if operation in summary['operations']:
-                summary['operations'][operation] += 1
+        if metric_type == "operation_performance":
+            operation = metric_data.get("operation")
+            if operation in summary["operations"]:
+                summary["operations"][operation] += 1
 
                 # 记录性能数据
-                duration = metric_data.get('duration_seconds', 0)
-                perf_key = f'avg_{operation}_time'
+                duration = metric_data.get("duration_seconds", 0)
+                perf_key = f"avg_{operation}_time"
 
                 # 确保 _temp_performance 字典存在
-                summary.setdefault('_temp_performance', {})
+                summary.setdefault("_temp_performance", {})
 
                 # 确保特定性能指标的列表存在
-                if perf_key not in summary['_temp_performance']:
-                    summary['_temp_performance'][perf_key] = []
+                if perf_key not in summary["_temp_performance"]:
+                    summary["_temp_performance"][perf_key] = []
 
-                summary['_temp_performance'][perf_key].append(duration)
+                summary["_temp_performance"][perf_key].append(duration)
 
-        elif metric_type == 'operation_failure':
-            operation = metric_data.get('operation')
-            if operation in summary['failures']:
-                summary['failures'][operation] += 1
+        elif metric_type == "operation_failure":
+            operation = metric_data.get("operation")
+            if operation in summary["failures"]:
+                summary["failures"][operation] += 1
 
-        elif metric_type == 'store_success':
-            data_size = metric_data.get('data_size', 0)
-            summary.setdefault('_temp_sizes', []).append(data_size)
+        elif metric_type == "store_success":
+            data_size = metric_data.get("data_size", 0)
+            summary.setdefault("_temp_sizes", []).append(data_size)
 
-        elif metric_type == 'health_check':
-            summary['health_checks']['total'] += 1
-            if not metric_data.get('is_healthy', True):
-                summary['health_checks']['failed'] += 1
+        elif metric_type == "health_check":
+            summary["health_checks"]["total"] += 1
+            if not metric_data.get("is_healthy", True):
+                summary["health_checks"]["failed"] += 1
 
-            response_time = metric_data.get('response_time_seconds', 0)
+            response_time = metric_data.get("response_time_seconds", 0)
             if response_time > 0:
-                summary.setdefault('_temp_response_times', []).append(response_time)
+                summary.setdefault("_temp_response_times", []).append(response_time)
 
     def _calculate_averages(self, summary: Dict) -> None:
         """计算平均值"""
         # 计算性能平均值
-        if '_temp_performance' in summary:
-            for key, times in summary['_temp_performance'].items():
+        if "_temp_performance" in summary:
+            for key, times in summary["_temp_performance"].items():
                 if times:
-                    summary['performance'][key] = round(sum(times) / len(times), 3)
-            del summary['_temp_performance']
+                    summary["performance"][key] = round(sum(times) / len(times), 3)
+            del summary["_temp_performance"]
 
         # 计算数据大小平均值
-        if '_temp_sizes' in summary:
-            sizes = summary['_temp_sizes']
+        if "_temp_sizes" in summary:
+            sizes = summary["_temp_sizes"]
             if sizes:
                 total_mb = sum(sizes) / (1024 * 1024)
                 avg_kb = (sum(sizes) / len(sizes)) / 1024
-                summary['data_volume']['total_stored_mb'] = round(total_mb, 2)
-                summary['data_volume']['avg_item_size_kb'] = round(avg_kb, 2)
-            del summary['_temp_sizes']
+                summary["data_volume"]["total_stored_mb"] = round(total_mb, 2)
+                summary["data_volume"]["avg_item_size_kb"] = round(avg_kb, 2)
+            del summary["_temp_sizes"]
 
         # 计算健康检查平均响应时间
-        if '_temp_response_times' in summary:
-            times = summary['_temp_response_times']
+        if "_temp_response_times" in summary:
+            times = summary["_temp_response_times"]
             if times:
-                summary['health_checks']['avg_response_time'] = round(sum(times) / len(times), 3)
-            del summary['_temp_response_times']
+                summary["health_checks"]["avg_response_time"] = round(
+                    sum(times) / len(times), 3
+                )
+            del summary["_temp_response_times"]
 
     def cleanup_metrics(self, older_than_days: int = 30) -> int:
         """
@@ -659,19 +714,22 @@ class XComStorageManager:
 
             # 查找所有指标键
             pattern = f"{self.metrics_key_prefix}*"
-            metric_keys = self.redis_client.keys(pattern)
+            metric_keys = self.redis_client.scan_iter(match=pattern, count=500)
 
             for key in metric_keys:
-                key_str = key.decode('utf-8')
+                key_str = key.decode("utf-8")
                 # 提取日期部分
-                date_part = key_str.split(':')[-1]
+                date_part = key_str.split(":")[-1]
                 try:
                     # 将字符串日期转换为时区感知的日期
                     key_date = get_taipei_now().replace(
                         year=int(date_part[:4]),
                         month=int(date_part[4:6]),
                         day=int(date_part[6:8]),
-                        hour=0, minute=0, second=0, microsecond=0
+                        hour=0,
+                        minute=0,
+                        second=0,
+                        microsecond=0,
                     )
                     if key_date < cutoff_date:
                         self.redis_client.delete(key)

@@ -73,6 +73,18 @@ class OrderIntent(BaseModel, TimestampMixin):
     risk_checked_at = Column(DateTime(timezone=True), nullable=True)
     submitted_at = Column(DateTime(timezone=True), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)
+    execution_dispatched_at = Column(DateTime(timezone=True), nullable=True)
+    execution_dispatch_claim_token = Column(String(36), nullable=True)
+    execution_dispatch_claimed_at = Column(DateTime(timezone=True), nullable=True)
+    execution_attempt_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    execution_claim_token = Column(String(36), nullable=True)
+    execution_claimed_at = Column(DateTime(timezone=True), nullable=True)
+    execution_lease_expires_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -109,7 +121,23 @@ class OrderIntent(BaseModel, TimestampMixin):
             "notional IS NULL OR notional > 0",
             name="ck_order_intents_notional_positive",
         ),
+        CheckConstraint(
+            "execution_attempt_count >= 0",
+            name="ck_order_intents_execution_attempt_count_nonnegative",
+        ),
         Index("ix_order_intents_user_status_time", "user_id", "status", "requested_at"),
+        Index(
+            "ix_order_intents_dispatch_pending",
+            "status",
+            "execution_dispatched_at",
+            "execution_dispatch_claimed_at",
+            "updated_at",
+        ),
+        Index(
+            "ix_order_intents_execution_lease",
+            "status",
+            "execution_lease_expires_at",
+        ),
         {"comment": "下單意圖表"},
     )
 
@@ -160,9 +188,7 @@ class BrokerOrder(BaseModel, TimestampMixin):
     raw_payload = Column(JSON, nullable=True)
 
     __table_args__ = (
-        UniqueConstraint(
-            "broker_order_ref", name="uq_broker_orders_broker_order_ref"
-        ),
+        UniqueConstraint("broker_order_ref", name="uq_broker_orders_broker_order_ref"),
         CheckConstraint(
             "status IN ('ACCEPTED', 'SUBMITTED', 'PARTIALLY_FILLED', 'FILLED', "
             "'CANCELLED', 'REJECTED', 'FAILED')",
@@ -241,9 +267,7 @@ class OrderExecution(BaseModel):
 
     __table_args__ = (
         CheckConstraint("side IN ('BUY', 'SELL')", name="ck_order_executions_side"),
-        CheckConstraint(
-            "quantity > 0", name="ck_order_executions_quantity_positive"
-        ),
+        CheckConstraint("quantity > 0", name="ck_order_executions_quantity_positive"),
         CheckConstraint("price > 0", name="ck_order_executions_price_positive"),
         Index("ix_order_executions_order_time", "broker_order_id", "executed_at"),
         {"comment": "broker 成交回報表"},

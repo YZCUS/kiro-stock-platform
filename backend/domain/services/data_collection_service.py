@@ -13,7 +13,11 @@ from domain.repositories.stock_repository_interface import IStockRepository
 from domain.repositories.daily_price_repository_interface import (
     IDailyPriceRepository,
 )
-from domain.repositories.price_data_source_interface import IPriceDataSource
+from domain.repositories.price_data_source_interface import (
+    DataUnavailableError,
+    IPriceDataSource,
+    RateLimitError,
+)
 from domain.repositories.market_data_bar_repository_interface import (
     IMarketDataBarRepository,
 )
@@ -180,6 +184,10 @@ class DataCollectionService:
                 status = DataCollectionStatus.NO_DATA
                 errors = ["未收集到數據"]
 
+        except RateLimitError as e:
+            records_count = 0
+            status = DataCollectionStatus.RATE_LIMITED
+            errors = [str(e)]
         except Exception as e:
             records_count = 0
             status = DataCollectionStatus.FAILED
@@ -403,9 +411,7 @@ class DataCollectionService:
                         "skipped": False,
                         "stale": True,
                         "data_points": collect_result.records_collected,
-                        "latest_date": latest_date.isoformat()
-                        if latest_date
-                        else None,
+                        "latest_date": latest_date.isoformat() if latest_date else None,
                         "message": collect_result.status.value,
                         "errors": collect_result.errors,
                         "warnings": collect_result.warnings,
@@ -424,9 +430,7 @@ class DataCollectionService:
                         "skipped": False,
                         "stale": True,
                         "data_points": 0,
-                        "latest_date": latest_date.isoformat()
-                        if latest_date
-                        else None,
+                        "latest_date": latest_date.isoformat() if latest_date else None,
                         "message": str(exc),
                         "errors": [str(exc)],
                     }
@@ -618,10 +622,16 @@ class DataCollectionService:
         if not latest_price:
             return True  # 沒有數據，需要收集
 
-        # 如果最新數據的日期早於結束日期，需要收集
-        # 例如：latest_price.date = 2025-10-15, end_date = 2025-10-16 → days_behind = 1 → 需要收集
-        days_behind = (end_date - latest_price.date).days
-        return days_behind >= 1
+        if latest_price.date < end_date:
+            return True
+
+        missing_dates = await self.price_repo.get_missing_dates(
+            db,
+            stock_id,
+            start_date,
+            end_date,
+        )
+        return bool(missing_dates)
 
     async def _perform_data_collection(
         self, symbol: str, start_date: date, end_date: date, market: str = "US"
@@ -629,10 +639,9 @@ class DataCollectionService:
         """執行實際的數據收集，包含重試邏輯"""
         import asyncio
         import logging
-        from domain.repositories.price_data_source_interface import DataUnavailableError
 
         logger = logging.getLogger(__name__)
-        max_retries = 3
+        max_retries = max(1, self.retry_count)
         base_delay = 2
 
         for attempt in range(max_retries):
@@ -661,27 +670,31 @@ class DataCollectionService:
                 )
                 return result_data
 
+            except DataUnavailableError:
+                return []
             except Exception as e:
                 error_msg = str(e)
                 logger.error(
                     f"Attempt {attempt + 1}/{max_retries} failed for {symbol}: {error_msg}"
                 )
 
-                if (
+                rate_limited = isinstance(e, RateLimitError) or (
                     "429" in error_msg
                     or "Too Many Requests" in error_msg
                     or "rate limit" in error_msg.lower()
-                ):
+                )
+                if rate_limited:
                     if attempt < max_retries - 1:
                         continue
-                    else:
-                        logger.error(
-                            f"Rate limit exceeded for {symbol} after {max_retries} attempts"
-                        )
-                else:
-                    break
+                    logger.error(
+                        f"Rate limit exceeded for {symbol} after {max_retries} attempts"
+                    )
+                    if isinstance(e, RateLimitError):
+                        raise
+                    raise RateLimitError(error_msg) from e
+                raise
 
-        return []
+        raise RuntimeError(f"Data collection retry loop exhausted for {symbol}")
 
     async def _should_throttle(self) -> bool:
         """檢查是否應該進行節流"""
@@ -766,9 +779,9 @@ class DataCollectionService:
                 latest_collection = updated_at
 
         return {
-            "latest_collection": latest_collection.isoformat()
-            if latest_collection
-            else None,
+            "latest_collection": (
+                latest_collection.isoformat() if latest_collection else None
+            ),
             "coverage_percentage": round(
                 (with_data_count / len(active_stocks)) * 100,
                 2,

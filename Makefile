@@ -1,6 +1,6 @@
 # 股票分析平台 Makefile
 
-.PHONY: help build up down logs clean test test-coverage backend-coverage frontend-coverage e2e db-init db-migrate db-reset db-seed db-test
+.PHONY: help build up down logs clean test airflow-test qlib-test test-coverage backend-coverage frontend-coverage e2e db-init db-migrate db-reset db-seed db-test prod-deploy db-backup db-restore
 
 # 預設目標
 help:
@@ -29,19 +29,19 @@ help:
 
 # Docker 操作
 build:
-	docker-compose build
+	docker compose -p kiro-stock-platform build
 
 up:
-	docker-compose up -d
+	docker compose -p kiro-stock-platform up -d
 
 down:
-	docker-compose down
+	docker compose -p kiro-stock-platform down
 
 logs:
-	docker-compose logs -f
+	docker compose -p kiro-stock-platform logs -f
 
 clean:
-	docker-compose down -v --rmi all --remove-orphans
+	docker compose -p kiro-stock-platform down -v --rmi all --remove-orphans
 	docker system prune -f
 
 # 資料庫操作
@@ -63,7 +63,18 @@ db-test:
 # 開發操作
 test:
 	cd backend && python -m pytest tests/ -v
+	$(MAKE) airflow-test
+	$(MAKE) qlib-test
 	cd frontend && npm test
+
+airflow-test:
+	AIRFLOW_HOME=/tmp/kiro-airflow-test PYTHONPATH=airflow \
+		python -m pytest --import-mode=importlib airflow/tests/unit -q
+
+qlib-test:
+	PYTHONPATH=qlib_service QLIB_ARTIFACT_ROOT=/tmp/kiro-qlib-test \
+		QLIB_PROVIDER_URI=/tmp/kiro-qlib-test/provider \
+		python -m pytest qlib_service/tests -q
 
 backend-coverage:
 	PYTHONPATH=backend backend/.venv/bin/python -m pytest backend/tests \
@@ -97,13 +108,18 @@ dev-setup: build up db-init db-seed
 
 # 生產環境部署
 prod-deploy:
-	docker-compose -f docker-compose.prod.yml up -d
+	@test -s .env.images || (echo "Missing immutable .env.images" >&2; exit 1)
+	@test -s nginx/ssl/fullchain.pem || (echo "Missing TLS fullchain" >&2; exit 1)
+	@test -s nginx/ssl/privkey.pem || (echo "Missing TLS private key" >&2; exit 1)
+	python3 scripts/validate-production-env.py .env.production
+	python3 scripts/validate-production-env.py --images .env.images
+	docker compose -p kiro-stock-platform --env-file .env.production --env-file .env.images -f docker-compose.prod.yml pull backend qlib-prediction-service airflow-webserver frontend
+	docker compose -p kiro-stock-platform --env-file .env.production --env-file .env.images -f docker-compose.prod.yml up -d --remove-orphans
 
 # 備份資料庫
 db-backup:
-	docker-compose exec postgres pg_dump -U postgres stock_analysis > backup_$(shell date +%Y%m%d_%H%M%S).sql
+	PROJECT_DIR=$(CURDIR) bash scripts/backup.sh
 
 # 還原資料庫
 db-restore:
-	@read -p "請輸入備份檔案名稱: " backup_file; \
-	docker-compose exec -T postgres psql -U postgres stock_analysis < $$backup_file
+	PROJECT_DIR=$(CURDIR) bash scripts/restore.sh

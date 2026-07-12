@@ -7,15 +7,37 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 import socket
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import redis
 
-from domain.execution import IOrderExecutionQueue, OrderExecutionCommand
+from domain.execution import (
+    IOrderExecutionQueue,
+    OrderExecutionCommand,
+    OrderQueueFailureDisposition,
+)
 
 
 class RedisStreamOrderExecutionQueue(IOrderExecutionQueue):
     """Durable Redis Streams adapter for order execution commands."""
+
+    _ACK_AND_DELETE_SCRIPT = """
+    -- order_execution_ack_and_delete
+    local acknowledged = redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+    local deleted = redis.call('XDEL', KEYS[1], ARGV[2])
+    return {acknowledged, deleted}
+    """
+    _REPLACE_AND_ACK_SCRIPT = """
+    -- order_execution_replace_and_ack
+    local fields = {}
+    for index = 3, #ARGV do
+        fields[#fields + 1] = ARGV[index]
+    end
+    redis.call('XADD', KEYS[1], '*', unpack(fields))
+    redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+    redis.call('XDEL', KEYS[1], ARGV[2])
+    return 1
+    """
 
     def __init__(
         self,
@@ -24,6 +46,7 @@ class RedisStreamOrderExecutionQueue(IOrderExecutionQueue):
         consumer_group: str = "order_execution_workers",
         consumer_name: Optional[str] = None,
         dead_letter_stream: str = "order_execution_dead",
+        dead_letter_maxlen: int = 10000,
         max_attempts: int = 3,
         pending_idle_ms: int = 60000,
     ) -> None:
@@ -35,6 +58,7 @@ class RedisStreamOrderExecutionQueue(IOrderExecutionQueue):
         self.consumer_group = consumer_group
         self.consumer_name = consumer_name or socket.gethostname()
         self.dead_letter_stream = dead_letter_stream
+        self.dead_letter_maxlen = max(1, dead_letter_maxlen)
         self.max_attempts = max_attempts
         self.pending_idle_ms = pending_idle_ms
         self._group_ready = False
@@ -121,15 +145,17 @@ class RedisStreamOrderExecutionQueue(IOrderExecutionQueue):
             return None
 
         await asyncio.to_thread(
-            self.redis_client.xack,
+            self.redis_client.eval,
+            self._ACK_AND_DELETE_SCRIPT,
+            1,
             self.stream_name,
             self.consumer_group,
             message_id,
         )
 
-    async def fail(self, command: OrderExecutionCommand, error: Exception) -> None:
-        await self.ack(command)
-
+    async def fail(
+        self, command: OrderExecutionCommand, error: Exception
+    ) -> OrderQueueFailureDisposition:
         failed_at = datetime.now(timezone.utc).isoformat()
         retry_metadata = {
             key: value
@@ -159,8 +185,10 @@ class RedisStreamOrderExecutionQueue(IOrderExecutionQueue):
                 self.redis_client.xadd,
                 self.dead_letter_stream,
                 dead_fields,
+                maxlen=self.dead_letter_maxlen,
+                approximate=True,
             )
-            return None
+            return OrderQueueFailureDisposition.DEAD_LETTERED
 
         next_command = OrderExecutionCommand(
             order_intent_id=command.order_intent_id,
@@ -169,7 +197,59 @@ class RedisStreamOrderExecutionQueue(IOrderExecutionQueue):
             attempt=command.attempt + 1,
             metadata=retry_metadata,
         )
-        await self.enqueue(next_command)
+        await self._replace_and_ack(command, next_command)
+        return OrderQueueFailureDisposition.REQUEUED
+
+    async def _replace_and_ack(
+        self,
+        current: OrderExecutionCommand,
+        replacement: OrderExecutionCommand,
+    ) -> None:
+        message_id = current.metadata.get("_redis_message_id")
+        if not message_id:
+            await self.enqueue(replacement)
+            return
+
+        flattened_fields = []
+        for key, value in replacement.to_stream_fields().items():
+            flattened_fields.extend((key, value))
+        await asyncio.to_thread(
+            self.redis_client.eval,
+            self._REPLACE_AND_ACK_SCRIPT,
+            1,
+            self.stream_name,
+            self.consumer_group,
+            message_id,
+            *flattened_fields,
+        )
+
+    async def quarantine(
+        self, command: OrderExecutionCommand, error: Exception
+    ) -> None:
+        metadata = {
+            key: value
+            for key, value in command.metadata.items()
+            if not str(key).startswith("_redis_") and key != "_queue_backend"
+        }
+        metadata.update(
+            {
+                "reconciliation_required": True,
+                "reconciliation_error": str(error),
+                "reconciliation_requested_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        broker_order_ref = getattr(error, "broker_order_ref", None)
+        if broker_order_ref:
+            metadata["broker_order_ref"] = str(broker_order_ref)
+        replacement = OrderExecutionCommand(
+            order_intent_id=command.order_intent_id,
+            user_id=command.user_id,
+            idempotency_key=command.idempotency_key,
+            attempt=command.attempt,
+            requested_at=command.requested_at,
+            metadata=metadata,
+        )
+        await self._replace_and_ack(command, replacement)
 
     async def _ensure_consumer_group(self) -> None:
         if self._group_ready:

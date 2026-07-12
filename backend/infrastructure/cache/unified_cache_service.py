@@ -3,6 +3,7 @@
 整合所有快取功能，提供統一的快取抽象
 """
 
+import asyncio
 import json
 import redis
 from typing import Optional, List, Dict, Any, Union
@@ -57,7 +58,7 @@ class RedisCacheService(ICacheService):
             return None
 
         try:
-            data = self.redis_client.get(key)
+            data = await asyncio.to_thread(self.redis_client.get, key)
             if data:
                 self.hit_count += 1
                 return json.loads(data)
@@ -76,8 +77,11 @@ class RedisCacheService(ICacheService):
 
         try:
             ttl = ttl or self.default_ttl
-            success = self.redis_client.setex(
-                key, ttl, json.dumps(value, ensure_ascii=False, default=str)
+            success = await asyncio.to_thread(
+                self.redis_client.setex,
+                key,
+                ttl,
+                json.dumps(value, ensure_ascii=False, default=str),
             )
             if success:
                 logger.debug(f"成功設置快取: {key}")
@@ -92,7 +96,7 @@ class RedisCacheService(ICacheService):
             return False
 
         try:
-            result = self.redis_client.delete(key)
+            result = await asyncio.to_thread(self.redis_client.unlink, key)
             return bool(result)
         except Exception as e:
             logger.error(f"快取刪除失敗 {key}: {e}")
@@ -112,10 +116,20 @@ class RedisCacheService(ICacheService):
             return 0
 
         try:
-            keys = self.redis_client.keys(pattern)
-            if keys:
-                return self.redis_client.delete(*keys)
-            return 0
+
+            def scan_and_unlink() -> int:
+                cursor = 0
+                deleted = 0
+                while True:
+                    cursor, keys = self.redis_client.scan(
+                        cursor=cursor, match=pattern, count=500
+                    )
+                    if keys:
+                        deleted += int(self.redis_client.unlink(*keys))
+                    if cursor == 0:
+                        return deleted
+
+            return await asyncio.to_thread(scan_and_unlink)
         except Exception as e:
             logger.error(f"清除快取模式失敗 {pattern}: {e}")
             return 0

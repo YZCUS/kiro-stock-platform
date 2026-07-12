@@ -19,7 +19,7 @@ from api.schemas.watchlist import (
     WatchlistResponse,
     WatchlistStockDetail,
 )
-from domain.market_data.daily_prices import fetch_latest_daily_price
+from domain.market_data.daily_prices import fetch_latest_daily_price_rows_by_stock
 from domain.models.stock import Stock
 from domain.models.user import User
 from domain.models.user_stock_list import UserStockList, UserStockListItem
@@ -115,15 +115,27 @@ async def get_my_watchlist_detailed(
         .order_by(UserStockListItem.sort_order, UserStockListItem.created_at)
     )
 
+    item_rows = result.all()
+    latest_prices = await fetch_latest_daily_price_rows_by_stock(
+        db,
+        [stock.id for _, stock in item_rows],
+        rows_per_stock=1,
+    )
+
     response = []
-    for item, stock in result.all():
-        latest = await fetch_latest_daily_price(db, stock.id)
+    for item, stock in item_rows:
+        stock_prices = latest_prices.get(stock.id, [])
+        latest = stock_prices[0] if stock_prices else None
         latest_price = None
         if latest:
             latest_price = {
-                "close": float(latest.close_price) if latest.close_price else None,
-                "date": latest.date.isoformat() if latest.date else None,
-                "volume": latest.volume,
+                "close": (
+                    float(latest["close_price"])
+                    if latest["close_price"] is not None
+                    else None
+                ),
+                "date": latest["date"].isoformat() if latest["date"] else None,
+                "volume": latest["volume"],
             }
 
         response.append(
@@ -209,7 +221,10 @@ async def check_in_watchlist(
             UserStockListItem.stock_id == stock_id,
         )
     )
-    return {"in_watchlist": result.scalar_one_or_none() is not None, "stock_id": stock_id}
+    return {
+        "in_watchlist": result.scalar_one_or_none() is not None,
+        "stock_id": stock_id,
+    }
 
 
 @router.get("/popular", response_model=list[PopularStock])

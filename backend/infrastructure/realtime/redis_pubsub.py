@@ -20,6 +20,7 @@ class RedisWebSocketBroadcaster:
         self.redis_pool = None
         self.subscriber = None
         self.publisher = None
+        self._pubsub = None
         self.subscriptions: Set[str] = set()
         self.is_connected = False
 
@@ -55,6 +56,9 @@ class RedisWebSocketBroadcaster:
     async def disconnect(self):
         """斷開Redis連接"""
         try:
+            if self._pubsub:
+                await self._pubsub.aclose()
+                self._pubsub = None
             if self.publisher:
                 await self.publisher.close()
             if self.subscriber:
@@ -120,20 +124,29 @@ class RedisWebSocketBroadcaster:
             logger.warning("Redis 未連接，無法訂閱頻道")
             return
 
+        pubsub = None
         try:
             # 建立PubSub實例
             pubsub = self.subscriber.pubsub()
+            self._pubsub = pubsub
 
-            # 訂閱頻道
-            for channel in channels:
-                await pubsub.subscribe(channel)
-                self.subscriptions.add(channel)
+            patterns = [
+                channel for channel in channels if any(c in channel for c in "*?[")
+            ]
+            direct_channels = [
+                channel for channel in channels if not any(c in channel for c in "*?[")
+            ]
+            if direct_channels:
+                await pubsub.subscribe(*direct_channels)
+            if patterns:
+                await pubsub.psubscribe(*patterns)
+            self.subscriptions.update(channels)
 
             logger.info(f"已訂閱頻道: {channels}")
 
             # 處理消息
             async for message in pubsub.listen():
-                if message["type"] == "message":
+                if message["type"] in {"message", "pmessage"}:
                     try:
                         # 解析消息
                         channel = message["channel"]
@@ -149,6 +162,11 @@ class RedisWebSocketBroadcaster:
 
         except Exception as e:
             logger.error(f"訂閱頻道失敗: {e}")
+        finally:
+            if pubsub is not None and self._pubsub is pubsub:
+                await pubsub.aclose()
+                self._pubsub = None
+                self.subscriptions.difference_update(channels)
 
     async def unsubscribe_from_channels(self, channels: List[str]):
         """取消訂閱頻道"""
@@ -156,10 +174,21 @@ class RedisWebSocketBroadcaster:
             return
 
         try:
-            pubsub = self.subscriber.pubsub()
-            for channel in channels:
-                await pubsub.unsubscribe(channel)
-                self.subscriptions.discard(channel)
+            pubsub = self._pubsub
+            if pubsub is None:
+                return
+
+            patterns = [
+                channel for channel in channels if any(c in channel for c in "*?[")
+            ]
+            direct_channels = [
+                channel for channel in channels if not any(c in channel for c in "*?[")
+            ]
+            if direct_channels:
+                await pubsub.unsubscribe(*direct_channels)
+            if patterns:
+                await pubsub.punsubscribe(*patterns)
+            self.subscriptions.difference_update(channels)
 
             logger.info(f"已取消訂閱頻道: {channels}")
 

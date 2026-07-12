@@ -22,7 +22,7 @@ from plugins.workflows.storage_monitoring import (
 dag_config = {
     'dag_id': 'storage_monitoring',
     'description': '外部存儲監控和維護工作流程',
-    'schedule_interval': '*/30 * * * *',  # 每30分鐘運行一次
+    'schedule': '*/30 * * * *',  # 每30分鐘運行一次
     'max_active_runs': 1,
     'catchup': False,
     'tags': ['monitoring', 'storage', 'maintenance'],

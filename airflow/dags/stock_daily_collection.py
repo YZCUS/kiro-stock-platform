@@ -4,7 +4,9 @@
 執行時間：每交易日 16:00 (台北時間，台股收盤後)
 功能：通過API調用Backend服務收集台股數據
 """
+
 from datetime import datetime, timedelta
+import pendulum
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator, BranchPythonOperator
@@ -36,24 +38,24 @@ from plugins.workflows.stock_collection import (
 
 # DAG配置
 dag_config = {
-    'dag_id': 'daily_stock_collection_tw_api',
-    'description': '每日台股數據收集工作流程 - API版本',
-    'schedule_interval': '0 16 * * 1-5',  # 週一到週五下午4點
-    'max_active_runs': 1,
-    'catchup': False,  # 移至 DAG 層級，避免補跑歷史排程
-    'tags': ['stock-data', 'daily', 'api', 'tw-market'],
-    'default_args': {
-        'owner': 'stock-analysis-platform',
-        'depends_on_past': False,
-        'start_date': datetime(2024, 1, 1),
-        'email_on_failure': True,
-        'email_on_retry': False,
-        'retries': 2,
-        'retry_delay': timedelta(minutes=5),
-        'on_failure_callback': lambda context: handle_task_failure(context),
-        'on_success_callback': None,
-        'on_retry_callback': lambda context: handle_task_retry(context)
-    }
+    "dag_id": "daily_stock_collection_tw_api",
+    "description": "每日台股數據收集工作流程 - API版本",
+    "schedule": "0 16 * * 1-5",  # 週一到週五下午4點
+    "max_active_runs": 1,
+    "catchup": False,  # 移至 DAG 層級，避免補跑歷史排程
+    "tags": ["stock-data", "daily", "api", "tw-market"],
+    "default_args": {
+        "owner": "stock-analysis-platform",
+        "depends_on_past": False,
+        "start_date": pendulum.datetime(2024, 1, 1, tz="Asia/Taipei"),
+        "email_on_failure": True,
+        "email_on_retry": False,
+        "retries": 2,
+        "retry_delay": timedelta(minutes=5),
+        "on_failure_callback": lambda context: handle_task_failure(context),
+        "on_success_callback": None,
+        "on_retry_callback": lambda context: handle_task_retry(context),
+    },
 }
 
 # 建立 DAG
@@ -63,106 +65,91 @@ dag = DAG(**dag_config)
 
 # 檢查台股交易日（使用分支決策）
 check_trading_day_task = BranchPythonOperator(
-    task_id='check_trading_day_tw',
-    python_callable=check_trading_day_tw,
-    dag=dag
+    task_id="check_trading_day_tw", python_callable=check_trading_day_tw, dag=dag
 )
 
 # 非交易日跳過任務
-skip_collection_task = EmptyOperator(
-    task_id='skip_collection',
-    dag=dag
-)
+skip_collection_task = EmptyOperator(task_id="skip_collection", dag=dag)
 
 # 檢查市場狀態
 check_market_status_task = PythonOperator(
-    task_id='check_market_status',
-    python_callable=check_market_status,
-    dag=dag
+    task_id="check_market_status", python_callable=check_market_status, dag=dag
 )
 
 # 分支決策：選擇收集策略
 branch_task = BranchPythonOperator(
-    task_id='decide_collection_strategy',
+    task_id="decide_collection_strategy",
     python_callable=decide_collection_strategy,
-    dag=dag
+    dag=dag,
 )
 
 # 主要收集任務 - 台股
 try_main_collection_task = PythonOperator(
-    task_id='try_main_collection',
+    task_id="try_main_collection",
     python_callable=try_main_collection_workflow_tw,
-    dag=dag
+    dag=dag,
 )
 
 # 根據主要收集結果決定下一步
 next_step_branch = BranchPythonOperator(
-    task_id='decide_next_step',
+    task_id="decide_next_step",
     python_callable=decide_next_step,
-    dag=dag
+    trigger_rule=TriggerRule.ALL_DONE,
+    dag=dag,
 )
 
 # 成功標記任務（當主要流程成功時）
-collection_success_task = EmptyOperator(
-    task_id='collection_success',
-    dag=dag
-)
+collection_success_task = EmptyOperator(task_id="collection_success", dag=dag)
 
 # 備援收集任務 - 台股
 fallback_collection_task = PythonOperator(
-    task_id='execute_fallback_collection',
+    task_id="execute_fallback_collection",
     python_callable=execute_fallback_collection_tw,
-    dag=dag
+    dag=dag,
 )
 
 # 聚合任務 - 匯合主要成功路徑和備援成功路徑
 collection_complete_task = EmptyOperator(
-    task_id='collection_complete',
-    trigger_rule=TriggerRule.NONE_FAILED_OR_SKIPPED,  # 只要執行的路徑成功即可
-    dag=dag
+    task_id="collection_complete",
+    trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
+    dag=dag,
 )
 
 # 本地價格快取預抓
 prefetch_price_cache_task = PythonOperator(
-    task_id='prefetch_price_cache',
-    python_callable=prefetch_price_cache_tw,
-    dag=dag
+    task_id="prefetch_price_cache", python_callable=prefetch_price_cache_tw, dag=dag
 )
 
 # 多 timeframe K 線管線
 market_data_pipeline_task = PythonOperator(
-    task_id='run_market_data_pipeline',
+    task_id="run_market_data_pipeline",
     python_callable=run_market_data_pipeline_tw,
-    dag=dag
+    dag=dag,
 )
 
 # 數據品質驗證
 validate_data_task = PythonOperator(
-    task_id='validate_data_quality',
-    python_callable=validate_data_quality,
-    dag=dag
+    task_id="validate_data_quality", python_callable=validate_data_quality, dag=dag
 )
 
 # 驗證任務依賴關係
 verify_dependencies_task = PythonOperator(
-    task_id='verify_dependencies',
-    python_callable=verify_task_dependencies,
-    dag=dag
+    task_id="verify_dependencies", python_callable=verify_task_dependencies, dag=dag
 )
 
 # 發送完成通知
 send_notification_task = PythonOperator(
-    task_id='send_completion_notification',
+    task_id="send_completion_notification",
     python_callable=send_completion_notification,
-    dag=dag
+    dag=dag,
 )
 
 # 清理外部存儲
 cleanup_storage_task = PythonOperator(
-    task_id='cleanup_external_storage',
+    task_id="cleanup_external_storage",
     python_callable=cleanup_external_storage,
     trigger_rule=TriggerRule.ALL_DONE,  # 無論成功失敗都執行清理
-    dag=dag
+    dag=dag,
 )
 
 # ========== 任務依賴關係 ==========

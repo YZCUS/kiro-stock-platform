@@ -162,6 +162,7 @@ class StrategySignalService:
                 reason=trading_signal.reason,
                 extra_data=trading_signal.extra_data,
                 status="active",
+                signal_scope="user",
             )
             db.add(signal)
             signals_to_save.append(signal)
@@ -173,6 +174,145 @@ class StrategySignalService:
             await db.refresh(signal)
 
         return signals_to_save
+
+    async def generate_canonical_signals(
+        self,
+        db: AsyncSession,
+        market: str = "US",
+    ) -> Dict[str, Any]:
+        """Generate user-independent signals with each strategy's defaults."""
+        stock_result = await db.execute(
+            select(Stock)
+            .filter(Stock.market == market.upper(), Stock.is_active == True)
+            .order_by(Stock.id)
+        )
+        stocks = list(stock_result.scalars().all())
+        if not stocks:
+            return {
+                "processed_strategies": 0,
+                "generated_signals": 0,
+                "errors": [],
+            }
+
+        stock_ids = [stock.id for stock in stocks]
+        candidates: list[tuple[TradingSignal, str, Dict[str, Any]]] = []
+        errors = []
+        processed_strategies = 0
+
+        for strategy in strategy_registry.get_all_strategies():
+            strategy_type = strategy.strategy_type.value
+            params = dict(strategy.get_default_params() or {})
+            try:
+                try:
+                    trading_signals = await strategy.batch_analyze(
+                        stock_ids=stock_ids,
+                        db=db,
+                        params=params,
+                    )
+                except NotImplementedError:
+                    trading_signals = []
+                    for stock in stocks:
+                        signal = await strategy.analyze(
+                            stock_id=stock.id,
+                            db=db,
+                            params=params,
+                        )
+                        if signal:
+                            trading_signals.append(signal)
+
+                for trading_signal in trading_signals:
+                    horizon = str(
+                        (trading_signal.extra_data or {}).get("horizon")
+                        or params.get("horizon")
+                        or self.default_strategy_horizons.get(
+                            strategy_type,
+                            "20d",
+                        )
+                    )
+                    candidates.append((trading_signal, horizon, params))
+                processed_strategies += 1
+            except Exception as exc:
+                errors.append(
+                    {
+                        "strategy_type": strategy_type,
+                        "error": str(exc),
+                    }
+                )
+
+        existing_keys = set()
+        if candidates:
+            candidate_stock_ids = {
+                trading_signal.stock_id for trading_signal, _, _ in candidates
+            }
+            candidate_strategy_types = {
+                trading_signal.strategy_type.value
+                for trading_signal, _, _ in candidates
+            }
+            candidate_dates = [
+                trading_signal.signal_date for trading_signal, _, _ in candidates
+            ]
+            existing_result = await db.execute(
+                select(StrategySignal).filter(
+                    StrategySignal.signal_scope == "canonical",
+                    StrategySignal.stock_id.in_(candidate_stock_ids),
+                    StrategySignal.strategy_type.in_(candidate_strategy_types),
+                    StrategySignal.signal_date >= min(candidate_dates),
+                    StrategySignal.signal_date <= max(candidate_dates),
+                )
+            )
+            existing_keys = {
+                (
+                    signal.stock_id,
+                    signal.strategy_type,
+                    signal.signal_horizon,
+                    signal.signal_date,
+                )
+                for signal in existing_result.scalars().all()
+            }
+
+        generated_signals = 0
+        for trading_signal, horizon, params in candidates:
+            strategy_type = trading_signal.strategy_type.value
+            key = (
+                trading_signal.stock_id,
+                strategy_type,
+                horizon,
+                trading_signal.signal_date,
+            )
+            if key in existing_keys:
+                continue
+
+            extra_data = dict(trading_signal.extra_data or {})
+            extra_data["canonical_parameters"] = params
+            db.add(
+                StrategySignal(
+                    user_id=None,
+                    stock_id=trading_signal.stock_id,
+                    strategy_type=strategy_type,
+                    signal_horizon=horizon,
+                    direction=trading_signal.direction.value,
+                    confidence=float(trading_signal.confidence),
+                    entry_min=float(trading_signal.entry_zone[0]),
+                    entry_max=float(trading_signal.entry_zone[1]),
+                    stop_loss=float(trading_signal.stop_loss),
+                    take_profit_targets=trading_signal.take_profit,
+                    signal_date=trading_signal.signal_date,
+                    valid_until=trading_signal.valid_until,
+                    reason=trading_signal.reason,
+                    extra_data=extra_data,
+                    status="active",
+                    signal_scope="canonical",
+                )
+            )
+            existing_keys.add(key)
+            generated_signals += 1
+
+        await db.commit()
+        return {
+            "processed_strategies": processed_strategies,
+            "generated_signals": generated_signals,
+            "errors": errors,
+        }
 
     def _resolve_signal_horizon(
         self,
@@ -625,11 +765,12 @@ class StrategySignalService:
     async def _check_duplicate_signal(
         self,
         db: AsyncSession,
-        user_id: uuid.UUID,
+        user_id: Optional[uuid.UUID],
         stock_id: int,
         strategy_type: str,
         signal_horizon: str,
         signal_date: date,
+        signal_scope: str = "user",
     ) -> Optional[StrategySignal]:
         """
         檢查是否存在重複的活躍信號
@@ -647,6 +788,7 @@ class StrategySignalService:
         result = await db.execute(
             select(StrategySignal).filter(
                 StrategySignal.user_id == user_id,
+                StrategySignal.signal_scope == signal_scope,
                 StrategySignal.stock_id == stock_id,
                 StrategySignal.strategy_type == strategy_type,
                 StrategySignal.signal_horizon == signal_horizon,

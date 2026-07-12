@@ -8,11 +8,13 @@ weights, and current composite stock scores.
 
 from datetime import datetime, timedelta
 import os
+import pendulum
 
 import requests
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
+from plugins.common.date_utils import context_interval_date
 
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://backend:8000/api/v1")
 INTERNAL_API_TOKEN = os.getenv(
@@ -25,16 +27,18 @@ DEFAULT_HORIZONS = "1d,5d,20d,60d"
 def run_strategy_evaluation(**context):
     horizons = [
         horizon.strip()
-        for horizon in os.getenv("STRATEGY_EVALUATION_HORIZONS", DEFAULT_HORIZONS).split(",")
+        for horizon in os.getenv(
+            "STRATEGY_EVALUATION_HORIZONS", DEFAULT_HORIZONS
+        ).split(",")
         if horizon.strip()
     ]
-    logical_date = context["logical_date"].date()
-    start_date = logical_date - timedelta(days=365 * 3)
+    evaluation_date = context_interval_date(context, "America/New_York")
+    start_date = evaluation_date - timedelta(days=365 * 3)
     params = [
         ("market", "US"),
         ("universe", "active_us"),
         ("start_date", start_date.isoformat()),
-        ("end_date", logical_date.isoformat()),
+        ("end_date", evaluation_date.isoformat()),
         *[("horizons", horizon) for horizon in horizons],
     ]
     response = requests.post(
@@ -50,14 +54,14 @@ def run_strategy_evaluation(**context):
 dag = DAG(
     dag_id="strategy_weekly_evaluation",
     description="Run strategy research metrics and publish bounded reliability weights",
-    schedule_interval="0 6 * * 6",
+    schedule="0 6 * * 6",
     max_active_runs=1,
     catchup=False,
     tags=["strategy", "research", "backtest", "weights"],
     default_args={
         "owner": "stock-analysis-platform",
         "depends_on_past": False,
-        "start_date": datetime(2024, 1, 1),
+        "start_date": pendulum.datetime(2024, 1, 1, tz="UTC"),
         "email_on_failure": True,
         "email_on_retry": False,
         "retries": 0,

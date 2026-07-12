@@ -18,6 +18,10 @@ from domain.services.data_collection_service import (
     DataCollectionStatus,
 )
 from domain.services.stock_service import StockService
+from core.internal_auth import (
+    require_active_user_or_internal_token,
+    require_internal_token,
+)
 from api.schemas.stocks import (
     DataCollectionRequest,
     DataCollectionResponse,
@@ -28,7 +32,11 @@ from api.schemas.stocks import (
 router = APIRouter()
 
 
-@router.post("/{stock_id}/refresh", response_model=DataCollectionResponse)
+@router.post(
+    "/{stock_id}/refresh",
+    response_model=DataCollectionResponse,
+    dependencies=[Depends(require_active_user_or_internal_token)],
+)
 async def refresh_stock_data(
     stock_id: int,
     days: int = 30,
@@ -73,7 +81,11 @@ async def refresh_stock_data(
         raise HTTPException(status_code=500, detail=f"數據刷新失敗: {str(e)}")
 
 
-@router.post("/collect", response_model=DataCollectionResponse)
+@router.post(
+    "/collect",
+    response_model=DataCollectionResponse,
+    dependencies=[Depends(require_internal_token)],
+)
 async def collect_stock_data(
     request: DataCollectionRequest,
     db: AsyncSession = Depends(get_database_session),
@@ -110,7 +122,11 @@ async def collect_stock_data(
         raise HTTPException(status_code=500, detail=f"數據收集失敗: {str(e)}")
 
 
-@router.post("/collect-all", response_model=Dict[str, Any])
+@router.post(
+    "/collect-all",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_internal_token)],
+)
 async def collect_all_stocks_data(
     days: int = 7,
     market: str | None = Query(None, pattern="^(TW|US)$"),
@@ -142,7 +158,11 @@ async def collect_all_stocks_data(
         raise HTTPException(status_code=500, detail=f"批次收集失敗: {str(e)}")
 
 
-@router.post("/collect-batch", response_model=Dict[str, Any])
+@router.post(
+    "/collect-batch",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_internal_token)],
+)
 async def collect_batch_stocks_data(
     request: BatchCollectionRequest,
     db: AsyncSession = Depends(get_database_session),
@@ -190,7 +210,11 @@ async def collect_batch_stocks_data(
         raise HTTPException(status_code=500, detail=f"批次收集失敗: {str(e)}")
 
 
-@router.post("/prefetch-prices", response_model=Dict[str, Any])
+@router.post(
+    "/prefetch-prices",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_active_user_or_internal_token)],
+)
 async def prefetch_stock_price_cache(
     request: DailyPrefetchRequest = Body(...),
     db: AsyncSession = Depends(get_database_session),
@@ -219,7 +243,11 @@ async def prefetch_stock_price_cache(
         raise HTTPException(status_code=500, detail=f"價格快取預抓失敗: {str(e)}")
 
 
-@router.post("/{stock_id}/backfill-full", response_model=Dict[str, Any])
+@router.post(
+    "/{stock_id}/backfill-full",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_internal_token)],
+)
 async def backfill_full_history(
     stock_id: int,
     period: str = "1y",
@@ -292,7 +320,11 @@ async def backfill_full_history(
         raise HTTPException(status_code=500, detail=f"歷史資料補齊失敗: {str(e)}")
 
 
-@router.post("/backfill-missing", response_model=Dict[str, Any])
+@router.post(
+    "/backfill-stale",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_internal_token)],
+)
 async def backfill_missing_data(
     days: int = 365,
     market: str = None,

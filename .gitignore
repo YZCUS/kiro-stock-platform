@@ -53,6 +53,10 @@ venv.bak/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
+.env.images
+.env.images.previous
+.env.images.candidate
 
 # Logs
 logs/
@@ -106,10 +110,12 @@ build/
 dist/
 *.tgz
 *.tar.gz
+deploy.tar.gz
 
 # Docker
 .dockerignore
 docker-compose.override.yml
+nginx/ssl/*.pem
 
 # PostgreSQL
 *.sql

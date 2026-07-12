@@ -55,7 +55,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
 
       - name: Install system dependencies
         run: |
@@ -66,13 +68,11 @@ jobs:
         run: |
           cd backend
           pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-asyncio
+          pip install -r requirements-dev.txt
 
       - name: Run linting (flake8)
         run: |
           cd backend
-          pip install flake8
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
@@ -80,7 +80,6 @@ jobs:
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
-          pip install black
           if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
             BASE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
           fi
@@ -90,13 +89,31 @@ jobs:
             exit 0
           fi
 
-          CHANGED_FILES="$(git diff --name-only "$BASE_SHA" HEAD -- 'backend/**/*.py')"
+          CHANGED_FILES="$(git diff --name-only --diff-filter=ACM "$BASE_SHA" HEAD -- 'backend/**/*.py')"
           if [ -z "$CHANGED_FILES" ]; then
             echo "No changed backend Python files to check."
             exit 0
           fi
 
           echo "$CHANGED_FILES" | xargs black --check
+
+      - name: Run PostgreSQL migrations
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stock_analysis_test
+          REDIS_URL: redis://localhost:6379/0
+          SECURITY_SECRET_KEY: test-secret-key-for-ci-only
+          APP_ENVIRONMENT: test
+        run: |
+          cd backend
+          heads="$(alembic heads)"
+          printf '%s\n' "$heads"
+          head_count="$(printf '%s\n' "$heads" | awk '/\(head\)$/ { count++ } END { print count + 0 }')"
+          if [ "$head_count" -ne 1 ]; then
+            echo "Expected exactly one Alembic head, found $head_count." >&2
+            exit 1
+          fi
+          alembic upgrade head
+          alembic current | grep -q '(head)'
 
       - name: Run tests with coverage
         env:
@@ -115,6 +132,64 @@ jobs:
           flags: backend
           name: backend-coverage
           fail_ci_if_error: false
+
+  airflow-test:
+    name: Airflow DAG and Operator Tests
+    runs-on: ubuntu-latest
+    env:
+      AIRFLOW_HOME: /tmp/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      PYTHONPATH: ${{ github.workspace }}/airflow
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            airflow/requirements.txt
+            airflow/requirements-dev.txt
+
+      - name: Install Airflow test runtime
+        run: |
+          pip install --upgrade pip
+          pip install "apache-airflow==2.8.0" \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.8.0/constraints-3.11.txt"
+          pip install -r airflow/requirements-dev.txt
+
+      - name: Run Airflow tests
+        run: |
+          pytest --import-mode=importlib airflow/tests/unit -q
+
+  qlib-test:
+    name: Qlib Service Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            qlib_service/requirements.txt
+            qlib_service/requirements-dev.txt
+
+      - name: Install Qlib service runtime
+        run: |
+          pip install --upgrade pip
+          pip install -r qlib_service/requirements-dev.txt
+
+      - name: Run Qlib service tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/qlib_service
+          QLIB_ARTIFACT_ROOT: /tmp/qlib-artifacts
+          QLIB_PROVIDER_URI: /tmp/qlib-artifacts/provider
+        run: |
+          pytest qlib_service/tests -q
 
   # ============================================================================
   # Frontend 測試與程式碼品質檢查
@@ -149,16 +224,17 @@ jobs:
           cd frontend
           npm run type-check || npx tsc --noEmit
 
-      - name: Run tests (if available)
+      - name: Run Jest tests
         run: |
           cd frontend
-          # npm test -- --passWithNoTests
-          echo "Frontend tests will be added in the future"
+          npm test -- --ci --runInBand
 
       - name: Build production
         env:
-          NEXT_PUBLIC_API_URL: http://localhost:8000
-          NEXT_PUBLIC_WS_URL: ws://localhost:8000/ws
+          NEXT_PUBLIC_API_URL: same-origin
+          NEXT_PUBLIC_WS_URL: same-origin
+          NEXT_PUBLIC_MARKET_WS_URL: same-origin
+          INTERNAL_API_BASE_URL: http://backend:8000
         run: |
           cd frontend
           npm run build
@@ -175,7 +251,7 @@ jobs:
   docker-build:
     name: Docker Build Test
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test]
+    needs: [backend-test, frontend-test, airflow-test, qlib-test]
 
     steps:
       - name: Checkout code
@@ -204,8 +280,74 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            NEXT_PUBLIC_API_URL=http://localhost:8000
-            NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+            NEXT_PUBLIC_API_URL=same-origin
+            NEXT_PUBLIC_WS_URL=same-origin
+            NEXT_PUBLIC_MARKET_WS_URL=same-origin
+            INTERNAL_API_BASE_URL=http://backend:8000
+
+      - name: Build Airflow Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./airflow
+          file: ./airflow/Dockerfile
+          push: false
+          tags: stock-analysis-airflow:test
+          cache-from: type=gha,scope=airflow
+          cache-to: type=gha,mode=max,scope=airflow
+
+      - name: Build Qlib Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./qlib_service
+          file: ./qlib_service/Dockerfile
+          push: false
+          tags: stock-analysis-qlib:test
+          cache-from: type=gha,scope=qlib
+          cache-to: type=gha,mode=max,scope=qlib
+
+      - name: Validate production Compose contract
+        env:
+          POSTGRES_PASSWORD: test-postgres-password
+          REDIS_PASSWORD: test-redis-password
+          INTERNAL_API_TOKEN: test-internal-token
+          QLIB_INTERNAL_TOKEN: test-qlib-token
+          AIRFLOW_FERNET_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+          AIRFLOW_SECRET_KEY: test-airflow-secret
+          AIRFLOW_ADMIN_PASSWORD: test-airflow-password
+          NEXT_PUBLIC_API_URL: http://localhost
+          NEXT_PUBLIC_WS_URL: same-origin
+          NEXT_PUBLIC_MARKET_WS_URL: same-origin
+        run: |
+          cp .env.production.example .env.production
+          printf '%s\n' \
+            'BACKEND_IMAGE=registry.example/backend@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
+            'FRONTEND_IMAGE=registry.example/frontend@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
+            'AIRFLOW_IMAGE=registry.example/airflow@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
+            'QLIB_IMAGE=registry.example/qlib@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
+            > .env.images
+          python3 scripts/validate-production-env.py --images .env.images
+          docker compose --env-file .env.production \
+            --env-file .env.images \
+            -f docker-compose.prod.yml config --quiet
+          docker compose --env-file .env.production \
+            --env-file .env.images \
+            -f docker-compose.prod.yml config --format json \
+            | jq -e '.name == "kiro-stock-platform"'
+
+      - name: Validate production Nginx configuration
+        run: |
+          mkdir -p /tmp/kiro-nginx-ssl
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj '/CN=stocks.example.com' \
+            -keyout /tmp/kiro-nginx-ssl/privkey.pem \
+            -out /tmp/kiro-nginx-ssl/fullchain.pem
+          docker run --rm \
+            --add-host backend:127.0.0.1 \
+            --add-host frontend:127.0.0.1 \
+            -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            -v "$PWD/nginx/conf.d:/etc/nginx/conf.d:ro" \
+            -v "/tmp/kiro-nginx-ssl:/etc/nginx/ssl:ro" \
+            nginx:1.27-alpine nginx -t
 
   # ============================================================================
   # 安全掃描
@@ -223,22 +365,25 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Trivy vulnerability scanner (Backend)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: './backend'
           format: 'sarif'
           output: 'trivy-backend-results.sarif'
           severity: 'CRITICAL,HIGH'
+          exit-code: '1'
 
       - name: Run Trivy vulnerability scanner (Frontend)
-        uses: aquasecurity/trivy-action@master
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: './frontend'
           format: 'sarif'
           output: 'trivy-frontend-results.sarif'
           severity: 'CRITICAL,HIGH'
+          exit-code: '1'
 
       - name: Upload Trivy results to GitHub Security (Backend)
         uses: github/codeql-action/upload-sarif@v4
@@ -262,7 +407,7 @@ jobs:
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test, docker-build, security-scan]
+    needs: [backend-test, airflow-test, qlib-test, frontend-test, docker-build, security-scan]
     if: always()
 
     steps:
@@ -270,18 +415,20 @@ jobs:
         run: |
           echo "🎉 CI Pipeline completed!"
           echo "Backend Tests: ${{ needs.backend-test.result }}"
+          echo "Airflow Tests: ${{ needs.airflow-test.result }}"
+          echo "Qlib Tests: ${{ needs.qlib-test.result }}"
           echo "Frontend Tests: ${{ needs.frontend-test.result }}"
           echo "Docker Build: ${{ needs.docker-build.result }}"
           echo "Security Scan: ${{ needs.security-scan.result }}"
 
       - name: CI Success
-        if: ${{ needs.backend-test.result == 'success' && needs.frontend-test.result == 'success' && needs.docker-build.result == 'success' }}
+        if: ${{ needs.backend-test.result == 'success' && needs.airflow-test.result == 'success' && needs.qlib-test.result == 'success' && needs.frontend-test.result == 'success' && needs.docker-build.result == 'success' && needs.security-scan.result == 'success' }}
         run: |
           echo "✅ All CI checks passed!"
           exit 0
 
       - name: CI Failure
-        if: ${{ needs.backend-test.result == 'failure' || needs.frontend-test.result == 'failure' || needs.docker-build.result == 'failure' }}
+        if: ${{ needs.backend-test.result != 'success' || needs.airflow-test.result != 'success' || needs.qlib-test.result != 'success' || needs.frontend-test.result != 'success' || needs.docker-build.result != 'success' || needs.security-scan.result != 'success' }}
         run: |
           echo "❌ Some CI checks failed!"
           exit 1

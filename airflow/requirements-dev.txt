@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# Test and development-only tooling. Keep these out of the production image.
+pytest==7.4.0
+pytest-mock==3.11.1
+black==23.7.0
+flake8==6.0.0

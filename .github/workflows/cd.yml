@@ -1,280 +1,391 @@
 name: CD - Deploy to Production
 
 on:
-  push:
-    branches: [ main ]
-    tags:
-      - 'v*.*.*'
+  workflow_run:
+    workflows: ["CI - Test and Build"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Deployment environment'
-        required: true
-        default: 'production'
-        type: choice
-        options:
-          - production
-          - staging
+
+concurrency:
+  group: kiro-stock-platform-production
+  cancel-in-progress: false
 
 env:
   DEPLOY_USER: opc
   DEPLOY_HOST: 158.101.102.77
   DEPLOY_PATH: /home/opc/projects/kiro-stock-platform
+  IMAGE_PREFIX: ghcr.io/yzcus/kiro-stock-platform
+  VERIFIED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
-  # ============================================================================
-  # 構建並推送 Docker 映像到 GitHub Container Registry
-  # ============================================================================
   build-and-push:
-    name: Build and Push Docker Images
+    name: Build and Push Runtime Images
+    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
       packages: write
+    outputs:
+      backend_digest: ${{ steps.backend.outputs.digest }}
+      frontend_digest: ${{ steps.frontend.outputs.digest }}
+      airflow_digest: ${{ steps.airflow.outputs.digest }}
+      qlib_digest: ${{ steps.qlib.outputs.digest }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERIFIED_SHA }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Refuse a superseded main commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          latest_main_sha="$(
+            gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq '.sha'
+          )"
+          if [ "$latest_main_sha" != "$VERIFIED_SHA" ]; then
+            echo "Verified commit ${VERIFIED_SHA} is no longer main (${latest_main_sha}); deployment skipped." >&2
+            exit 1
+          fi
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+      - name: Verify CI for a manual deployment
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          successful_runs="$(
+            gh api -X GET \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+              -f branch=main \
+              -f status=success \
+              --jq '[.workflow_runs[] | select(.head_sha == "${{ env.VERIFIED_SHA }}" and .event == "push")] | length'
+          )"
+          if [ "$successful_runs" -lt 1 ]; then
+            echo "Manual deployment requires a successful main-push CI run for ${VERIFIED_SHA}." >&2
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for Backend
-        id: meta-backend
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}/backend
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
-
-      - name: Extract metadata for Frontend
-        id: meta-frontend
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}/frontend
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
-
-      - name: Build and push Backend image
-        uses: docker/build-push-action@v5
+      - name: Build and push backend
+        id: backend
+        uses: docker/build-push-action@v6
         with:
           context: ./backend
           file: ./backend/Dockerfile
           push: true
-          tags: ${{ steps.meta-backend.outputs.tags }}
-          labels: ${{ steps.meta-backend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/backend:${{ env.VERIFIED_SHA }}
+            ${{ env.IMAGE_PREFIX }}/backend:main
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
 
-      - name: Build and push Frontend image
-        uses: docker/build-push-action@v5
+      - name: Build and push frontend
+        id: frontend
+        uses: docker/build-push-action@v6
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
           push: true
-          tags: ${{ steps.meta-frontend.outputs.tags }}
-          labels: ${{ steps.meta-frontend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/frontend:${{ env.VERIFIED_SHA }}
+            ${{ env.IMAGE_PREFIX }}/frontend:main
           build-args: |
-            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
-            NEXT_PUBLIC_WS_URL=${{ secrets.NEXT_PUBLIC_WS_URL }}
+            NEXT_PUBLIC_API_URL=same-origin
+            NEXT_PUBLIC_WS_URL=same-origin
+            NEXT_PUBLIC_MARKET_WS_URL=same-origin
+            INTERNAL_API_BASE_URL=http://backend:8000
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
 
-  # ============================================================================
-  # 部署到 OCI 生產環境
-  # ============================================================================
+      - name: Build and push Airflow
+        id: airflow
+        uses: docker/build-push-action@v6
+        with:
+          context: ./airflow
+          file: ./airflow/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/airflow:${{ env.VERIFIED_SHA }}
+            ${{ env.IMAGE_PREFIX }}/airflow:main
+          cache-from: type=gha,scope=airflow
+          cache-to: type=gha,mode=max,scope=airflow
+
+      - name: Build and push Qlib
+        id: qlib
+        uses: docker/build-push-action@v6
+        with:
+          context: ./qlib_service
+          file: ./qlib_service/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/qlib:${{ env.VERIFIED_SHA }}
+            ${{ env.IMAGE_PREFIX }}/qlib:main
+          cache-from: type=gha,scope=qlib
+          cache-to: type=gha,mode=max,scope=qlib
+
   deploy-to-oci:
-    name: Deploy to OCI
+    name: Deploy Immutable Images to OCI
     runs-on: ubuntu-latest
     needs: build-and-push
+    permissions:
+      contents: read
+      packages: read
     environment:
       name: production
-      url: http://158.101.102.77
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERIFIED_SHA }}
 
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.0
+      - uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
 
-      - name: Add OCI host to known_hosts
+      - name: Install pinned OCI host key
+        env:
+          OCI_SSH_KNOWN_HOSTS: ${{ secrets.OCI_SSH_KNOWN_HOSTS }}
         run: |
+          umask 077
           mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+          if [ -z "${OCI_SSH_KNOWN_HOSTS}" ]; then
+            echo "OCI_SSH_KNOWN_HOSTS is required." >&2
+            exit 1
+          fi
+          printf '%s\n' "${OCI_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          ssh-keygen -l -f ~/.ssh/known_hosts >/dev/null
 
       - name: Create deployment package
         run: |
+          printf '%s\n' \
+            "BACKEND_IMAGE=${IMAGE_PREFIX}/backend@${{ needs.build-and-push.outputs.backend_digest }}" \
+            "FRONTEND_IMAGE=${IMAGE_PREFIX}/frontend@${{ needs.build-and-push.outputs.frontend_digest }}" \
+            "AIRFLOW_IMAGE=${IMAGE_PREFIX}/airflow@${{ needs.build-and-push.outputs.airflow_digest }}" \
+            "QLIB_IMAGE=${IMAGE_PREFIX}/qlib@${{ needs.build-and-push.outputs.qlib_digest }}" \
+            > .env.images.candidate
+          python3 scripts/validate-production-env.py \
+            --images .env.images.candidate
           tar -czf deploy.tar.gz \
             docker-compose.prod.yml \
             nginx/ \
             scripts/ \
-            .env.production.example
+            .env.production.example \
+            .env.images.candidate
 
-      - name: Copy files to OCI
+      - name: Copy deployment package
         run: |
-          scp deploy.tar.gz ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:${{ env.DEPLOY_PATH }}/
+          ssh "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '${DEPLOY_PATH}'"
+          scp deploy.tar.gz "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/"
 
-      - name: Backup database before deployment
+      - name: Refuse a parallel accidental production project
         run: |
-          ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} << 'ENDSSH'
-            cd ${{ env.DEPLOY_PATH }}
-            echo "📦 Creating pre-deployment backup..."
-            bash scripts/backup.sh || echo "⚠️ Backup failed, but continuing deployment"
+          ssh "${DEPLOY_USER}@${DEPLOY_HOST}" << 'ENDSSH'
+            set -e
+            cd /home/opc/projects/kiro-stock-platform
+            wrong_project_containers="$(
+              docker ps -aq \
+                --filter 'label=com.docker.compose.project=kiro-stock-platform-prod'
+            )"
+            if [ -n "$wrong_project_containers" ]; then
+              echo "Refusing deployment: parallel kiro-stock-platform-prod containers exist." >&2
+              echo "Remove or migrate that accidental stack before deploying." >&2
+              exit 1
+            fi
+            if docker volume inspect \
+                 kiro-stock-platform-prod_postgres_data_prod >/dev/null 2>&1; then
+              echo "Refusing deployment: accidental production database volume exists." >&2
+              echo "Migrate that volume explicitly before deploying; it will not be deleted." >&2
+              exit 1
+            fi
+            if [ -s .env.images ] && \
+               ! docker volume inspect \
+                   kiro-stock-platform_postgres_data_prod >/dev/null 2>&1; then
+              echo "Refusing deployment: established install is missing its expected database volume." >&2
+              exit 1
+            fi
           ENDSSH
 
-      - name: Deploy to OCI server
+      - name: Backup database
         run: |
-          ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} << 'ENDSSH'
+          ssh "${DEPLOY_USER}@${DEPLOY_HOST}" << 'ENDSSH'
             set -e
+            cd /home/opc/projects/kiro-stock-platform
+            tar -xzf deploy.tar.gz \
+              scripts/backup.sh \
+              scripts/validate-production-env.py \
+              .env.images.candidate
+            if docker volume inspect \
+                 kiro-stock-platform_postgres_data_prod >/dev/null 2>&1; then
+              if [ -s .env.images ]; then
+                bash scripts/backup.sh
+              else
+                echo "Legacy install has no image manifest; using the validated candidate only to address the existing database for backup."
+                IMAGE_ENV_FILE=.env.images.candidate bash scripts/backup.sh
+              fi
+            else
+              echo "No established production database volume; first-deploy backup skipped."
+            fi
+          ENDSSH
 
-            cd ${{ env.DEPLOY_PATH }}
-
-            echo "📦 Extracting deployment package..."
+      - name: Deploy
+        run: |
+          ssh "${DEPLOY_USER}@${DEPLOY_HOST}" << 'ENDSSH'
+            set -e
+            cd /home/opc/projects/kiro-stock-platform
             tar -xzf deploy.tar.gz
             rm deploy.tar.gz
+            mkdir -p backups logs/backend nginx/logs nginx/ssl
 
-            echo "🔐 Logging in to GitHub Container Registry..."
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            python3 scripts/validate-production-env.py .env.production
+            python3 scripts/validate-production-env.py \
+              --images .env.images.candidate
+            if [ ! -s nginx/ssl/fullchain.pem ] || \
+               [ ! -s nginx/ssl/privkey.pem ]; then
+              echo "Refusing deployment: production TLS certificate files are missing or empty." >&2
+              exit 1
+            fi
+            if ! command -v openssl >/dev/null 2>&1; then
+              echo "Refusing deployment: openssl is required for TLS certificate validation." >&2
+              exit 1
+            fi
+            if ! openssl x509 -help 2>&1 | grep -q -- '-checkhost'; then
+              echo "Refusing deployment: openssl does not support hostname validation." >&2
+              exit 1
+            fi
+            production_base_url="$(
+              python3 scripts/validate-production-env.py \
+                --get PRODUCTION_BASE_URL .env.production
+            )"
+            tls_hostname="$(
+              python3 -c \
+                'import sys; from urllib.parse import urlparse; print(urlparse(sys.argv[1]).hostname or "")' \
+                "$production_base_url"
+            )"
+            if [ -z "$tls_hostname" ]; then
+              echo "Refusing deployment: PRODUCTION_BASE_URL has no hostname." >&2
+              exit 1
+            fi
+            if ! openssl x509 -in nginx/ssl/fullchain.pem \
+                 -noout -checkend 0 >/dev/null 2>&1; then
+              echo "Refusing deployment: production TLS certificate is expired or invalid." >&2
+              exit 1
+            fi
+            if ! openssl x509 -in nginx/ssl/fullchain.pem \
+                 -noout -checkhost "$tls_hostname" >/dev/null 2>&1; then
+              echo "Refusing deployment: production TLS certificate does not match PRODUCTION_BASE_URL." >&2
+              exit 1
+            fi
 
-            echo "⬇️ Pulling latest images..."
-            docker-compose -f docker-compose.prod.yml pull
+            echo '${{ secrets.GITHUB_TOKEN }}' | \
+              docker login ghcr.io -u '${{ github.actor }}' --password-stdin
 
-            echo "🔄 Restarting services with zero downtime..."
-            docker-compose -f docker-compose.prod.yml up -d --no-deps --build
+            docker compose -p kiro-stock-platform \
+              --env-file .env.production \
+              --env-file .env.images.candidate \
+              -f docker-compose.prod.yml pull \
+              backend qlib-prediction-service airflow-webserver frontend
+            if [ -s .env.images ]; then
+              cp .env.images .env.images.previous
+            else
+              rm -f .env.images.previous
+            fi
+            mv .env.images.candidate .env.images
+            printf '%s\n' '${{ github.run_id }}' > .deploy-in-progress
+            docker compose -p kiro-stock-platform \
+              --env-file .env.production \
+              --env-file .env.images \
+              -f docker-compose.prod.yml up -d --remove-orphans
 
-            echo "⏳ Waiting for services to be healthy..."
-            sleep 30
-
-            echo "🏥 Running health check..."
-            bash scripts/health-check.sh || echo "⚠️ Health check warnings detected"
-
-            echo "🧹 Cleaning up old Docker resources..."
-            docker system prune -af --volumes || true
-
-            echo "✅ Deployment completed!"
+            bash scripts/health-check.sh
+            docker image prune -af --filter 'until=168h'
           ENDSSH
 
-      - name: Verify deployment
+      - name: Verify public endpoints
         run: |
-          echo "🔍 Verifying deployment..."
+          PRODUCTION_BASE_URL="$(
+            ssh "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "cd '${DEPLOY_PATH}' && python3 scripts/validate-production-env.py --get PRODUCTION_BASE_URL .env.production"
+          )"
+          case "${PRODUCTION_BASE_URL}" in
+            https://*) ;;
+            *)
+              echo "PRODUCTION_BASE_URL must be a non-empty https:// URL." >&2
+              exit 1
+              ;;
+          esac
+          base_url="${PRODUCTION_BASE_URL%/}"
+          curl --fail --retry 10 --retry-delay 6 \
+            "${base_url}/health"
+          curl --fail --retry 5 --retry-delay 3 \
+            "${base_url}/api/v1/stocks/"
 
-          # Wait for services to stabilize
-          sleep 10
-
-          # Check health endpoint
-          curl -f http://${{ env.DEPLOY_HOST }}/health || exit 1
-
-          # Check API endpoint
-          curl -f http://${{ env.DEPLOY_HOST }}/api/v1/stocks/ || exit 1
-
-          echo "✅ Deployment verification passed!"
-
-      - name: Notify deployment status
-        if: always()
+      - name: Mark deployment successful
         run: |
-          if [ "${{ job.status }}" == "success" ]; then
-            echo "✅ Deployment to OCI succeeded!"
-          else
-            echo "❌ Deployment to OCI failed!"
-          fi
+          ssh "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "cd '${DEPLOY_PATH}' && rm -f .deploy-in-progress .env.images.candidate"
 
-  # ============================================================================
-  # 部署後健康檢查
-  # ============================================================================
-  post-deployment-check:
-    name: Post-Deployment Health Check
+  rollback-on-failure:
+    name: Roll Back Runtime Images
     runs-on: ubuntu-latest
     needs: deploy-to-oci
-    if: success()
-
-    steps:
-      - name: Wait for services to stabilize
-        run: sleep 30
-
-      - name: Check frontend
-        run: |
-          curl -f -I http://${{ env.DEPLOY_HOST }}/ || exit 1
-          echo "✅ Frontend is accessible"
-
-      - name: Check backend API
-        run: |
-          curl -f http://${{ env.DEPLOY_HOST }}/api/v1/stocks/ || exit 1
-          echo "✅ Backend API is responding"
-
-      - name: Check health endpoint
-        run: |
-          response=$(curl -s http://${{ env.DEPLOY_HOST }}/health)
-          echo "Health check response: $response"
-          echo "$response" | grep -q "healthy" || exit 1
-          echo "✅ Health check passed"
-
-      - name: Test critical endpoints
-        run: |
-          # Test stock list
-          curl -f http://${{ env.DEPLOY_HOST }}/api/v1/stocks/ > /dev/null
-
-          echo "✅ All critical endpoints are working"
-
-  # ============================================================================
-  # 部署失敗時自動回滾（可選）
-  # ============================================================================
-  rollback-on-failure:
-    name: Rollback on Failure
-    runs-on: ubuntu-latest
-    needs: [deploy-to-oci, post-deployment-check]
     if: failure()
+    environment:
+      name: production
+    permissions:
+      contents: read
+      packages: read
 
     steps:
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.0
+      - uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
 
-      - name: Add OCI host to known_hosts
+      - name: Install pinned OCI host key
+        env:
+          OCI_SSH_KNOWN_HOSTS: ${{ secrets.OCI_SSH_KNOWN_HOSTS }}
         run: |
+          umask 077
           mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+          if [ -z "${OCI_SSH_KNOWN_HOSTS}" ]; then
+            echo "OCI_SSH_KNOWN_HOSTS is required." >&2
+            exit 1
+          fi
+          printf '%s\n' "${OCI_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          ssh-keygen -l -f ~/.ssh/known_hosts >/dev/null
 
-      - name: Rollback deployment
+      - name: Restore previous image digests
         run: |
-          ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} << 'ENDSSH'
-            cd ${{ env.DEPLOY_PATH }}
-
-            echo "🔙 Rolling back to previous version..."
-
-            # Find latest backup
-            latest_backup=$(ls -t backups/db_backup_*.sql.gz 2>/dev/null | head -1)
-
-            if [ -n "$latest_backup" ]; then
-              echo "📥 Restoring database from: $latest_backup"
-              bash scripts/restore.sh "$latest_backup"
+          ssh "${DEPLOY_USER}@${DEPLOY_HOST}" << 'ENDSSH'
+            set -e
+            cd /home/opc/projects/kiro-stock-platform
+            expected_run_id='${{ github.run_id }}'
+            if [ ! -s .deploy-in-progress ] || \
+               [ "$(cat .deploy-in-progress)" != "$expected_run_id" ]; then
+              echo "No deployment mutation for this run; rollback skipped."
+              rm -f .env.images.candidate
+              exit 0
             fi
-
-            echo "🔄 Restarting services..."
-            docker-compose -f docker-compose.prod.yml restart
-
-            echo "⚠️ Rollback completed, but please investigate the deployment failure!"
+            test -s .env.images.previous
+            cp .env.images.previous .env.images
+            python3 scripts/validate-production-env.py --images .env.images
+            docker compose -p kiro-stock-platform \
+              --env-file .env.production \
+              --env-file .env.images \
+              -f docker-compose.prod.yml pull \
+              backend qlib-prediction-service airflow-webserver frontend
+            docker compose -p kiro-stock-platform \
+              --env-file .env.production \
+              --env-file .env.images \
+              -f docker-compose.prod.yml up -d --remove-orphans
+            bash scripts/health-check.sh
+            rm -f .deploy-in-progress .env.images.candidate
           ENDSSH
-
-      - name: Notify rollback
-        run: |
-          echo "⚠️ Deployment failed and rollback was initiated!"
-          echo "Please check the logs and investigate the issue."

@@ -7,13 +7,14 @@ latest successful artifact for the selected model and market.
 
 from datetime import datetime, timedelta
 import os
+import pendulum
 
 import requests
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
-from airflow.utils.trigger_rule import TriggerRule
 
+from plugins.common.date_utils import context_interval_date
 
 QLIB_API_URL = os.getenv("QLIB_PREDICTION_URL", "http://qlib-prediction-service:8090")
 QLIB_INTERNAL_TOKEN = os.getenv("QLIB_INTERNAL_TOKEN", "dev-qlib-token")
@@ -93,6 +94,8 @@ def get_enabled_cpu_model_names():
         for model_name in raw_model_names.split(",")
         if model_name.strip()
     ]
+    if not model_names:
+        raise ValueError("QLIB_CPU_MODEL_NAMES must enable at least one model")
     invalid_model_names = [
         model_name
         for model_name in model_names
@@ -106,7 +109,7 @@ def get_enabled_cpu_model_names():
 
 
 def build_training_payloads(**context):
-    test_end = context["logical_date"].date()
+    test_end = context_interval_date(context, "America/New_York")
     test_start = test_end - timedelta(days=90)
     valid_end = test_start - timedelta(days=1)
     valid_start = valid_end - timedelta(days=90)
@@ -163,14 +166,14 @@ def validate_training_results(**context):
 dag_config = {
     "dag_id": "qlib_cpu_model_training",
     "description": "Train CPU Qlib model artifacts for daily inference",
-    "schedule_interval": "0 2 * * 6",
+    "schedule": "0 2 * * 6",
     "max_active_runs": 1,
     "catchup": False,
     "tags": ["qlib", "training", "ml", "cpu"],
     "default_args": {
         "owner": "stock-analysis-platform",
         "depends_on_past": False,
-        "start_date": datetime(2024, 1, 1),
+        "start_date": pendulum.datetime(2024, 1, 1, tz="UTC"),
         "email_on_failure": True,
         "email_on_retry": False,
         "retries": 0,
@@ -201,7 +204,6 @@ validate_results_task = PythonOperator(
 
 complete_task = EmptyOperator(
     task_id="qlib_cpu_training_complete",
-    trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
     dag=dag,
 )
 

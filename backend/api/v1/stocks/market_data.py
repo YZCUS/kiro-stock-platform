@@ -4,7 +4,7 @@ Multi-timeframe market data endpoints.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -31,6 +31,7 @@ from domain.services.market_data_validation_service import (
 )
 from domain.workers import StreamTaskCommand
 from infrastructure.workers import RedisStreamTaskQueue
+from core.internal_auth import require_internal_token
 
 router = APIRouter(prefix="/market-data")
 
@@ -44,7 +45,7 @@ WORKER_STREAMS = {
 class MarketDataStockSelector(BaseModel):
     stock_ids: Optional[List[int]] = None
     market: str = Field("TW", pattern="^(TW|US)$")
-    limit: int = Field(100, ge=1, le=1000)
+    limit: int = Field(100, ge=1, le=10000)
 
 
 class MarketDataCollectRequest(MarketDataStockSelector):
@@ -90,7 +91,34 @@ class MarketDataPipelineRequest(MarketDataStockSelector):
     backfill_incomplete_derived: bool = True
 
 
-@router.post("/collect", response_model=Dict[str, Any])
+@router.get(
+    "/trading-day",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_internal_token)],
+)
+async def get_trading_day_status(
+    market: str = Query(..., pattern="^(TW|US)$"),
+    session_date: date = Query(...),
+):
+    """Return the backend's authoritative exchange-calendar decision."""
+
+    calendar = MarketCalendarService()
+    previous = session_date
+    while not calendar.is_trading_day(market, previous):
+        previous -= timedelta(days=1)
+    return {
+        "market": market,
+        "date": session_date.isoformat(),
+        "is_trading_day": calendar.is_trading_day(market, session_date),
+        "previous_trading_day": previous.isoformat(),
+    }
+
+
+@router.post(
+    "/collect",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_internal_token)],
+)
 async def collect_market_data(
     request: MarketDataCollectRequest,
     db: AsyncSession = Depends(get_database_session),
@@ -137,7 +165,11 @@ async def collect_market_data(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/aggregate", response_model=Dict[str, Any])
+@router.post(
+    "/aggregate",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_internal_token)],
+)
 async def aggregate_market_data(
     request: MarketDataAggregateRequest,
     db: AsyncSession = Depends(get_database_session),
@@ -190,7 +222,11 @@ async def aggregate_market_data(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/validate", response_model=Dict[str, Any])
+@router.post(
+    "/validate",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_internal_token)],
+)
 async def validate_market_data(
     request: MarketDataValidateRequest,
     db: AsyncSession = Depends(get_database_session),
@@ -245,7 +281,11 @@ async def validate_market_data(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/orchestrate", response_model=Dict[str, Any])
+@router.post(
+    "/orchestrate",
+    response_model=Dict[str, Any],
+    dependencies=[Depends(require_internal_token)],
+)
 async def orchestrate_market_data_pipeline(
     request: MarketDataPipelineRequest,
     db: AsyncSession = Depends(get_database_session),

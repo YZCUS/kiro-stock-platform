@@ -3,6 +3,7 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db
 from core.auth import create_access_token
@@ -59,14 +60,15 @@ async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
         )
 
     # 建立新用戶
-    user = await db.run_sync(
-        lambda session: User.create_user(
-            session,
-            email=user_data.email,
-            username=user_data.username,
-            password=user_data.password,
-        )
+    hashed_password = await run_in_threadpool(
+        User.get_password_hash, user_data.password
     )
+    user = User(
+        email=user_data.email,
+        username=user_data.username,
+        hashed_password=hashed_password,
+    )
+    db.add(user)
     await db.flush()
     db.add(
         UserStockList(
@@ -124,7 +126,12 @@ async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
         )
 
     # 驗證用戶和密碼
-    if user is None or not user.check_password(credentials.password):
+    password_valid = False
+    if user is not None:
+        password_valid = await run_in_threadpool(
+            user.check_password, credentials.password
+        )
+    if user is None or not password_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用戶名稱/電子郵件或密碼錯誤",
@@ -194,13 +201,18 @@ async def change_password(
         HTTPException: 如果舊密碼錯誤
     """
     # 驗證舊密碼
-    if not current_user.check_password(password_data.old_password):
+    password_valid = await run_in_threadpool(
+        current_user.check_password, password_data.old_password
+    )
+    if not password_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="舊密碼錯誤"
         )
 
     # 更新密碼
-    current_user.hashed_password = User.get_password_hash(password_data.new_password)
+    current_user.hashed_password = await run_in_threadpool(
+        User.get_password_hash, password_data.new_password
+    )
     await db.commit()
 
     return {"message": "密碼已成功修改"}

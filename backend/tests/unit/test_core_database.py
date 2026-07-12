@@ -197,6 +197,33 @@ class TestDatabaseConnectionPooling:
             elif "sqlite" in url:
                 assert "aiosqlite" in url
 
+    def test_runtime_pool_limits_are_applied_for_direct_postgres(self):
+        from core.database_url import make_async_engine_kwargs
+
+        kwargs = make_async_engine_kwargs(
+            "postgresql://user:pass@postgres:5432/app",
+            pool_size=2,
+            max_overflow=1,
+        )
+
+        assert kwargs["pool_size"] == 2
+        assert kwargs["max_overflow"] == 1
+
+    def test_transaction_pooler_keeps_null_pool(self):
+        from sqlalchemy.pool import NullPool
+
+        from core.database_url import make_async_engine_kwargs
+
+        kwargs = make_async_engine_kwargs(
+            "postgresql://user:pass@example.pooler.supabase.com:6543/app",
+            pool_size=2,
+            max_overflow=1,
+        )
+
+        assert kwargs["poolclass"] is NullPool
+        assert "pool_size" not in kwargs
+        assert "max_overflow" not in kwargs
+
     def test_session_factory_configuration(self):
         """Test session factory configuration"""
         from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession

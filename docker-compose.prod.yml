@@ -1,7 +1,70 @@
-version: '3.8'
+name: kiro-stock-platform
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+x-backend-environment: &backend-environment
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
+  PYTHONPATH: /app
+  APP_ENVIRONMENT: production
+  APP_DEBUG: "false"
+
+x-backend-worker-environment: &backend-worker-environment
+  <<: *backend-environment
+  DATABASE_POOL_SIZE: ${WORKER_DATABASE_POOL_SIZE:-2}
+  DATABASE_MAX_OVERFLOW: ${WORKER_DATABASE_MAX_OVERFLOW:-1}
+
+x-backend-worker: &backend-worker
+  image: ${BACKEND_IMAGE:?BACKEND_IMAGE digest is required}
+  restart: always
+  env_file:
+    - .env.production
+  environment: *backend-worker-environment
+  depends_on:
+    backend-migrate:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+  networks:
+    - stock_network_prod
+  logging: *default-logging
+  deploy:
+    resources:
+      limits:
+        cpus: "${WORKER_CPU_LIMIT:-0.75}"
+        memory: ${WORKER_MEMORY_LIMIT:-768M}
+
+x-airflow-environment: &airflow-environment
+  AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW_DATABASE_URL:?AIRFLOW_DATABASE_URL is required}
+  AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?AIRFLOW_FERNET_KEY is required}
+  AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:?AIRFLOW_SECRET_KEY is required}
+  AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__CORE__PARALLELISM: ${AIRFLOW_PARALLELISM:-4}
+  AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: ${AIRFLOW_MAX_ACTIVE_TASKS_PER_DAG:-4}
+  AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE: ${AIRFLOW_DATABASE_POOL_SIZE:-5}
+  AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW: ${AIRFLOW_DATABASE_MAX_OVERFLOW:-5}
+  AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Taipei
+  AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+  AIRFLOW__WEBSERVER__WARN_DEPLOYMENT_EXPOSURE: "false"
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  REDIS_URL: ${AIRFLOW_REDIS_URL:?AIRFLOW_REDIS_URL is required}
+  BACKEND_API_URL: http://backend:8000/api/v1
+  QLIB_PREDICTION_URL: http://qlib-prediction-service:8090
+  QLIB_INTERNAL_TOKEN: ${QLIB_INTERNAL_TOKEN:?QLIB_INTERNAL_TOKEN is required}
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
+  AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
+  AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?AIRFLOW_ADMIN_PASSWORD is required}
+  AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-admin@example.com}
+  PYTHONPATH: /opt/airflow
 
 services:
-  # PostgreSQL 資料庫 (生產環境)
   postgres:
     image: postgres:15-alpine
     container_name: stock_analysis_db_prod
@@ -9,79 +72,109 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-stock_analysis}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_INITDB_ARGS: --encoding=UTF8
     ports:
-      - "127.0.0.1:5432:5432"  # 只允許本地訪問
+      - 127.0.0.1:5432:5432
     volumes:
       - postgres_data_prod:/var/lib/postgresql/data
-      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql
-      - ./backups:/backups  # 備份目錄
+      - ./backups:/backups
     networks:
       - stock_network_prod
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${POSTGRES_CPU_LIMIT:-2}"
+          memory: ${POSTGRES_MEMORY_LIMIT:-2G}
 
-  # Redis 快取 (生產環境)
   redis:
     image: redis:7-alpine
     container_name: stock_analysis_redis_prod
     restart: always
-    command: >
-      redis-server
-      --requirepass ${REDIS_PASSWORD}
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
-      --save 60 1000
-      --appendonly yes
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command:
+      - sh
+      - -ec
+      - |
+        exec redis-server \
+          --requirepass "$${REDIS_PASSWORD}" \
+          --maxmemory 512mb \
+          --maxmemory-policy volatile-lru \
+          --save 60 1000 \
+          --appendonly yes
     ports:
-      - "127.0.0.1:6379:6379"  # 只允許本地訪問
+      - 127.0.0.1:6379:6379
     volumes:
       - redis_data_prod:/data
     networks:
       - stock_network_prod
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping 2>/dev/null | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${REDIS_CPU_LIMIT:-0.5}"
+          memory: ${REDIS_MEMORY_LIMIT:-768M}
 
-  # FastAPI 後端服務 (生產環境)
+  airflow-db-prepare:
+    image: postgres:15-alpine
+    restart: "no"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      AIRFLOW_DB: ${AIRFLOW_DB:-airflow}
+      AIRFLOW_DB_PREPARE_MAX_ATTEMPTS: ${AIRFLOW_DB_PREPARE_MAX_ATTEMPTS:-60}
+    volumes:
+      - ./scripts/ensure-airflow-db.sh:/scripts/ensure-airflow-db.sh:ro
+    command: ["sh", "/scripts/ensure-airflow-db.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - stock_network_prod
+
+  backend-migrate:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE digest is required}
+    restart: "no"
+    env_file:
+      - .env.production
+    environment: *backend-environment
+    command: ["python", "database/migrate.py", "upgrade"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - stock_network_prod
+    logging: *default-logging
+
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    image: stock-analysis-backend:${VERSION:-latest}
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE digest is required}
     container_name: stock_analysis_backend_prod
     restart: always
     env_file:
       - .env.production
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stock_analysis}
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      - PYTHONPATH=/app
-      - APP_ENVIRONMENT=production
-      - APP_DEBUG=false
+      <<: *backend-environment
+      DATABASE_POOL_SIZE: ${BACKEND_DATABASE_POOL_SIZE:-5}
+      DATABASE_MAX_OVERFLOW: ${BACKEND_DATABASE_MAX_OVERFLOW:-5}
     depends_on:
-      postgres:
-        condition: service_healthy
+      backend-migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     volumes:
-      - ./logs/backend:/app/logs
+      - backend_logs_prod:/app/logs
     networks:
       - stock_network_prod
     healthcheck:
@@ -90,35 +183,202 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "5"
+    logging: *default-logging
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
+          cpus: "${BACKEND_CPU_LIMIT:-2}"
+          memory: ${BACKEND_MEMORY_LIMIT:-2G}
 
-  # Next.js 前端應用 (生產環境)
+  order-execution-worker:
+    <<: *backend-worker
+    container_name: stock_analysis_order_execution_worker_prod
+    environment:
+      <<: *backend-worker-environment
+      ORDER_EXECUTION_QUEUE_CONSUMER_NAME: order-execution-worker-prod
+    command: ["python", "-m", "scripts.run_worker", "order-execution"]
+
+  broker-sync-worker:
+    <<: *backend-worker
+    container_name: stock_analysis_broker_sync_worker_prod
+    command: ["python", "-m", "scripts.run_worker", "broker-sync"]
+
+  market-data-worker:
+    <<: *backend-worker
+    container_name: stock_analysis_market_data_worker_prod
+    command: ["python", "-m", "scripts.run_worker", "market-data"]
+
+  bar-aggregation-worker:
+    <<: *backend-worker
+    container_name: stock_analysis_bar_aggregation_worker_prod
+    command: ["python", "-m", "scripts.run_worker", "bar-aggregation"]
+
+  data-validation-worker:
+    <<: *backend-worker
+    container_name: stock_analysis_data_validation_worker_prod
+    command: ["python", "-m", "scripts.run_worker", "data-validation"]
+
+  indicator-worker:
+    <<: *backend-worker
+    container_name: stock_analysis_indicator_worker_prod
+    command: ["python", "-m", "scripts.run_worker", "indicator"]
+
+  strategy-worker:
+    <<: *backend-worker
+    container_name: stock_analysis_strategy_worker_prod
+    command: ["python", "-m", "scripts.run_worker", "strategy"]
+
+  notification-worker:
+    <<: *backend-worker
+    container_name: stock_analysis_notification_worker_prod
+    command: ["python", "-m", "scripts.run_worker", "notification"]
+
+  qlib-artifact-prepare:
+    image: ${QLIB_IMAGE:?QLIB_IMAGE digest is required}
+    user: "0:0"
+    restart: "no"
+    command: ["sh", "-ec", "chown -R 1001:1001 /app/artifacts"]
+    volumes:
+      - qlib_artifacts_prod:/app/artifacts
+
+  qlib-prediction-service:
+    image: ${QLIB_IMAGE:?QLIB_IMAGE digest is required}
+    container_name: stock_analysis_qlib_prediction_service_prod
+    restart: always
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      QLIB_INTERNAL_TOKEN: ${QLIB_INTERNAL_TOKEN:?QLIB_INTERNAL_TOKEN is required}
+      QLIB_ENVIRONMENT: production
+      QLIB_ARTIFACT_ROOT: /app/artifacts
+      QLIB_PROVIDER_URI: /app/artifacts/provider
+      QLIB_WORKERS: ${QLIB_WORKERS:-2}
+      QLIB_CPU_THREADS: ${QLIB_CPU_THREADS:-2}
+      QLIB_DATABASE_POOL_SIZE: ${QLIB_DATABASE_POOL_SIZE:-2}
+      QLIB_DATABASE_MAX_OVERFLOW: ${QLIB_DATABASE_MAX_OVERFLOW:-1}
+      OMP_NUM_THREADS: ${QLIB_CPU_THREADS:-2}
+      OPENBLAS_NUM_THREADS: ${QLIB_CPU_THREADS:-2}
+      MKL_NUM_THREADS: ${QLIB_CPU_THREADS:-2}
+      NUMEXPR_NUM_THREADS: ${QLIB_CPU_THREADS:-2}
+    depends_on:
+      backend-migrate:
+        condition: service_completed_successfully
+      qlib-artifact-prepare:
+        condition: service_completed_successfully
+    volumes:
+      - qlib_artifacts_prod:/app/artifacts
+    networks:
+      - stock_network_prod
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8090/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${QLIB_CPU_LIMIT:-2}"
+          memory: ${QLIB_MEMORY_LIMIT:-4G}
+
+  airflow-init:
+    image: ${AIRFLOW_IMAGE:?AIRFLOW_IMAGE digest is required}
+    restart: "no"
+    environment: *airflow-environment
+    command:
+      - bash
+      - -ec
+      - |
+        airflow db migrate
+        airflow users create \
+          --username "$${AIRFLOW_ADMIN_USER}" \
+          --password "$${AIRFLOW_ADMIN_PASSWORD}" \
+          --firstname Admin --lastname User --role Admin \
+          --email "$${AIRFLOW_ADMIN_EMAIL}" || \
+          airflow users list | grep -F "$${AIRFLOW_ADMIN_USER}"
+    depends_on:
+      airflow-db-prepare:
+        condition: service_completed_successfully
+    networks:
+      - stock_network_prod
+    logging: *default-logging
+
+  airflow-webserver:
+    image: ${AIRFLOW_IMAGE:?AIRFLOW_IMAGE digest is required}
+    container_name: stock_analysis_airflow_webserver_prod
+    restart: always
+    environment: *airflow-environment
+    ports:
+      - 127.0.0.1:8080:8080
+    volumes:
+      - airflow_logs_prod:/opt/airflow/logs
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      backend:
+        condition: service_healthy
+      qlib-prediction-service:
+        condition: service_healthy
+    networks:
+      - stock_network_prod
+    command: ["airflow", "webserver", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${AIRFLOW_WEBSERVER_CPU_LIMIT:-1}"
+          memory: ${AIRFLOW_WEBSERVER_MEMORY_LIMIT:-2G}
+
+  airflow-scheduler:
+    image: ${AIRFLOW_IMAGE:?AIRFLOW_IMAGE digest is required}
+    container_name: stock_analysis_airflow_scheduler_prod
+    restart: always
+    environment: *airflow-environment
+    volumes:
+      - airflow_logs_prod:/opt/airflow/logs
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      backend:
+        condition: service_healthy
+      qlib-prediction-service:
+        condition: service_healthy
+    networks:
+      - stock_network_prod
+    command: ["airflow", "scheduler"]
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname $${HOSTNAME}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${AIRFLOW_SCHEDULER_CPU_LIMIT:-1}"
+          memory: ${AIRFLOW_SCHEDULER_MEMORY_LIMIT:-2G}
+
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-        - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
-    image: stock-analysis-frontend:${VERSION:-latest}
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE digest is required}
     container_name: stock_analysis_frontend_prod
     restart: always
     environment:
-      - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: same-origin
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:?NEXT_PUBLIC_WS_URL is required}
+      NEXT_PUBLIC_MARKET_WS_URL: ${NEXT_PUBLIC_MARKET_WS_URL:?NEXT_PUBLIC_MARKET_WS_URL is required}
+      INTERNAL_API_BASE_URL: http://backend:8000
     depends_on:
       backend:
         condition: service_healthy
@@ -130,168 +390,51 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "5"
+    logging: *default-logging
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
+          cpus: "${FRONTEND_CPU_LIMIT:-1}"
+          memory: ${FRONTEND_MEMORY_LIMIT:-1G}
 
-  # Apache Airflow Webserver (生產環境)
-  airflow-webserver:
-    image: apache/airflow:2.8.0
-    container_name: stock_analysis_airflow_webserver_prod
-    restart: always
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stock_analysis}
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
-      - AIRFLOW__WEBSERVER__SECRET_KEY=${AIRFLOW_SECRET_KEY}
-      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
-      - AIRFLOW__CORE__LOAD_EXAMPLES=false
-      - AIRFLOW__CORE__DEFAULT_TIMEZONE=Asia/Taipei
-      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=false
-      - AIRFLOW__WEBSERVER__WARN_DEPLOYMENT_EXPOSURE=false
-      - AIRFLOW__WEBSERVER__RBAC=true
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stock_analysis}
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      - BACKEND_API_URL=http://backend:8000/api/v1
-      - PYTHONPATH=/opt/airflow/dags:/opt/airflow:/opt/airflow/backend
-    ports:
-      - "127.0.0.1:8080:8080"  # 只允許本地訪問
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./logs/airflow:/opt/airflow/logs
-      - ./airflow/plugins:/opt/airflow/plugins
-      - ./airflow/airflow.cfg:/opt/airflow/airflow.cfg
-      - ./backend:/opt/airflow/backend
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - stock_network_prod
-    command: >
-      bash -c "
-        airflow db init &&
-        airflow users create --username ${AIRFLOW_ADMIN_USER:-admin} --password ${AIRFLOW_ADMIN_PASSWORD} --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL:-admin@example.com} || true &&
-        airflow webserver --port 8080
-      "
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "5"
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-
-  # Apache Airflow Scheduler (生產環境)
-  airflow-scheduler:
-    image: apache/airflow:2.8.0
-    container_name: stock_analysis_airflow_scheduler_prod
-    restart: always
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stock_analysis}
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
-      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
-      - AIRFLOW__CORE__LOAD_EXAMPLES=false
-      - AIRFLOW__CORE__DEFAULT_TIMEZONE=Asia/Taipei
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stock_analysis}
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      - BACKEND_API_URL=http://backend:8000/api/v1
-      - PYTHONPATH=/opt/airflow/dags:/opt/airflow:/opt/airflow/backend
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./logs/airflow:/opt/airflow/logs
-      - ./airflow/plugins:/opt/airflow/plugins
-      - ./airflow/airflow.cfg:/opt/airflow/airflow.cfg
-      - ./backend:/opt/airflow/backend
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      airflow-webserver:
-        condition: service_healthy
-    networks:
-      - stock_network_prod
-    command: airflow scheduler
-    healthcheck:
-      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname $${HOSTNAME}"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "5"
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-
-  # Nginx 反向代理
   nginx:
-    image: nginx:alpine
+    image: nginx:1.27-alpine
     container_name: stock_analysis_nginx_prod
     restart: always
     ports:
-      - "80:80"
-      - "443:443"
+      - 80:80
+      - 443:443
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
       - ./nginx/logs:/var/log/nginx
-      - ./frontend/public:/usr/share/nginx/html/static:ro
+      - /var/www/certbot:/var/www/certbot:ro
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
     networks:
       - stock_network_prod
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      test: ["CMD", "wget", "--no-check-certificate", "--quiet", "--spider", "https://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "5"
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${NGINX_CPU_LIMIT:-0.5}"
+          memory: ${NGINX_MEMORY_LIMIT:-512M}
 
 volumes:
   postgres_data_prod:
-    driver: local
   redis_data_prod:
-    driver: local
+  qlib_artifacts_prod:
+  backend_logs_prod:
+  airflow_logs_prod:
 
 networks:
   stock_network_prod:

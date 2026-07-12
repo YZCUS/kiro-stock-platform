@@ -8,51 +8,63 @@ Airflow DAG 通知模塊
 def send_completion_notification(**context):
     """發送完成通知 - 使用台北時區"""
     from plugins.common.date_utils import get_taipei_now
+    from plugins.services.notification_service import (
+        NotificationLevel,
+        get_notification_manager,
+    )
 
-    ti = context['ti']
+    ti = context["ti"]
     taipei_now = get_taipei_now()
 
     # 取得所有任務結果
-    main_result = ti.xcom_pull(task_ids='try_main_collection')
-    fallback_result = ti.xcom_pull(task_ids='execute_fallback_collection')
+    main_result = ti.xcom_pull(task_ids="try_main_collection")
+    fallback_result = ti.xcom_pull(task_ids="execute_fallback_collection")
 
     # 確定使用的收集結果
-    if main_result and main_result.get('status') == 'success':
+    if main_result and main_result.get("status") == "success":
         active_collection_result = main_result
         # 檢查是否有詳細的策略信息
-        strategy_desc = main_result.get('strategy_description', '')
-        collection_source = f"主要策略 ({strategy_desc})" if strategy_desc else "主要策略"
-    elif fallback_result and fallback_result.get('status') == 'success':
+        strategy_desc = main_result.get("strategy_description", "")
+        collection_source = (
+            f"主要策略 ({strategy_desc})" if strategy_desc else "主要策略"
+        )
+    elif fallback_result and fallback_result.get("status") == "success":
         active_collection_result = fallback_result
-        strategy_desc = fallback_result.get('strategy_description', '')
-        collection_source = f"備援策略 ({strategy_desc})" if strategy_desc else "備援策略"
+        strategy_desc = fallback_result.get("strategy_description", "")
+        collection_source = (
+            f"備援策略 ({strategy_desc})" if strategy_desc else "備援策略"
+        )
     else:
         active_collection_result = None
         collection_source = "無"
 
-    validation_result = ti.xcom_pull(task_ids='validate_data_quality')
-    dependency_result = ti.xcom_pull(task_ids='verify_dependencies')
+    validation_result = ti.xcom_pull(task_ids="validate_data_quality")
+    dependency_result = ti.xcom_pull(task_ids="verify_dependencies")
 
     # 準備通知內容，包含詳細的上下文信息
-    notification_context = active_collection_result.get('notification_context', {}) if active_collection_result else {}
+    notification_context = (
+        active_collection_result.get("notification_context", {})
+        if active_collection_result
+        else {}
+    )
 
     # 建構詳細的統計信息說明
     stats_explanation = []
-    if notification_context.get('scope_description'):
+    if notification_context.get("scope_description"):
         stats_explanation.append(f"範圍: {notification_context['scope_description']}")
 
-    if notification_context.get('statistics_reliability') == 'estimated':
+    if notification_context.get("statistics_reliability") == "estimated":
         stats_explanation.append("統計: 推算值")
-    elif notification_context.get('statistics_reliability') == 'api_provided':
+    elif notification_context.get("statistics_reliability") == "api_provided":
         stats_explanation.append("統計: API提供")
 
     stats_note = f" ({', '.join(stats_explanation)})" if stats_explanation else ""
 
     # 建構警告和注意事項
     warnings = []
-    if notification_context.get('warning'):
+    if notification_context.get("warning"):
         warnings.append(f"⚠️ {notification_context['warning']}")
-    if notification_context.get('note'):
+    if notification_context.get("note"):
         warnings.append(f"📝 {notification_context['note']}")
 
     warning_section = "\n".join(warnings) + "\n" if warnings else ""
@@ -77,10 +89,26 @@ def send_completion_notification(**context):
 執行時間: {taipei_now.format('YYYY-MM-DD HH:mm:ss')} (台北時間)
     """
 
-    print(message)  # 實際使用時可以發送郵件或其他通知
+    manager = get_notification_manager()
+    if manager is None:
+        raise RuntimeError("Notification manager is not configured")
+    delivery = manager.send_notification(
+        message=message,
+        level=NotificationLevel.INFO,
+        title="Daily stock collection completed",
+        context={
+            "collection_source": collection_source,
+            "stocks_collected": (
+                dependency_result.get("stocks_collected", 0) if dependency_result else 0
+            ),
+        },
+    )
+    if not delivery or not any(delivery.values()):
+        raise RuntimeError(f"Completion notification delivery failed: {delivery}")
 
     return {
-        'notification_sent': True,
-        'message': message,
-        'completion_time': taipei_now.isoformat()
+        "notification_sent": True,
+        "delivery": delivery,
+        "message": message,
+        "completion_time": taipei_now.isoformat(),
     }
