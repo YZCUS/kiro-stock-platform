@@ -18,6 +18,9 @@ interface StockListState {
   lists: StockList[];
   currentList: StockList | null;
   currentListStocks: Stock[];  // 改為 Stock[] 以包含完整股票信息和價格
+  currentListStocksListId: number | null;
+  activeStocksRequestId: string | null;
+  activeStocksListId: number | null;
   loading: boolean;
   error: string | null;
 }
@@ -27,6 +30,9 @@ const initialState: StockListState = {
   lists: [],
   currentList: null,
   currentListStocks: [],
+  currentListStocksListId: null,
+  activeStocksRequestId: null,
+  activeStocksListId: null,
   loading: false,
   error: null,
 };
@@ -161,6 +167,22 @@ const stockListSlice = createSlice({
   reducers: {
     // 設置當前清單
     setCurrentList: (state, action: PayloadAction<StockList | null>) => {
+      if (
+        action.payload === null ||
+        state.currentList?.id !== action.payload.id ||
+        (
+          state.currentListStocksListId !== null &&
+          state.currentListStocksListId !== action.payload.id
+        )
+      ) {
+        if (state.activeStocksRequestId !== null) {
+          state.loading = false;
+        }
+        state.currentListStocks = [];
+        state.currentListStocksListId = null;
+        state.activeStocksRequestId = null;
+        state.activeStocksListId = null;
+      }
       state.currentList = action.payload;
     },
     // 清除錯誤
@@ -247,6 +269,10 @@ const stockListSlice = createSlice({
         state.lists = state.lists.filter(list => list.id !== action.payload);
         if (state.currentList?.id === action.payload) {
           state.currentList = null;
+          state.currentListStocks = [];
+          state.currentListStocksListId = null;
+          state.activeStocksRequestId = null;
+          state.activeStocksListId = null;
         }
       })
       .addCase(deleteStockList.rejected, (state, action) => {
@@ -256,16 +282,50 @@ const stockListSlice = createSlice({
 
     // 獲取清單股票
     builder
-      .addCase(fetchListStocks.pending, (state) => {
+      .addCase(fetchListStocks.pending, (state, action) => {
         state.loading = true;
         state.error = null;
+        const displayedListId = state.currentListStocksListId ?? state.currentList?.id ?? null;
+        if (displayedListId !== action.meta.arg) {
+          state.currentListStocks = [];
+          state.currentListStocksListId = null;
+        }
+        state.activeStocksRequestId = action.meta.requestId;
+        state.activeStocksListId = action.meta.arg;
       })
       .addCase(fetchListStocks.fulfilled, (state, action) => {
+        if (
+          state.activeStocksRequestId !== action.meta.requestId ||
+          state.activeStocksListId !== action.meta.arg
+        ) {
+          return;
+        }
+
         state.loading = false;
-        state.currentListStocks = action.payload.items;
+        if (action.payload.list_id === action.meta.arg) {
+          state.currentListStocks = action.payload.items;
+          state.currentListStocksListId = action.meta.arg;
+        } else {
+          state.currentListStocks = [];
+          state.currentListStocksListId = null;
+          state.error = '獲取清單股票失敗';
+        }
+        state.activeStocksRequestId = null;
+        state.activeStocksListId = null;
       })
       .addCase(fetchListStocks.rejected, (state, action) => {
+        if (
+          state.activeStocksRequestId !== action.meta.requestId ||
+          state.activeStocksListId !== action.meta.arg
+        ) {
+          return;
+        }
+
         state.loading = false;
+        state.currentListStocks = [];
+        state.currentListStocksListId = null;
+        state.activeStocksRequestId = null;
+        state.activeStocksListId = null;
         state.error = action.payload as string;
       });
 
@@ -290,7 +350,10 @@ const stockListSlice = createSlice({
       .addCase(removeStockFromList.fulfilled, (state, action) => {
         const { listId, stockId } = action.payload;
         // 從 currentListStocks（Stock[]）中過濾掉被移除的股票
-        state.currentListStocks = state.currentListStocks.filter(stock => stock.id !== stockId);
+        const displayedListId = state.currentListStocksListId ?? state.currentList?.id ?? null;
+        if (displayedListId === listId) {
+          state.currentListStocks = state.currentListStocks.filter(stock => stock.id !== stockId);
+        }
         // 更新清單的股票數量
         const list = state.lists.find(l => l.id === listId);
         if (list) {

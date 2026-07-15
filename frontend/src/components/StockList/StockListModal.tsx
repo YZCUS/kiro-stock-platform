@@ -3,12 +3,13 @@
  */
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useId } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { X } from 'lucide-react';
 import type { StockList } from '@/types';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 interface StockListModalProps {
   isOpen: boolean;
@@ -24,6 +25,8 @@ export default function StockListModal({ isOpen, onClose, onSave, list }: StockL
     is_default: false
   });
   const [errors, setErrors] = useState<{ name?: string }>({});
+  const titleId = useId();
+  const dialogRef = useDialogA11y(isOpen, onClose);
 
   useEffect(() => {
     if (isOpen) {
@@ -82,13 +85,20 @@ export default function StockListModal({ isOpen, onClose, onSave, list }: StockL
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4"
+      >
         {/* Header */}
         <div className="px-6 py-4 border-b flex justify-between items-center">
-          <h2 className="text-xl font-bold">
+          <h2 id={titleId} className="text-xl font-bold">
             {list ? '編輯清單' : '新建清單'}
           </h2>
-          <Button variant="ghost" size="sm" onClick={onClose}>
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label="關閉">
             <X className="w-4 h-4" />
           </Button>
         </div>

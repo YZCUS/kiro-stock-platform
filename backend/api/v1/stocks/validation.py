@@ -5,7 +5,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Dict, Any
+from math import isfinite
+from typing import Dict, Any, Iterable, Optional
 
 from app.dependencies import (
     get_database_session,
@@ -20,6 +21,38 @@ from domain.services.stock_service import StockService
 from domain.market_data.daily_prices import fetch_daily_prices
 
 router = APIRouter()
+
+
+def _latest_price_payload(prices: Iterable[Any]) -> Optional[Dict[str, Any]]:
+    """Build a JSON-safe latest-price payload from daily price rows."""
+    finite_prices = []
+    for price in prices:
+        if price.close_price is None:
+            continue
+
+        close_price = float(price.close_price)
+        if isfinite(close_price):
+            finite_prices.append((price, close_price))
+
+    if not finite_prices:
+        return None
+
+    latest, close_price = finite_prices[0]
+    change = None
+    change_percent = None
+    if len(finite_prices) > 1:
+        prev_close = finite_prices[1][1]
+        if prev_close != 0:
+            change = close_price - prev_close
+            change_percent = (change / prev_close) * 100
+
+    return {
+        "close": close_price,
+        "change": change,
+        "change_percent": change_percent,
+        "date": str(latest.date) if latest.date else None,
+        "volume": latest.volume,
+    }
 
 
 @router.post("/validate")
@@ -118,30 +151,11 @@ async def ensure_stock_exists(
 
             stock_data = StockResponse.model_validate(existing_stock).model_dump()
 
-            prices = await fetch_daily_prices(db, existing_stock.id, limit=2)
+            prices = await fetch_daily_prices(db, existing_stock.id, limit=3)
 
-            if prices and len(prices) > 0:
-                latest = prices[0]
-                close_price = float(latest.close_price) if latest.close_price else None
-
-                # 計算漲跌
-                change = None
-                change_percent = None
-                if close_price and len(prices) > 1:
-                    prev_close = (
-                        float(prices[1].close_price) if prices[1].close_price else None
-                    )
-                    if prev_close and prev_close != 0:
-                        change = close_price - prev_close
-                        change_percent = (change / prev_close) * 100
-
-                stock_data["latest_price"] = {
-                    "close": close_price,
-                    "change": change,
-                    "change_percent": change_percent,
-                    "date": str(latest.date) if latest.date else None,
-                    "volume": latest.volume,
-                }
+            latest_price = _latest_price_payload(prices)
+            if latest_price is not None:
+                stock_data["latest_price"] = latest_price
 
             return {"exists": True, "created": False, "stock": stock_data}
 
@@ -180,30 +194,11 @@ async def ensure_stock_exists(
 
         stock_data = StockResponse.model_validate(new_stock).model_dump()
 
-        prices = await fetch_daily_prices(db, new_stock.id, limit=2)
+        prices = await fetch_daily_prices(db, new_stock.id, limit=3)
 
-        if prices and len(prices) > 0:
-            latest = prices[0]
-            close_price = float(latest.close_price) if latest.close_price else None
-
-            # 計算漲跌
-            change = None
-            change_percent = None
-            if close_price and len(prices) > 1:
-                prev_close = (
-                    float(prices[1].close_price) if prices[1].close_price else None
-                )
-                if prev_close and prev_close != 0:
-                    change = close_price - prev_close
-                    change_percent = (change / prev_close) * 100
-
-            stock_data["latest_price"] = {
-                "close": close_price,
-                "change": change,
-                "change_percent": change_percent,
-                "date": str(latest.date) if latest.date else None,
-                "volume": latest.volume,
-            }
+        latest_price = _latest_price_payload(prices)
+        if latest_price is not None:
+            stock_data["latest_price"] = latest_price
 
         return {"exists": False, "created": True, "stock": stock_data}
 

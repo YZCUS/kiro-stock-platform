@@ -13,6 +13,7 @@ from domain.market_data.daily_prices import (
     DailyPriceBar,
     fetch_daily_prices,
     fetch_latest_daily_price,
+    has_valid_ohlc,
 )
 from domain.models.market_data_bar import MarketDataBar
 from domain.models.stock import Stock
@@ -101,7 +102,7 @@ class DailyPriceRepository(IDailyPriceRepository):
             high_price = data.get("high_price")
             low_price = data.get("low_price")
             close_price = data.get("close_price")
-            if not all([open_price, high_price, low_price, close_price]):
+            if not has_valid_ohlc(data):
                 continue
 
             bar_date = data["date"]
@@ -161,14 +162,19 @@ class DailyPriceRepository(IDailyPriceRepository):
         await db.execute(stmt)
         await db.commit()
 
-        dates = [data["date"] for data in price_data]
+        dates_by_stock: dict[int, set[date]] = {}
+        for bar in bars:
+            dates_by_stock.setdefault(bar["stock_id"], set()).add(
+                bar["timestamp"].date()
+            )
+
+        accepted_keys = {
+            (stock_id, bar_date)
+            for stock_id, stock_dates in dates_by_stock.items()
+            for bar_date in stock_dates
+        }
         created: list[DailyPriceBar] = []
-        for stock_id in stock_ids:
-            stock_dates = [
-                data["date"] for data in price_data if data["stock_id"] == stock_id
-            ]
-            if not stock_dates:
-                continue
+        for stock_id, stock_dates in dates_by_stock.items():
             created.extend(
                 await fetch_daily_prices(
                     db,
@@ -178,7 +184,9 @@ class DailyPriceRepository(IDailyPriceRepository):
                     limit=len(stock_dates),
                 )
             )
-        return [price for price in created if price.date in dates]
+        return [
+            price for price in created if (price.stock_id, price.date) in accepted_keys
+        ]
 
     @staticmethod
     def _canonical_source_name(source: str) -> str:

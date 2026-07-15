@@ -1,36 +1,42 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
-import { useAppDispatch } from '@/store';
-import { loginSuccess, setAuthLoading, setAuthError } from '@/store/slices/authSlice';
-import { login } from '@/services/authApi';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useAppDispatch } from "@/store";
+import {
+  loginSuccess,
+  setAuthLoading,
+  setAuthError,
+} from "@/store/slices/authSlice";
+import { login } from "@/services/authApi";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { getSafeRedirectPath } from "@/lib/authRedirect";
+import { getApiErrorMessage } from "@/lib/apiError";
 
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const dispatch = useAppDispatch();
   const [formData, setFormData] = useState({
-    username: '',
-    password: '',
+    username: "",
+    password: "",
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [redirectPath, setRedirectPath] = useState('/');
-
-  // 獲取 redirect 參數
-  useEffect(() => {
-    const redirect = searchParams.get('redirect');
-    if (redirect) {
-      setRedirectPath(redirect);
-    }
-  }, [searchParams]);
+  const redirect = searchParams.get("redirect");
+  const redirectPath = getSafeRedirectPath(redirect);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,14 +46,15 @@ export default function LoginPage() {
 
     try {
       const response = await login(formData);
-      dispatch(loginSuccess({
-        user: response.user,
-        token: response.access_token,
-      }));
+      dispatch(
+        loginSuccess({
+          user: response.user,
+          token: response.access_token,
+        }),
+      );
       router.push(redirectPath);
     } catch (err: unknown) {
-      const apiError = err as { response?: { data?: { detail?: string } } };
-      const errorMsg = apiError.response?.data?.detail || '登入失敗，請檢查您的帳號密碼';
+      const errorMsg = getApiErrorMessage(err, "登入失敗，請檢查您的帳號密碼");
       setError(errorMsg);
       dispatch(setAuthError(errorMsg));
     } finally {
@@ -57,13 +64,13 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50/60 p-4">
-      <Card className="w-full max-w-md rounded-lg shadow-sm">
+    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-background p-4 sm:p-8">
+      <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">登入</CardTitle>
-          <CardDescription>
-            輸入您的帳號密碼以登入股票分析平台
-          </CardDescription>
+          <CardTitle className="text-2xl font-semibold tracking-tight">
+            登入投資工作台
+          </CardTitle>
+          <CardDescription>輸入您的帳號密碼以登入股票分析平台</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -79,9 +86,12 @@ export default function LoginPage() {
                 type="text"
                 placeholder="username@example.com"
                 value={formData.username}
-                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, username: e.target.value })
+                }
                 required
                 disabled={loading}
+                autoComplete="username"
               />
             </div>
             <div className="space-y-2">
@@ -91,20 +101,26 @@ export default function LoginPage() {
                 type="password"
                 placeholder="••••••••"
                 value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, password: e.target.value })
+                }
                 required
                 disabled={loading}
+                autoComplete="current-password"
               />
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? '登入中...' : '登入'}
+              {loading ? "登入中..." : "登入"}
             </Button>
           </form>
         </CardContent>
         <CardFooter className="flex flex-col space-y-2">
           <div className="text-sm text-muted-foreground text-center">
-            還沒有帳號？{' '}
-            <Link href="/register" className="text-primary hover:underline font-medium">
+            還沒有帳號？{" "}
+            <Link
+              href={`/register?redirect=${encodeURIComponent(redirectPath)}`}
+              className="font-medium text-primary hover:underline"
+            >
               立即註冊
             </Link>
           </div>

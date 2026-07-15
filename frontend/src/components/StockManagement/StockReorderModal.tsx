@@ -1,11 +1,12 @@
 /**
  * 清單內股票排序模態窗口
  */
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { Stock } from '@/types';
-import { GripVertical, X } from 'lucide-react';
+import React, { useState, useEffect, useId } from "react";
+import { Stock } from "@/types";
+import { ChevronDown, ChevronUp, GripVertical, X } from "lucide-react";
+import { useDialogA11y } from "@/hooks/useDialogA11y";
 
 interface StockReorderModalProps {
   isOpen: boolean;
@@ -18,11 +19,13 @@ export default function StockReorderModal({
   isOpen,
   onClose,
   stocks,
-  onSave
+  onSave,
 }: StockReorderModalProps) {
   const [orderedStocks, setOrderedStocks] = useState<Stock[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const titleId = useId();
+  const dialogRef = useDialogA11y(isOpen, onClose);
 
   // 當 modal 打開或 stocks 變化時，重置排序
   useEffect(() => {
@@ -56,13 +59,25 @@ export default function StockReorderModal({
     setDraggedIndex(null);
   };
 
+  const moveStock = (index: number, direction: -1 | 1) => {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= orderedStocks.length) return;
+
+    const nextStocks = [...orderedStocks];
+    [nextStocks[index], nextStocks[targetIndex]] = [
+      nextStocks[targetIndex],
+      nextStocks[index],
+    ];
+    setOrderedStocks(nextStocks);
+  };
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
       await onSave(orderedStocks);
       onClose();
     } catch (error) {
-      console.error('儲存排序失敗:', error);
+      console.error("儲存排序失敗:", error);
     } finally {
       setIsSaving(false);
     }
@@ -72,19 +87,29 @@ export default function StockReorderModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md animate-scale-in max-h-[80vh] flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="bg-white rounded-lg p-6 w-full max-w-md animate-scale-in max-h-[80vh] flex flex-col"
+      >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium text-gray-900">調整股票順序</h3>
+          <h3 id={titleId} className="text-lg font-medium text-gray-900">
+            調整股票順序
+          </h3>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600"
+            aria-label="關閉"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <p className="text-sm text-gray-600 mb-4">
-          拖動股票以調整顯示順序
+          拖動股票，或使用上下按鈕調整顯示順序
         </p>
 
         <div className="space-y-2 mb-6 overflow-y-auto flex-1">
@@ -96,7 +121,7 @@ export default function StockReorderModal({
               onDragOver={(e) => handleDragOver(e, index)}
               onDragEnd={handleDragEnd}
               className={`flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-md cursor-move hover:bg-gray-100 transition-colors ${
-                draggedIndex === index ? 'opacity-50' : ''
+                draggedIndex === index ? "opacity-50" : ""
               }`}
             >
               <GripVertical className="w-5 h-5 text-gray-400 flex-shrink-0" />
@@ -105,21 +130,41 @@ export default function StockReorderModal({
                   <span className="font-medium text-gray-900">
                     {stock.symbol}
                   </span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    stock.market === 'TW'
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-blue-100 text-blue-700'
-                  }`}>
-                    {stock.market === 'TW' ? '台股' : '美股'}
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full ${
+                      stock.market === "TW"
+                        ? "bg-green-100 text-green-700"
+                        : "bg-blue-100 text-blue-700"
+                    }`}
+                  >
+                    {stock.market === "TW" ? "台股" : "美股"}
                   </span>
                 </div>
                 <span className="text-sm text-gray-500 truncate block">
                   {stock.name || stock.symbol}
                 </span>
               </div>
-              <span className="text-sm text-gray-400 flex-shrink-0">
-                #{index + 1}
-              </span>
+              <div className="flex flex-shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => moveStock(index, -1)}
+                  disabled={index === 0}
+                  aria-label={`將 ${stock.symbol} 上移`}
+                  className="rounded p-1 text-gray-500 hover:bg-white hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-30"
+                >
+                  <ChevronUp className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => moveStock(index, 1)}
+                  disabled={index === orderedStocks.length - 1}
+                  aria-label={`將 ${stock.symbol} 下移`}
+                  className="rounded p-1 text-gray-500 hover:bg-white hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-30"
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </button>
+                <span className="ml-1 text-sm text-gray-400">#{index + 1}</span>
+              </div>
             </div>
           ))}
         </div>
@@ -140,13 +185,25 @@ export default function StockReorderModal({
             {isSaving ? (
               <>
                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="none"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
                 </svg>
                 儲存中...
               </>
             ) : (
-              '儲存'
+              "儲存"
             )}
           </button>
         </div>

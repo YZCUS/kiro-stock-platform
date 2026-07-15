@@ -1,10 +1,11 @@
 /**
  * 確認對話框組件
  */
-'use client';
+"use client";
 
-import React from 'react';
-import { Button } from './button';
+import React, { useId } from "react";
+import { Button } from "./button";
+import { useDialogA11y } from "@/hooks/useDialogA11y";
 
 export interface ConfirmDialogProps {
   isOpen: boolean;
@@ -12,7 +13,7 @@ export interface ConfirmDialogProps {
   message: string;
   confirmText?: string;
   cancelText?: string;
-  type?: 'danger' | 'warning' | 'info';
+  type?: "danger" | "warning" | "info";
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -21,40 +22,53 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   isOpen,
   title,
   message,
-  confirmText = '確認',
-  cancelText = '取消',
-  type = 'danger',
+  confirmText = "確認",
+  cancelText = "取消",
+  type = "danger",
   onConfirm,
   onCancel,
 }) => {
+  const titleId = useId();
+  const messageId = useId();
+  const dialogRef = useDialogA11y(isOpen, onCancel);
+
   if (!isOpen) return null;
 
   const iconColor = {
-    danger: 'text-red-600',
-    warning: 'text-yellow-600',
-    info: 'text-blue-600',
+    danger: "text-red-600",
+    warning: "text-yellow-600",
+    info: "text-blue-600",
   }[type];
 
   const confirmVariant = {
-    danger: 'destructive',
-    warning: 'warning',
-    info: 'default',
-  }[type] as 'destructive' | 'warning' | 'default';
+    danger: "destructive",
+    warning: "warning",
+    info: "default",
+  }[type] as "destructive" | "warning" | "default";
 
   return (
     <div className="fixed inset-0 z-[10000] overflow-y-auto">
       {/* 背景遮罩 */}
       <div
-        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+        className="fixed inset-0 bg-slate-950/45 backdrop-blur-[1px] transition-opacity"
         onClick={onCancel}
-      ></div>
+        aria-hidden="true"
+      />
 
       {/* 對話框 */}
       <div className="flex min-h-full items-center justify-center p-4">
-        <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6 animate-scale-in">
+        <div
+          ref={dialogRef}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          aria-describedby={messageId}
+          tabIndex={-1}
+          className="relative w-full max-w-md animate-scale-in rounded-xl border border-slate-200 bg-white p-6 shadow-xl outline-none"
+        >
           {/* 圖標 */}
           <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
-            {type === 'danger' && (
+            {type === "danger" && (
               <svg
                 className={`h-6 w-6 ${iconColor}`}
                 fill="none"
@@ -69,7 +83,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                 />
               </svg>
             )}
-            {type === 'warning' && (
+            {type === "warning" && (
               <svg
                 className={`h-6 w-6 ${iconColor}`}
                 fill="none"
@@ -84,7 +98,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                 />
               </svg>
             )}
-            {type === 'info' && (
+            {type === "info" && (
               <svg
                 className={`h-6 w-6 ${iconColor}`}
                 fill="none"
@@ -102,20 +116,21 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           </div>
 
           {/* 標題 */}
-          <h3 className="text-lg font-medium text-gray-900 text-center mb-2">
+          <h3
+            id={titleId}
+            className="mb-2 text-center text-lg font-semibold text-slate-950"
+          >
             {title}
           </h3>
 
           {/* 訊息 */}
-          <p className="text-sm text-gray-500 text-center mb-6">{message}</p>
+          <p id={messageId} className="mb-6 text-center text-sm text-slate-600">
+            {message}
+          </p>
 
           {/* 按鈕 */}
           <div className="flex gap-3">
-            <Button
-              variant="outline"
-              onClick={onCancel}
-              className="flex-1"
-            >
+            <Button variant="outline" onClick={onCancel} className="flex-1">
               {cancelText}
             </Button>
             <Button

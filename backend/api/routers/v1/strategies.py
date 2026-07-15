@@ -458,6 +458,16 @@ async def get_user_signals(
         limit=limit,
         offset=offset,
     )
+    total = await signal_service.count_user_signals(
+        db=db,
+        user_id=current_user.id,
+        strategy_type=strategy_type,
+        status=status,
+        direction=direction,
+        stock_id=stock_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
     signal_responses = [
         SignalResponse(
@@ -484,7 +494,7 @@ async def get_user_signals(
         for signal in signals
     ]
 
-    return SignalListResponse(signals=signal_responses, total=len(signal_responses))
+    return SignalListResponse(signals=signal_responses, total=total)
 
 
 @router.get("/signals/statistics", response_model=SignalStatisticsResponse)

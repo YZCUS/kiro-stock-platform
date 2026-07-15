@@ -4,11 +4,12 @@
  */
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useId } from 'react';
 import { useAppDispatch, useAppSelector } from '@/store';
 import { updateStockList, fetchListStocks } from '@/store/slices/stockListSlice';
 import { addToast } from '@/store/slices/uiSlice';
 import { X, GripVertical, Save } from 'lucide-react';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 interface StockListEditModalProps {
   isOpen: boolean;
@@ -30,6 +31,8 @@ export default function StockListEditModal({ isOpen, onClose, list }: StockListE
   const [stocks, setStocks] = useState<any[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const titleId = useId();
+  const dialogRef = useDialogA11y(isOpen, onClose);
 
   // 載入清單中的股票
   useEffect(() => {
@@ -157,18 +160,27 @@ export default function StockListEditModal({ isOpen, onClose, list }: StockListE
         <div
           className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75"
           onClick={onClose}
+          aria-hidden="true"
         />
 
         {/* Modal 內容 */}
-        <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full">
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
+          className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full"
+        >
           {/* 標題列 */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-medium text-gray-900">
+            <h3 id={titleId} className="text-lg font-medium text-gray-900">
               編輯清單
             </h3>
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-gray-500 focus:outline-none"
+              aria-label="關閉"
             >
               <X className="w-5 h-5" />
             </button>

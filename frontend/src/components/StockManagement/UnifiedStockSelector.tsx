@@ -2,36 +2,45 @@
  * 統一的股票選擇器組件
  * 整合清單選擇和視圖模式（清單股票/我的持倉/自選股）
  */
-'use client';
+"use client";
 
-import React, { useState, useEffect, useRef } from 'react';
-import { useAppDispatch, useAppSelector } from '@/store';
+import React, { useState, useEffect, useRef } from "react";
+import { useAppDispatch, useAppSelector } from "@/store";
 import {
   fetchStockLists,
   setCurrentList,
   createStockList,
-  deleteStockList
-} from '@/store/slices/stockListSlice';
-import { addToast } from '@/store/slices/uiSlice';
-import { Plus, ChevronDown, Trash2, Check, Edit2, ArrowUpDown } from 'lucide-react';
-import StockListModal from '../StockList/StockListModal';
-import StockListEditModal from './StockListEditModal';
-import StockListReorderModal from './StockListReorderModal';
-import * as stockListApi from '@/services/stockListApi';
+  deleteStockList,
+} from "@/store/slices/stockListSlice";
+import { addToast } from "@/store/slices/uiSlice";
+import {
+  Plus,
+  ChevronDown,
+  Trash2,
+  Check,
+  Edit2,
+  ArrowUpDown,
+} from "lucide-react";
+import StockListModal from "../StockList/StockListModal";
+import StockListEditModal from "./StockListEditModal";
+import StockListReorderModal from "./StockListReorderModal";
+import * as stockListApi from "@/services/stockListApi";
 
 interface UnifiedStockSelectorProps {
   onListChange?: (listId: number | null) => void;
-  viewMode: 'all' | 'portfolio';
-  onViewModeChange: (mode: 'all' | 'portfolio') => void;
+  viewMode: "all" | "portfolio";
+  onViewModeChange: (mode: "all" | "portfolio") => void;
 }
 
 export default function UnifiedStockSelector({
   onListChange,
   viewMode,
-  onViewModeChange
+  onViewModeChange,
 }: UnifiedStockSelectorProps) {
   const dispatch = useAppDispatch();
-  const { lists, currentList, loading } = useAppSelector((state) => state.stockList);
+  const { lists, currentList, loading } = useAppSelector(
+    (state) => state.stockList,
+  );
   const { isAuthenticated } = useAppSelector((state) => state.auth);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -39,18 +48,25 @@ export default function UnifiedStockSelector({
   const [isReorderModalOpen, setIsReorderModalOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const hasRequestedListsRef = useRef(false);
 
   // 載入清單 - 只要已認證就載入
   useEffect(() => {
-    if (isAuthenticated && lists.length === 0 && !loading) {
-      dispatch(fetchStockLists());
+    if (!isAuthenticated) {
+      hasRequestedListsRef.current = false;
+      return;
     }
-  }, [isAuthenticated, lists.length, loading, dispatch]);
+
+    if (!hasRequestedListsRef.current) {
+      hasRequestedListsRef.current = true;
+      void dispatch(fetchStockLists());
+    }
+  }, [isAuthenticated, dispatch]);
 
   // 設置預設清單
   useEffect(() => {
-    if (lists.length > 0 && !currentList && viewMode === 'all') {
-      const defaultList = lists.find(l => l.is_default) || lists[0];
+    if (lists.length > 0 && !currentList && viewMode === "all") {
+      const defaultList = lists.find((l) => l.is_default) || lists[0];
       dispatch(setCurrentList(defaultList));
       onListChange?.(defaultList.id);
     }
@@ -59,26 +75,29 @@ export default function UnifiedStockSelector({
   // 點擊外部關閉下拉選單
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setIsDropdownOpen(false);
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   const handleSelectList = (listId: number) => {
-    const selectedList = lists.find(l => l.id === listId);
+    const selectedList = lists.find((l) => l.id === listId);
     if (selectedList) {
       dispatch(setCurrentList(selectedList));
       onListChange?.(listId);
-      onViewModeChange('all');
+      onViewModeChange("all");
       setIsDropdownOpen(false);
     }
   };
 
-  const handleSelectViewMode = (mode: 'portfolio') => {
+  const handleSelectViewMode = (mode: "portfolio") => {
     onViewModeChange(mode);
     onListChange?.(null);
     setIsDropdownOpen(false);
@@ -93,11 +112,13 @@ export default function UnifiedStockSelector({
     if (!currentList) return;
 
     if (lists.length === 1) {
-      dispatch(addToast({
-        type: 'warning',
-        title: '無法刪除',
-        message: '至少需要保留一個清單'
-      }));
+      dispatch(
+        addToast({
+          type: "warning",
+          title: "無法刪除",
+          message: "至少需要保留一個清單",
+        }),
+      );
       return;
     }
 
@@ -108,49 +129,60 @@ export default function UnifiedStockSelector({
     try {
       await dispatch(deleteStockList(currentList.id)).unwrap();
 
-      dispatch(addToast({
-        type: 'success',
-        title: '成功',
-        message: '已成功刪除清單'
-      }));
+      dispatch(
+        addToast({
+          type: "success",
+          title: "成功",
+          message: "已成功刪除清單",
+        }),
+      );
 
       // 切換到另一個清單
-      const remainingLists = lists.filter(l => l.id !== currentList.id);
+      const remainingLists = lists.filter((l) => l.id !== currentList.id);
       if (remainingLists.length > 0) {
         const nextList = remainingLists[0];
         dispatch(setCurrentList(nextList));
         onListChange?.(nextList.id);
       }
     } catch (error: any) {
-      dispatch(addToast({
-        type: 'error',
-        title: '錯誤',
-        message: error?.message || error?.toString() || '刪除清單失敗'
-      }));
+      dispatch(
+        addToast({
+          type: "error",
+          title: "錯誤",
+          message: error?.message || error?.toString() || "刪除清單失敗",
+        }),
+      );
     }
   };
 
-  const handleSaveList = async (data: { name: string; description?: string }) => {
+  const handleSaveList = async (data: {
+    name: string;
+    description?: string;
+  }) => {
     try {
       const newList = await dispatch(createStockList(data)).unwrap();
 
-      dispatch(addToast({
-        type: 'success',
-        title: '成功',
-        message: '已成功建立清單'
-      }));
+      dispatch(
+        addToast({
+          type: "success",
+          title: "成功",
+          message: "已成功建立清單",
+        }),
+      );
 
       // 自動切換到新建立的清單
       dispatch(setCurrentList(newList));
       onListChange?.(newList.id);
-      onViewModeChange('all');
+      onViewModeChange("all");
       setIsModalOpen(false);
     } catch (error: any) {
-      dispatch(addToast({
-        type: 'error',
-        title: '錯誤',
-        message: error?.message || error?.toString() || '建立清單失敗'
-      }));
+      dispatch(
+        addToast({
+          type: "error",
+          title: "錯誤",
+          message: error?.message || error?.toString() || "建立清單失敗",
+        }),
+      );
     }
   };
 
@@ -159,7 +191,7 @@ export default function UnifiedStockSelector({
       // 準備排序數據
       const list_orders = reorderedLists.map((list, index) => ({
         id: list.id,
-        sort_order: index
+        sort_order: index,
       }));
 
       // 調用 API
@@ -168,29 +200,33 @@ export default function UnifiedStockSelector({
       // 重新載入清單
       await dispatch(fetchStockLists());
 
-      dispatch(addToast({
-        type: 'success',
-        title: '成功',
-        message: '清單順序已更新'
-      }));
+      dispatch(
+        addToast({
+          type: "success",
+          title: "成功",
+          message: "清單順序已更新",
+        }),
+      );
 
       setIsReorderModalOpen(false);
     } catch (error: any) {
-      dispatch(addToast({
-        type: 'error',
-        title: '錯誤',
-        message: error?.message || error?.toString() || '更新順序失敗'
-      }));
+      dispatch(
+        addToast({
+          type: "error",
+          title: "錯誤",
+          message: error?.message || error?.toString() || "更新順序失敗",
+        }),
+      );
     }
   };
 
   // 獲取當前顯示的標籤
   const getCurrentLabel = () => {
-    if (viewMode === 'portfolio') return '我的持倉';
+    if (viewMode === "portfolio") return "我的持倉";
     if (currentList) {
-      return `${currentList.name} (${currentList.stocks_count})${currentList.is_default ? ' ⭐' : ''}`;
+      return `${currentList.name} (${currentList.stocks_count})${currentList.is_default ? " ⭐" : ""}`;
     }
-    return lists.length === 0 ? '暫無清單' : '請選擇清單';
+    return lists.length === 0 ? "暫無清單" : "請選擇清單";
   };
 
   if (!isAuthenticated) {
@@ -207,9 +243,11 @@ export default function UnifiedStockSelector({
           disabled={loading}
         >
           <span className="truncate">
-            {loading ? '載入中...' : getCurrentLabel()}
+            {loading ? "載入中..." : getCurrentLabel()}
           </span>
-          <ChevronDown className={`w-4 h-4 ml-2 transition-transform ${isDropdownOpen ? 'transform rotate-180' : ''}`} />
+          <ChevronDown
+            className={`w-4 h-4 ml-2 transition-transform ${isDropdownOpen ? "transform rotate-180" : ""}`}
+          />
         </button>
 
         {isDropdownOpen && (
@@ -220,13 +258,15 @@ export default function UnifiedStockSelector({
                 快速視圖
               </div>
               <button
-                onClick={() => handleSelectViewMode('portfolio')}
+                onClick={() => handleSelectViewMode("portfolio")}
                 className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center justify-between ${
-                  viewMode === 'portfolio' ? 'bg-blue-50 text-blue-600' : 'text-gray-700'
+                  viewMode === "portfolio"
+                    ? "bg-blue-50 text-blue-600"
+                    : "text-gray-700"
                 }`}
               >
                 <span>我的持倉</span>
-                {viewMode === 'portfolio' && <Check className="w-4 h-4" />}
+                {viewMode === "portfolio" && <Check className="w-4 h-4" />}
               </button>
             </div>
 
@@ -241,22 +281,23 @@ export default function UnifiedStockSelector({
                     key={list.id}
                     onClick={() => handleSelectList(list.id)}
                     className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center justify-between ${
-                      viewMode === 'all' && currentList?.id === list.id
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'text-gray-900'
+                      viewMode === "all" && currentList?.id === list.id
+                        ? "bg-blue-50 text-blue-600"
+                        : "text-gray-900"
                     }`}
                   >
                     <span className="truncate">
-                      {list.name} ({list.stocks_count}){list.is_default ? ' ⭐' : ''}
+                      {list.name} ({list.stocks_count})
+                      {list.is_default ? " ⭐" : ""}
                     </span>
-                    {viewMode === 'all' && currentList?.id === list.id && (
+                    {viewMode === "all" && currentList?.id === list.id && (
                       <Check className="w-4 h-4 flex-shrink-0 ml-2" />
                     )}
                   </button>
                 ))
               ) : (
                 <div className="py-3 px-3 text-sm text-gray-500 text-center">
-                  {loading ? '載入中...' : '暫無自訂清單'}
+                  {loading ? "載入中..." : "暫無自訂清單"}
                 </div>
               )}
             </div>
@@ -291,7 +332,7 @@ export default function UnifiedStockSelector({
       </div>
 
       {/* 編輯和刪除按鈕 - 只在選擇自訂清單時顯示 */}
-      {viewMode === 'all' && currentList && (
+      {viewMode === "all" && currentList && (
         <>
           <button
             onClick={() => setIsEditModalOpen(true)}

@@ -1,20 +1,22 @@
 /**
  * 信號工作台組件
  */
-'use client';
+"use client";
 
-import Link from 'next/link';
-import React, { useEffect, useMemo, useState } from 'react';
-import { useAppDispatch, useAppSelector } from '@/store';
+import Link from "next/link";
+import React, { useEffect, useMemo, useState } from "react";
+import { useAppDispatch, useAppSelector } from "@/store";
 import {
   fetchSignals,
   updateSignalStatus,
   selectSignals,
   selectSignalsLoading,
-} from '@/store/slices/strategySlice';
-import { addToast } from '@/store/slices/uiSlice';
-import { Button } from '@/components/ui/button';
+} from "@/store/slices/strategySlice";
+import { addToast } from "@/store/slices/uiSlice";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import {
+  AlertCircle,
   Check,
   ChevronDown,
   ChevronRight,
@@ -23,17 +25,18 @@ import {
   RefreshCw,
   Search,
   X,
-} from 'lucide-react';
-import StocksApiService from '@/services/stocksApi';
-import type { PriceData } from '@/types';
+} from "lucide-react";
+import StocksApiService from "@/services/stocksApi";
+import { inferMarketFromSymbol } from "@/lib/finance";
+import type { PriceData } from "@/types";
 import type {
   SignalDirection,
   SignalQueryParams,
   SignalStatus,
   TradingSignal,
-} from '@/types/strategy';
+} from "@/types/strategy";
 
-type StatusUpdate = 'triggered' | 'cancelled';
+type StatusUpdate = "triggered" | "cancelled";
 
 interface SignalGroup {
   key: string;
@@ -50,49 +53,52 @@ interface SignalGroup {
 }
 
 const statusText: Record<SignalStatus, string> = {
-  active: '活躍',
-  triggered: '已觸發',
-  expired: '已過期',
-  cancelled: '已取消',
+  active: "活躍",
+  triggered: "已觸發",
+  expired: "已過期",
+  cancelled: "已取消",
 };
 
 const directionText: Record<SignalDirection, string> = {
-  LONG: '看多',
-  SHORT: '看空',
-  NEUTRAL: '中性',
+  LONG: "看多",
+  SHORT: "看空",
+  NEUTRAL: "中性",
 };
 
 const directionClasses: Record<SignalDirection, string> = {
-  LONG: 'bg-emerald-50 text-emerald-700',
-  SHORT: 'bg-red-50 text-red-700',
-  NEUTRAL: 'bg-gray-100 text-gray-700',
+  LONG: "bg-emerald-50 text-emerald-700",
+  SHORT: "bg-red-50 text-red-700",
+  NEUTRAL: "bg-gray-100 text-gray-700",
 };
 
 const statusClasses: Record<SignalStatus, string> = {
-  active: 'bg-blue-50 text-blue-700',
-  triggered: 'bg-emerald-50 text-emerald-700',
-  expired: 'bg-gray-100 text-gray-600',
-  cancelled: 'bg-red-50 text-red-700',
+  active: "bg-blue-50 text-blue-700",
+  triggered: "bg-emerald-50 text-emerald-700",
+  expired: "bg-gray-100 text-gray-600",
+  cancelled: "bg-red-50 text-red-700",
 };
 
 const formatDate = (value?: string | null) =>
-  value ? new Date(value).toLocaleDateString('zh-TW') : '-';
+  value ? new Date(value).toLocaleDateString("zh-TW") : "-";
 
-const formatPrice = (value: number | undefined | null) =>
-  typeof value === 'number' && Number.isFinite(value)
-    ? `$${value.toFixed(2)}`
-    : '-';
+const formatPrice = (
+  value: number | undefined | null,
+  symbol?: string | null,
+) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? `${inferMarketFromSymbol(symbol || undefined) === "TW" ? "NT$" : "$"}${value.toFixed(2)}`
+    : "-";
 
 const directionValue = (direction: SignalDirection) => {
-  if (direction === 'LONG') return 1;
-  if (direction === 'SHORT') return -1;
+  if (direction === "LONG") return 1;
+  if (direction === "SHORT") return -1;
   return 0;
 };
 
 const getEntryRange = (signal: TradingSignal) => {
   const entryMin = signal.entry_zone?.min ?? signal.entry_min;
   const entryMax = signal.entry_zone?.max ?? signal.entry_max;
-  return `${formatPrice(entryMin)} - ${formatPrice(entryMax)}`;
+  return `${formatPrice(entryMin, signal.stock_symbol)} - ${formatPrice(entryMax, signal.stock_symbol)}`;
 };
 
 const getTakeProfitTargets = (signal: TradingSignal) =>
@@ -107,7 +113,7 @@ const getTimestamp = (value?: string | null) => {
 };
 
 const isExpiredActiveSignal = (signal: TradingSignal) => {
-  if (signal.status !== 'active') return false;
+  if (signal.status !== "active") return false;
   if (signal.is_valid === false) return true;
   if (!signal.valid_until) return false;
 
@@ -120,7 +126,10 @@ const isExpiredActiveSignal = (signal: TradingSignal) => {
 };
 
 const getEffectiveStatus = (signal: TradingSignal): SignalStatus =>
-  isExpiredActiveSignal(signal) ? 'expired' : signal.status;
+  isExpiredActiveSignal(signal) ? "expired" : signal.status;
+
+const getErrorMessage = (error: unknown, fallback: string) =>
+  typeof error === "string" ? error : fallback;
 
 const buildSignalGroups = (signals: TradingSignal[]): SignalGroup[] => {
   const grouped = new Map<string, TradingSignal[]>();
@@ -130,56 +139,71 @@ const buildSignalGroups = (signals: TradingSignal[]): SignalGroup[] => {
     grouped.set(key, [...(grouped.get(key) ?? []), signal]);
   });
 
-  return Array.from(grouped.entries())
-    .map(([key, groupSignals]) => {
-      const sortedSignals = [...groupSignals].sort(sortByLatestDate);
-      const weightedScore =
-        sortedSignals.reduce(
-          (total, signal) =>
-            total + directionValue(signal.direction) * signal.confidence,
-          0
-        ) / Math.max(sortedSignals.length, 1);
-      const dominantDirection: SignalDirection =
-        weightedScore > 5 ? 'LONG' : weightedScore < -5 ? 'SHORT' : 'NEUTRAL';
-      const primarySignal = [...sortedSignals].sort(
-        (a, b) => b.confidence - a.confidence
-      )[0];
+  return Array.from(grouped.entries()).map(([key, groupSignals]) => {
+    const sortedSignals = [...groupSignals].sort(sortByLatestDate);
+    const weightedScore =
+      sortedSignals.reduce(
+        (total, signal) =>
+          total + directionValue(signal.direction) * signal.confidence,
+        0,
+      ) / Math.max(sortedSignals.length, 1);
+    const dominantDirection: SignalDirection =
+      weightedScore > 5 ? "LONG" : weightedScore < -5 ? "SHORT" : "NEUTRAL";
+    const primarySignal = [...sortedSignals].sort(
+      (a, b) => b.confidence - a.confidence,
+    )[0];
 
-      return {
-        key,
-        stockId: primarySignal.stock_id,
-        symbol: primarySignal.stock_symbol || '-',
-        name: primarySignal.stock_name,
-        signals: sortedSignals,
-        latestSignalDate: sortedSignals[0]?.signal_date,
-        latestValidUntil: sortedSignals[0]?.valid_until,
-        dominantDirection,
-        signalStrength: Math.abs(weightedScore),
-        primaryStrategy:
-          primarySignal.strategy_name || primarySignal.strategy_type,
-        primaryHorizon: primarySignal.signal_horizon,
-      };
-    });
+    return {
+      key,
+      stockId: primarySignal.stock_id,
+      symbol: primarySignal.stock_symbol || "-",
+      name: primarySignal.stock_name,
+      signals: sortedSignals,
+      latestSignalDate: sortedSignals[0]?.signal_date,
+      latestValidUntil: sortedSignals[0]?.valid_until,
+      dominantDirection,
+      signalStrength: Math.abs(weightedScore),
+      primaryStrategy:
+        primarySignal.strategy_name || primarySignal.strategy_type,
+      primaryHorizon: primarySignal.signal_horizon,
+    };
+  });
 };
 
 export default function SignalList() {
   const dispatch = useAppDispatch();
   const signals = useAppSelector(selectSignals);
   const loading = useAppSelector(selectSignalsLoading);
+  const signalsTotal = useAppSelector((state) => state.strategy.signalsTotal);
 
   const [filters, setFilters] = useState<SignalQueryParams>({
-    status: 'active',
-    sort_by: 'signal_date',
-    sort_order: 'desc',
+    status: "active",
+    sort_by: "signal_date",
+    sort_order: "desc",
     limit: 100,
   });
   const [showFilters, setShowFilters] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshRevision, setRefreshRevision] = useState(0);
 
   useEffect(() => {
-    dispatch(fetchSignals(filters));
-  }, [dispatch, filters]);
+    let active = true;
+    setLoadError(null);
+    const request = dispatch(fetchSignals(filters));
+
+    request.unwrap().catch((error) => {
+      if (active) {
+        setLoadError(getErrorMessage(error, "無法載入交易信號"));
+      }
+    });
+
+    return () => {
+      active = false;
+      request.abort();
+    };
+  }, [dispatch, filters, refreshRevision]);
 
   const displaySignals = useMemo(
     () =>
@@ -190,12 +214,12 @@ export default function SignalList() {
         if (!filters.status) return true;
         return getEffectiveStatus(signal) === filters.status;
       }),
-    [filters.direction, filters.status, signals]
+    [filters.direction, filters.status, signals],
   );
 
   const signalGroups = useMemo(
     () => buildSignalGroups(displaySignals),
-    [displaySignals]
+    [displaySignals],
   );
 
   const visibleGroups = useMemo(() => {
@@ -209,16 +233,16 @@ export default function SignalList() {
             ...group.signals.map((signal) => signal.strategy_type),
           ]
             .filter(Boolean)
-            .join(' ')
+            .join(" ")
             .toLowerCase();
           return haystack.includes(keyword);
         })
       : signalGroups;
 
-    const direction = filters.sort_order === 'asc' ? 1 : -1;
+    const direction = filters.sort_order === "asc" ? 1 : -1;
 
     return [...filteredGroups].sort((a, b) => {
-      if (filters.sort_by === 'signal_date') {
+      if (filters.sort_by === "signal_date") {
         const dateSort =
           direction *
           (getTimestamp(a.latestSignalDate) - getTimestamp(b.latestSignalDate));
@@ -231,64 +255,80 @@ export default function SignalList() {
   }, [filters.sort_by, filters.sort_order, searchTerm, signalGroups]);
 
   const handleRefresh = () => {
-    dispatch(fetchSignals(filters));
+    setRefreshRevision((revision) => revision + 1);
   };
 
-  const handleUpdateStatus = async (
-    signalId: number,
-    status: StatusUpdate
-  ) => {
+  const handleUpdateStatus = async (signalId: number, status: StatusUpdate) => {
     try {
       await dispatch(
         updateSignalStatus({
           id: signalId,
           data: { status },
-        })
+        }),
       ).unwrap();
 
       dispatch(
         addToast({
-          type: 'success',
-          title: '成功',
-          message: `信號已標記為${status === 'triggered' ? '已觸發' : '已取消'}`,
-        })
+          type: "success",
+          title: "成功",
+          message: `信號已標記為${status === "triggered" ? "已觸發" : "已取消"}`,
+        }),
       );
 
-      dispatch(fetchSignals(filters));
+      setRefreshRevision((revision) => revision + 1);
     } catch (error: unknown) {
       dispatch(
         addToast({
-          type: 'error',
-          title: '錯誤',
-          message: typeof error === 'string' ? error : '更新失敗',
-        })
+          type: "error",
+          title: "錯誤",
+          message: typeof error === "string" ? error : "更新失敗",
+        }),
       );
     }
   };
 
   const handleFilterChange = <K extends keyof SignalQueryParams>(
     key: K,
-    value: SignalQueryParams[K]
+    value: SignalQueryParams[K],
   ) => {
-    setFilters((current) => ({ ...current, [key]: value }));
+    setFilters((current) => ({
+      ...current,
+      [key]: value,
+      ...(key === "offset" ? {} : { offset: 0 }),
+    }));
     setExpandedGroup(null);
   };
 
   const handleStatusQuickFilter = (status?: SignalStatus) => {
-    setFilters((current) => ({ ...current, status }));
+    setFilters((current) => ({ ...current, status, offset: 0 }));
     setExpandedGroup(null);
   };
 
   const handleDirectionQuickFilter = (direction?: SignalDirection) => {
-    setFilters((current) => ({ ...current, direction }));
+    setFilters((current) => ({ ...current, direction, offset: 0 }));
     setExpandedGroup(null);
   };
 
+  const pageSize = filters.limit ?? 100;
+  const currentOffset = filters.offset ?? 0;
+  const currentPage = Math.floor(currentOffset / pageSize) + 1;
+  const totalPages = Math.max(1, Math.ceil(signalsTotal / pageSize));
+
+  const handlePageChange = (page: number) => {
+    const nextPage = Math.min(Math.max(page, 1), totalPages);
+    handleFilterChange("offset", (nextPage - 1) * pageSize);
+  };
+
   return (
-    <section className="space-y-4">
+    <section className="space-y-4" aria-labelledby="signal-list-title">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">交易信號</h2>
+          <h2
+            id="signal-list-title"
+            className="text-lg font-semibold text-gray-950"
+          >
+            交易信號
+          </h2>
           <p className="mt-1 text-sm text-gray-600">
             依股票彙總信號，展開後查看各策略的進場、停損與原因。
           </p>
@@ -298,6 +338,8 @@ export default function SignalList() {
             variant="outline"
             size="sm"
             onClick={() => setShowFilters((value) => !value)}
+            aria-expanded={showFilters}
+            aria-controls="signal-advanced-filters"
           >
             <Filter className="h-4 w-4" />
             過濾器
@@ -308,7 +350,7 @@ export default function SignalList() {
             onClick={handleRefresh}
             disabled={loading}
           >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             刷新
           </Button>
         </div>
@@ -319,17 +361,20 @@ export default function SignalList() {
           <div className="flex flex-col gap-2">
             <div className="flex flex-wrap gap-2">
               {[
-                { label: '活躍', value: 'active' as SignalStatus },
-                { label: '已觸發', value: 'triggered' as SignalStatus },
-                { label: '已過期', value: 'expired' as SignalStatus },
-                { label: '已忽略', value: 'cancelled' as SignalStatus },
-                { label: '全部狀態', value: undefined },
+                { label: "活躍", value: "active" as SignalStatus },
+                { label: "已觸發", value: "triggered" as SignalStatus },
+                { label: "已過期", value: "expired" as SignalStatus },
+                { label: "已忽略", value: "cancelled" as SignalStatus },
+                { label: "全部狀態", value: undefined },
               ].map((item) => (
                 <Button
                   key={item.label}
-                  variant={filters.status === item.value ? 'default' : 'outline'}
+                  variant={
+                    filters.status === item.value ? "default" : "outline"
+                  }
                   size="sm"
                   onClick={() => handleStatusQuickFilter(item.value)}
+                  aria-pressed={filters.status === item.value}
                 >
                   {item.label}
                 </Button>
@@ -337,18 +382,19 @@ export default function SignalList() {
             </div>
             <div className="flex flex-wrap gap-2">
               {[
-                { label: '全部方向', value: undefined },
-                { label: '看多', value: 'LONG' as SignalDirection },
-                { label: '看空', value: 'SHORT' as SignalDirection },
-                { label: '中性', value: 'NEUTRAL' as SignalDirection },
+                { label: "全部方向", value: undefined },
+                { label: "看多", value: "LONG" as SignalDirection },
+                { label: "看空", value: "SHORT" as SignalDirection },
+                { label: "中性", value: "NEUTRAL" as SignalDirection },
               ].map((item) => (
                 <Button
                   key={item.label}
                   variant={
-                    filters.direction === item.value ? 'default' : 'outline'
+                    filters.direction === item.value ? "default" : "outline"
                   }
                   size="sm"
                   onClick={() => handleDirectionQuickFilter(item.value)}
+                  aria-pressed={filters.direction === item.value}
                 >
                   {item.label}
                 </Button>
@@ -359,6 +405,7 @@ export default function SignalList() {
           <div className="relative w-full xl:w-80">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
             <input
+              aria-label="搜尋交易信號"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
               placeholder="搜尋股票、公司或策略"
@@ -368,19 +415,26 @@ export default function SignalList() {
         </div>
 
         {showFilters && (
-          <div className="grid grid-cols-1 gap-4 border-t pt-4 md:grid-cols-4">
+          <div
+            id="signal-advanced-filters"
+            className="grid grid-cols-1 gap-4 border-t pt-4 md:grid-cols-4"
+          >
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
+              <label
+                htmlFor="signal-status-filter"
+                className="mb-1 block text-sm font-medium text-gray-700"
+              >
                 狀態
               </label>
               <select
-                value={filters.status || 'all'}
+                id="signal-status-filter"
+                value={filters.status || "all"}
                 onChange={(event) =>
                   handleFilterChange(
-                    'status',
-                    event.target.value === 'all'
+                    "status",
+                    event.target.value === "all"
                       ? undefined
-                      : (event.target.value as SignalStatus)
+                      : (event.target.value as SignalStatus),
                   )
                 }
                 className="h-9 w-full rounded-md border border-gray-300 px-3 text-sm"
@@ -394,17 +448,21 @@ export default function SignalList() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
+              <label
+                htmlFor="signal-direction-filter"
+                className="mb-1 block text-sm font-medium text-gray-700"
+              >
                 方向
               </label>
               <select
-                value={filters.direction || 'all'}
+                id="signal-direction-filter"
+                value={filters.direction || "all"}
                 onChange={(event) =>
                   handleFilterChange(
-                    'direction',
-                    event.target.value === 'all'
+                    "direction",
+                    event.target.value === "all"
                       ? undefined
-                      : (event.target.value as SignalDirection)
+                      : (event.target.value as SignalDirection),
                   )
                 }
                 className="h-9 w-full rounded-md border border-gray-300 px-3 text-sm"
@@ -417,15 +475,19 @@ export default function SignalList() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
+              <label
+                htmlFor="signal-sort-filter"
+                className="mb-1 block text-sm font-medium text-gray-700"
+              >
                 排序方式
               </label>
               <select
-                value={filters.sort_by || 'signal_date'}
+                id="signal-sort-filter"
+                value={filters.sort_by || "signal_date"}
                 onChange={(event) =>
                   handleFilterChange(
-                    'sort_by',
-                    event.target.value as SignalQueryParams['sort_by']
+                    "sort_by",
+                    event.target.value as SignalQueryParams["sort_by"],
                   )
                 }
                 className="h-9 w-full rounded-md border border-gray-300 px-3 text-sm"
@@ -436,15 +498,19 @@ export default function SignalList() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
+              <label
+                htmlFor="signal-sort-direction"
+                className="mb-1 block text-sm font-medium text-gray-700"
+              >
                 排序方向
               </label>
               <select
-                value={filters.sort_order || 'desc'}
+                id="signal-sort-direction"
+                value={filters.sort_order || "desc"}
                 onChange={(event) =>
                   handleFilterChange(
-                    'sort_order',
-                    event.target.value as 'asc' | 'desc'
+                    "sort_order",
+                    event.target.value as "asc" | "desc",
                   )
                 }
                 className="h-9 w-full rounded-md border border-gray-300 px-3 text-sm"
@@ -457,26 +523,49 @@ export default function SignalList() {
         )}
       </div>
 
+      {loadError && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>{loadError}</span>
+            <Button variant="outline" size="sm" onClick={handleRefresh}>
+              <RefreshCw className="h-4 w-4" />
+              重試
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {loading && signals.length === 0 ? (
-        <div className="rounded-lg border bg-white py-12 text-center">
+        <div
+          className="rounded-lg border bg-white py-12 text-center"
+          role="status"
+        >
           <div className="inline-block h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900" />
           <p className="mt-2 text-gray-600">載入中...</p>
         </div>
-      ) : visibleGroups.length === 0 ? (
+      ) : loadError && signals.length === 0 ? null : visibleGroups.length ===
+        0 ? (
         <div className="rounded-lg border-2 border-dashed bg-gray-50 py-12 text-center">
-          <p className="text-gray-600">目前沒有交易信號</p>
+          <p className="text-gray-700">
+            {signals.length === 0
+              ? "目前沒有交易信號"
+              : "沒有符合搜尋條件的信號"}
+          </p>
           <p className="mt-2 text-sm text-gray-500">
-            請確認篩選條件，或等待策略排程產生新信號。
+            {signals.length === 0
+              ? "等待策略排程產生新信號，或切換其他狀態。"
+              : "請調整搜尋或篩選條件。"}
           </p>
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
           <div className="max-h-[720px] overflow-auto">
             <table className="w-full min-w-[980px] text-sm">
+              <caption className="sr-only">依股票彙總的交易信號</caption>
               <thead className="sticky top-0 z-10 bg-gray-50 text-left text-gray-600 shadow-sm">
                 <tr>
-                  <th className="w-10 px-4 py-3" />
-                  <th className="px-3 py-3 font-medium">股票</th>
+                  <th className="px-4 py-3 font-medium">股票</th>
                   <th className="px-3 py-3 font-medium">方向</th>
                   <th className="px-3 py-3 text-right font-medium">訊號強度</th>
                   <th className="px-3 py-3 text-right font-medium">信號數</th>
@@ -491,26 +580,32 @@ export default function SignalList() {
                   const expanded = expandedGroup === group.key;
                   return (
                     <React.Fragment key={group.key}>
-                      <tr
-                        className="cursor-pointer hover:bg-gray-50"
-                        onClick={() =>
-                          setExpandedGroup(expanded ? null : group.key)
-                        }
-                      >
+                      <tr className="hover:bg-gray-50">
                         <td className="px-4 py-3">
-                          {expanded ? (
-                            <ChevronDown className="h-4 w-4 text-gray-500" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4 text-gray-500" />
-                          )}
-                        </td>
-                        <td className="px-3 py-3">
-                          <div className="font-semibold text-gray-950">
-                            {group.symbol}
-                          </div>
-                          <div className="max-w-[220px] truncate text-xs text-gray-500">
-                            {group.name || '-'}
-                          </div>
+                          <button
+                            type="button"
+                            className="flex min-w-0 items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                            onClick={() =>
+                              setExpandedGroup(expanded ? null : group.key)
+                            }
+                            aria-expanded={expanded}
+                            aria-controls={`signal-details-${group.key}`}
+                            aria-label={`${expanded ? "收合" : "展開"} ${group.symbol} 信號明細`}
+                          >
+                            {expanded ? (
+                              <ChevronDown className="h-4 w-4 shrink-0 text-gray-500" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 shrink-0 text-gray-500" />
+                            )}
+                            <span className="min-w-0">
+                              <span className="block font-semibold text-gray-950">
+                                {group.symbol}
+                              </span>
+                              <span className="block max-w-[220px] truncate text-xs text-gray-500">
+                                {group.name || "-"}
+                              </span>
+                            </span>
+                          </button>
                         </td>
                         <td className="whitespace-nowrap px-3 py-3">
                           <span
@@ -529,7 +624,7 @@ export default function SignalList() {
                           {group.primaryStrategy}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3 text-gray-600">
-                          {group.primaryHorizon || '-'}
+                          {group.primaryHorizon || "-"}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3 text-gray-600">
                           {formatDate(group.latestSignalDate)}
@@ -541,7 +636,11 @@ export default function SignalList() {
 
                       {expanded && (
                         <tr>
-                          <td colSpan={9} className="bg-gray-50 px-4 py-4">
+                          <td
+                            id={`signal-details-${group.key}`}
+                            colSpan={8}
+                            className="bg-gray-50 px-4 py-4"
+                          >
                             <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
                               <section className="rounded-lg border bg-white p-4">
                                 <div className="flex flex-wrap items-end justify-between gap-2">
@@ -583,24 +682,35 @@ export default function SignalList() {
         </div>
       )}
 
-      {signals.length > 0 &&
-        (filters.limit || 100) < 100 &&
-        signals.length >= (filters.limit || 100) && (
-          <div className="pt-2 text-center">
+      {!loadError && signalsTotal > 0 && totalPages > 1 && (
+        <nav
+          className="flex flex-col items-center justify-between gap-3 rounded-lg border bg-white px-4 py-3 sm:flex-row"
+          aria-label="交易信號分頁"
+        >
+          <p className="text-sm text-gray-500">
+            第 {currentPage} / {totalPages} 頁，共{" "}
+            {signalsTotal.toLocaleString()} 個信號
+          </p>
+          <div className="flex gap-2">
             <Button
               variant="outline"
-              onClick={() =>
-                handleFilterChange(
-                  'limit',
-                  Math.min((filters.limit || 100) + 100, 100)
-                )
-              }
-              disabled={loading}
+              size="sm"
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={loading || currentPage <= 1}
             >
-              載入更多
+              上一頁
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={loading || currentPage >= totalPages}
+            >
+              下一頁
             </Button>
           </div>
-        )}
+        </nav>
+      )}
     </section>
   );
 }
@@ -620,9 +730,9 @@ function PricePreviewCard({ group }: { group: SignalGroup }) {
           Array.isArray(data)
             ? [...data].sort(
                 (a, b) =>
-                  new Date(a.date).getTime() - new Date(b.date).getTime()
+                  new Date(a.date).getTime() - new Date(b.date).getTime(),
               )
-            : []
+            : [],
         );
       })
       .catch(() => {
@@ -654,7 +764,9 @@ function PricePreviewCard({ group }: { group: SignalGroup }) {
           <p className="mt-1 text-sm text-gray-500">最近 90 根日線</p>
         </div>
         <Button asChild size="sm" variant="outline">
-          <Link href={`/dashboard?stock=${group.stockId}&source=strategy-signal`}>
+          <Link
+            href={`/dashboard?stock=${group.stockId}&source=strategy-signal`}
+          >
             <ExternalLink className="h-4 w-4" />
             完整圖表
           </Link>
@@ -666,16 +778,16 @@ function PricePreviewCard({ group }: { group: SignalGroup }) {
           <div>
             <p className="text-xs text-gray-500">最新收盤</p>
             <p className="text-xl font-semibold tabular-nums text-gray-950">
-              {formatPrice(lastClose)}
+              {formatPrice(lastClose, group.symbol)}
             </p>
           </div>
           {changePercent !== null && (
             <p
               className={`text-sm font-semibold tabular-nums ${
-                isPositive ? 'text-emerald-600' : 'text-red-600'
+                isPositive ? "text-emerald-600" : "text-red-600"
               }`}
             >
-              {isPositive ? '+' : ''}
+              {isPositive ? "+" : ""}
               {changePercent.toFixed(2)}%
             </p>
           )}
@@ -695,15 +807,21 @@ function PricePreviewCard({ group }: { group: SignalGroup }) {
               aria-label={`${group.symbol} 最近日線預覽`}
             >
               <defs>
-                <linearGradient id={`area-${group.stockId}`} x1="0" x2="0" y1="0" y2="1">
+                <linearGradient
+                  id={`area-${group.stockId}`}
+                  x1="0"
+                  x2="0"
+                  y1="0"
+                  y2="1"
+                >
                   <stop
                     offset="0%"
-                    stopColor={isPositive ? '#10b981' : '#ef4444'}
+                    stopColor={isPositive ? "#10b981" : "#ef4444"}
                     stopOpacity="0.22"
                   />
                   <stop
                     offset="100%"
-                    stopColor={isPositive ? '#10b981' : '#ef4444'}
+                    stopColor={isPositive ? "#10b981" : "#ef4444"}
                     stopOpacity="0"
                   />
                 </linearGradient>
@@ -715,7 +833,7 @@ function PricePreviewCard({ group }: { group: SignalGroup }) {
               <path
                 d={chart.path}
                 fill="none"
-                stroke={isPositive ? '#059669' : '#dc2626'}
+                stroke={isPositive ? "#059669" : "#dc2626"}
                 strokeWidth="2.5"
                 strokeLinecap="round"
               />
@@ -758,7 +876,7 @@ function buildPreviewChart(prices: PriceData[]) {
     .filter((value) => Number.isFinite(value));
 
   if (closes.length < 2) {
-    return { path: '' };
+    return { path: "" };
   }
 
   const min = Math.min(...closes);
@@ -774,7 +892,7 @@ function buildPreviewChart(prices: PriceData[]) {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
 
-  return { path: `M ${points.join(' L ')}` };
+  return { path: `M ${points.join(" L ")}` };
 }
 
 function SignalDetailCard({
@@ -819,14 +937,12 @@ function SignalDetailCard({
         <div className="grid gap-3 text-sm sm:grid-cols-3">
           <div>
             <p className="text-xs text-gray-500">進場區間</p>
-            <p className="font-medium text-gray-950">
-              {getEntryRange(signal)}
-            </p>
+            <p className="font-medium text-gray-950">{getEntryRange(signal)}</p>
           </div>
           <div>
             <p className="text-xs text-gray-500">停損</p>
             <p className="font-medium text-red-600">
-              {formatPrice(signal.stop_loss)}
+              {formatPrice(signal.stop_loss, signal.stock_symbol)}
             </p>
           </div>
           <div>
@@ -840,7 +956,7 @@ function SignalDetailCard({
                     key={`${signal.id}-tp-${index}`}
                     className="rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700"
                   >
-                    TP{index + 1}: {formatPrice(target)}
+                    TP{index + 1}: {formatPrice(target, signal.stock_symbol)}
                   </span>
                 ))
               )}
@@ -855,13 +971,13 @@ function SignalDetailCard({
               {signal.confidence.toFixed(1)}%
             </p>
           </div>
-          {effectiveStatus === 'active' && (
+          {effectiveStatus === "active" && (
             <div className="flex w-full gap-2 xl:w-auto">
               <Button
                 size="sm"
                 variant="successOutline"
                 className="flex-1 xl:flex-none"
-                onClick={() => onUpdateStatus(signal.id, 'triggered')}
+                onClick={() => onUpdateStatus(signal.id, "triggered")}
               >
                 <Check className="h-4 w-4" />
                 已觸發
@@ -870,7 +986,7 @@ function SignalDetailCard({
                 size="sm"
                 variant="destructiveOutline"
                 className="flex-1 xl:flex-none"
-                onClick={() => onUpdateStatus(signal.id, 'cancelled')}
+                onClick={() => onUpdateStatus(signal.id, "cancelled")}
               >
                 <X className="h-4 w-4" />
                 忽略

@@ -8,12 +8,16 @@ const SAME_ORIGIN_URL = 'same-origin';
 export function getApiBaseUrl(): string {
   const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
+  if (typeof window === 'undefined' && process.env.INTERNAL_API_BASE_URL) {
+    return process.env.INTERNAL_API_BASE_URL;
+  }
+
   if (configuredApiUrl === SAME_ORIGIN_URL) {
     if (typeof window !== 'undefined') {
       return window.location.origin;
     }
 
-    return process.env.INTERNAL_API_BASE_URL || DEFAULT_API_BASE_URL;
+    return DEFAULT_API_BASE_URL;
   }
 
   return configuredApiUrl || DEFAULT_API_BASE_URL;

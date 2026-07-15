@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, Optional
 from zoneinfo import ZoneInfo
 
@@ -14,6 +15,49 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from domain.models.market_data_bar import MarketDataBar
 
 GOOD_QUALITY_STATUSES = ("complete", "backfilled", "corrected")
+POSTGRES_NUMERIC_NAN = Decimal("NaN")
+OHLC_ATTRIBUTES = ("open_price", "high_price", "low_price", "close_price")
+
+
+def is_valid_ohlc_value(value: Any) -> bool:
+    """Return whether a value is a finite, positive market price."""
+    if value is None:
+        return False
+
+    try:
+        numeric_value = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+
+    return numeric_value.is_finite() and numeric_value > 0
+
+
+def has_valid_ohlc(bar: Any) -> bool:
+    """Return whether all OHLC fields on a bar are safe for public reads."""
+    if isinstance(bar, Mapping):
+        return all(
+            is_valid_ohlc_value(bar.get(attribute)) for attribute in OHLC_ATTRIBUTES
+        )
+
+    return all(
+        is_valid_ohlc_value(getattr(bar, attribute, None))
+        for attribute in OHLC_ATTRIBUTES
+    )
+
+
+def valid_ohlc_filters() -> list[Any]:
+    """Build SQL filters that reject invalid OHLC before ranking and limiting."""
+    filters: list[Any] = []
+    for attribute in OHLC_ATTRIBUTES:
+        column = getattr(MarketDataBar, attribute)
+        filters.extend(
+            (
+                column.is_not(None),
+                column > 0,
+                column != POSTGRES_NUMERIC_NAN,
+            )
+        )
+    return filters
 
 
 @dataclass
@@ -143,7 +187,7 @@ def _daily_filters(
     bar_date = market_bar_date_expr()
     filters = [
         MarketDataBar.timeframe == "1d",
-        MarketDataBar.close_price.is_not(None),
+        *valid_ohlc_filters(),
     ]
     if stock_id is not None:
         filters.append(MarketDataBar.stock_id == stock_id)
@@ -180,7 +224,11 @@ async def fetch_daily_prices(
         .order_by(order_by)
         .limit(limit)
     )
-    return [daily_price_from_bar(bar, bar_date) for bar, bar_date in result.all()]
+    return [
+        daily_price_from_bar(bar, bar_date)
+        for bar, bar_date in result.all()
+        if has_valid_ohlc(bar)
+    ]
 
 
 async def fetch_latest_daily_price(
@@ -235,5 +283,7 @@ async def fetch_latest_daily_price_rows_by_stock(
 
     prices_by_stock: dict[int, list[dict[str, Any]]] = {}
     for row in result.mappings().all():
+        if not is_valid_ohlc_value(row["close_price"]):
+            continue
         prices_by_stock.setdefault(row["stock_id"], []).append(dict(row))
     return prices_by_stock

@@ -1,14 +1,24 @@
 /**
  * 即時交易信號組件
  */
-'use client';
+"use client";
 
-import React, { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
-import { useSystemNotifications } from '../../hooks/useWebSocket';
-import { useMarketStream } from '../../hooks/useMarketStream';
-import { getSignals } from '@/services/strategyApi';
-import type { TradingSignal } from '@/types/strategy';
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { AlertCircle, RefreshCw, X } from "lucide-react";
+import { useSystemNotifications } from "../../hooks/useWebSocket";
+import { useMarketStream } from "../../hooks/useMarketStream";
+import { getSignals } from "@/services/strategyApi";
+import type { TradingSignal } from "@/types/strategy";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 interface RealtimeSignalsProps {
   stockId?: number | null;
@@ -17,68 +27,70 @@ interface RealtimeSignalsProps {
   enabled?: boolean;
 }
 
-const RealtimeSignals: React.FC<RealtimeSignalsProps> = ({
+function RealtimeSignals({
   stockId,
   symbol,
   market,
   enabled = true,
-}) => {
-  const { notifications, clearNotification } = useSystemNotifications();
-  const { signal: intradaySignal, status: streamStatus } = useMarketStream(
-    market,
-    symbol,
-    enabled && Boolean(market && symbol)
-  );
+}: RealtimeSignalsProps) {
+  const { notifications, clearNotification, clearAllNotifications } =
+    useSystemNotifications();
+  const {
+    signal: intradaySignal,
+    status: streamStatus,
+    error: streamError,
+  } = useMarketStream(market, symbol, enabled && Boolean(market && symbol));
   const [signals, setSignals] = useState<TradingSignal[]>([]);
   const [intradaySignals, setIntradaySignals] = useState<TradingSignal[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [requestVersion, setRequestVersion] = useState(0);
 
-  // 格式化時間
   const formatTime = (dateString: string | Date | null | undefined) => {
-    if (!dateString) return '-';
-    const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
-    return date.toLocaleTimeString('zh-TW', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
+    if (!dateString) return "-";
+    const date =
+      typeof dateString === "string" ? new Date(dateString) : dateString;
+    return date.toLocaleTimeString("zh-TW", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
     });
   };
 
   const formatDate = (dateString?: string | null) => {
-    if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString('zh-TW');
+    if (!dateString) return "-";
+    return new Date(dateString).toLocaleDateString("zh-TW");
   };
 
   const formatPrice = (value?: number | null) =>
-    typeof value === 'number' && Number.isFinite(value)
-      ? `$${value.toFixed(2)}`
-      : '-';
+    typeof value === "number" && Number.isFinite(value)
+      ? `${market === "TW" ? "NT$" : "$"}${value.toFixed(2)}`
+      : "-";
 
   const formatConfidence = (value: number) => {
     const percent = value <= 1 ? value * 100 : value;
     return `${percent.toFixed(1)}%`;
   };
 
-  // 獲取方向顏色
-  const getDirectionColor = (direction: TradingSignal['direction']) => {
+  const getDirectionVariant = (direction: TradingSignal["direction"]) => {
     switch (direction) {
-      case 'LONG':
-        return 'text-green-700 bg-green-50 border-green-200';
-      case 'SHORT':
-        return 'text-red-700 bg-red-50 border-red-200';
+      case "LONG":
+        return "success" as const;
+      case "SHORT":
+        return "destructive" as const;
       default:
-        return 'text-gray-700 bg-gray-50 border-gray-200';
+        return "secondary" as const;
     }
   };
 
-  const getDirectionText = (direction: TradingSignal['direction']) => {
+  const getDirectionText = (direction: TradingSignal["direction"]) => {
     switch (direction) {
-      case 'LONG':
-        return '看多';
-      case 'SHORT':
-        return '看空';
+      case "LONG":
+        return "看多";
+      case "SHORT":
+        return "看空";
       default:
-        return '中性';
+        return "中性";
     }
   };
 
@@ -87,22 +99,29 @@ const RealtimeSignals: React.FC<RealtimeSignalsProps> = ({
 
     if (!enabled || !stockId) {
       setSignals([]);
+      setLoading(false);
+      setError(null);
       return;
     }
 
+    setSignals([]);
     setLoading(true);
+    setError(null);
     getSignals({
-      status: 'active',
+      status: "active",
       stock_id: stockId,
-      sort_by: 'signal_date',
-      sort_order: 'desc',
+      sort_by: "signal_date",
+      sort_order: "desc",
       limit: 5,
     })
       .then((response) => {
         if (!cancelled) setSignals(response.signals);
       })
       .catch(() => {
-        if (!cancelled) setSignals([]);
+        if (!cancelled) {
+          setSignals([]);
+          setError("無法取得策略信號，請稍後重試。");
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -111,10 +130,15 @@ const RealtimeSignals: React.FC<RealtimeSignalsProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [enabled, stockId]);
+  }, [enabled, requestVersion, stockId]);
 
   useEffect(() => {
-    if (!intradaySignal || !stockId) return;
+    setIntradaySignals([]);
+  }, [market, stockId, symbol]);
+
+  useEffect(() => {
+    if (!intradaySignal || !stockId || intradaySignal.stock_id !== stockId)
+      return;
     setIntradaySignals((current) => {
       if (current.some((signal) => signal.id === intradaySignal.id)) {
         return current;
@@ -123,79 +147,120 @@ const RealtimeSignals: React.FC<RealtimeSignalsProps> = ({
     });
   }, [intradaySignal, stockId]);
 
+  const streamLabel =
+    streamStatus === "connected"
+      ? "串流中"
+      : streamStatus === "connecting"
+        ? "連線中"
+        : streamStatus === "error" || streamStatus === "disconnected"
+          ? "串流中斷"
+          : "等待";
+
+  const streamVariant =
+    streamStatus === "connected"
+      ? "success"
+      : streamStatus === "error" || streamStatus === "disconnected"
+        ? "destructive"
+        : "secondary";
+
   return (
-    <div className="space-y-6">
-      {/* 系統通知 */}
+    <div className="space-y-5">
       {notifications.length > 0 && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-medium text-blue-900">系統通知</h3>
-            <button
-              onClick={() => notifications.forEach(n => clearNotification(n.id))}
-              className="text-xs text-blue-600 hover:text-blue-800"
+        <Card role="region" aria-labelledby="system-notifications-title">
+          <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-border p-4">
+            <div>
+              <CardTitle id="system-notifications-title" className="text-sm">
+                系統通知
+              </CardTitle>
+              <CardDescription className="mt-1 text-xs">
+                最新 {Math.min(notifications.length, 3)} 則平台事件
+              </CardDescription>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={clearAllNotifications}
             >
               清除全部
-            </button>
-          </div>
-          <div className="space-y-2">
+            </Button>
+          </CardHeader>
+          <CardContent
+            className="divide-y divide-border p-0"
+            aria-live="polite"
+          >
             {notifications.slice(0, 3).map((notification) => (
               <div
                 key={notification.id}
-                className="flex items-center justify-between bg-white rounded p-2"
+                className="flex items-start gap-3 px-4 py-3"
               >
-                <div className="flex-1">
-                  <p className="text-sm text-blue-900">{notification.message}</p>
-                  <p className="text-xs text-blue-600">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm leading-5 text-foreground">
+                    {notification.message}
+                  </p>
+                  <p className="mt-1 text-xs tabular-nums text-muted-foreground">
                     {formatTime(notification.timestamp)}
                   </p>
                 </div>
-                <button
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="iconSm"
                   onClick={() => clearNotification(notification.id)}
-                  className="ml-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-blue-400 hover:bg-blue-50 hover:text-blue-600"
-                  aria-label="清除通知"
+                  aria-label={`清除通知：${notification.message}`}
                 >
-                  <X className="h-4 w-4" />
-                </button>
+                  <X aria-hidden="true" />
+                </Button>
               </div>
             ))}
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       )}
 
-      {/* 日內即時信號 */}
-      <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-        <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-4 py-3">
+      <Card role="region" aria-labelledby="intraday-signals-title">
+        <CardHeader className="flex-row items-start justify-between space-y-0 border-b border-border p-4">
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">日內即時信號</h3>
-            <p className="mt-1 text-xs text-gray-500">
-              由 5m K 即時串流產生，偏向短線觀察
-            </p>
+            <CardTitle id="intraday-signals-title" className="text-sm">
+              日內即時信號
+            </CardTitle>
+            <CardDescription className="mt-1 text-xs leading-5">
+              由 5 分鐘 K 線串流產生，供短線觀察
+            </CardDescription>
           </div>
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-            {streamStatus === 'connected' ? '串流中' : '等待'}
-          </span>
-        </div>
+          <Badge
+            variant={streamVariant}
+            role="status"
+            aria-label={`即時串流狀態：${streamLabel}`}
+          >
+            {streamLabel}
+          </Badge>
+        </CardHeader>
 
-        <div className="p-4">
+        <CardContent className="p-0">
           {!enabled ? (
-            <div className="py-5 text-center text-gray-500">
-              登入後顯示日內信號
-            </div>
+            <PanelState>登入後顯示日內信號</PanelState>
           ) : !stockId ? (
-            <div className="py-5 text-center text-gray-500">
-              選擇股票後顯示日內信號
+            <PanelState>選擇股票後顯示日內信號</PanelState>
+          ) : streamError ? (
+            <div
+              className="flex items-start gap-2 px-4 py-5 text-sm text-destructive"
+              role="alert"
+            >
+              <AlertCircle
+                className="mt-0.5 h-4 w-4 shrink-0"
+                aria-hidden="true"
+              />
+              <span>即時串流暫時中斷，系統會自動重新連線。</span>
             </div>
           ) : intradaySignals.length === 0 ? (
-            <div className="py-5 text-center text-gray-500">
-              等待 5m 即時信號...
-            </div>
+            <PanelState role="status">等待新的 5 分鐘信號</PanelState>
           ) : (
-            <div className="space-y-2">
+            <div className="divide-y divide-border">
               {intradaySignals.map((signal) => (
-                <SignalCard
+                <SignalRow
                   key={signal.id}
                   signal={signal}
-                  getDirectionColor={getDirectionColor}
+                  getDirectionVariant={getDirectionVariant}
                   getDirectionText={getDirectionText}
                   formatConfidence={formatConfidence}
                   formatDate={formatDate}
@@ -204,144 +269,160 @@ const RealtimeSignals: React.FC<RealtimeSignalsProps> = ({
               ))}
             </div>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
-      {/* 策略交易信號 */}
-      <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h3 className="text-sm font-semibold text-gray-900">策略交易信號</h3>
-          <p className="mt-1 text-xs text-gray-500">
-            {symbol ? `${symbol} 的活躍策略信號` : '隨訂閱策略與排程更新'}
-          </p>
-        </div>
+      <Card role="region" aria-labelledby="strategy-signals-title">
+        <CardHeader className="border-b border-border p-4">
+          <CardTitle id="strategy-signals-title" className="text-sm">
+            策略交易信號
+          </CardTitle>
+          <CardDescription className="text-xs leading-5">
+            {symbol ? `${symbol} 的活躍策略信號` : "隨訂閱策略與排程更新"}
+          </CardDescription>
+        </CardHeader>
 
-        <div className="p-4">
+        <CardContent className="p-0" aria-live="polite">
           {!enabled ? (
-            <div className="py-6 text-center text-gray-500">
-              登入後顯示策略信號
-            </div>
+            <PanelState>登入後顯示策略信號</PanelState>
           ) : !stockId ? (
-            <div className="text-center py-6">
-              <div className="text-gray-500">選擇股票後顯示策略信號</div>
-            </div>
+            <PanelState>選擇股票後顯示策略信號</PanelState>
           ) : loading ? (
-            <div className="py-6 text-center text-gray-500">
-              載入策略信號...
+            <PanelState role="status">載入策略信號中</PanelState>
+          ) : error ? (
+            <div
+              className="flex flex-col items-start gap-3 px-4 py-5"
+              role="alert"
+            >
+              <div className="flex items-start gap-2 text-sm text-destructive">
+                <AlertCircle
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                  aria-hidden="true"
+                />
+                <span>{error}</span>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setRequestVersion((version) => version + 1)}
+              >
+                <RefreshCw aria-hidden="true" />
+                重新載入
+              </Button>
             </div>
           ) : signals.length === 0 ? (
-            <div className="py-6 text-center text-gray-500">
-              目前沒有活躍策略信號
-            </div>
+            <PanelState>目前沒有活躍策略信號</PanelState>
           ) : (
-            <div className="space-y-2">
-              {signals.map((signal) => (
-                <SignalCard
-                  key={signal.id}
-                  signal={signal}
-                  getDirectionColor={getDirectionColor}
-                  getDirectionText={getDirectionText}
-                  formatConfidence={formatConfidence}
-                  formatDate={formatDate}
-                  formatPrice={formatPrice}
-                />
-              ))}
-            </div>
+            <>
+              <div className="divide-y divide-border">
+                {signals.map((signal) => (
+                  <SignalRow
+                    key={signal.id}
+                    signal={signal}
+                    getDirectionVariant={getDirectionVariant}
+                    getDirectionText={getDirectionText}
+                    formatConfidence={formatConfidence}
+                    formatDate={formatDate}
+                    formatPrice={formatPrice}
+                  />
+                ))}
+              </div>
+              <p className="border-t border-border px-4 py-3 text-xs leading-5 text-muted-foreground">
+                信號由策略訂閱、手動刷新或排程產生，不是每筆報價即時計算。
+              </p>
+            </>
           )}
-
-          {enabled && stockId && signals.length > 0 && (
-            <p className="mt-3 text-xs text-gray-500">
-              信號由策略訂閱、手動刷新或排程產生，不是每筆報價 tick 即時計算。
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* 添加一些 CSS 動畫 */}
-      <style jsx>{`
-        @keyframes fadeInDown {
-          from {
-            opacity: 0;
-            transform: translate3d(0, -20px, 0);
-          }
-          to {
-            opacity: 1;
-            transform: translate3d(0, 0, 0);
-          }
-        }
-      `}</style>
+        </CardContent>
+      </Card>
     </div>
   );
-};
+}
 
-interface SignalCardProps {
+interface PanelStateProps {
+  children: ReactNode;
+  role?: "status";
+}
+
+function PanelState({ children, role }: PanelStateProps) {
+  return (
+    <div
+      className="px-4 py-8 text-center text-sm text-muted-foreground"
+      role={role}
+    >
+      {children}
+    </div>
+  );
+}
+
+interface SignalRowProps {
   signal: TradingSignal;
-  getDirectionColor: (direction: TradingSignal['direction']) => string;
-  getDirectionText: (direction: TradingSignal['direction']) => string;
+  getDirectionVariant: (
+    direction: TradingSignal["direction"],
+  ) => "success" | "destructive" | "secondary";
+  getDirectionText: (direction: TradingSignal["direction"]) => string;
   formatConfidence: (value: number) => string;
   formatDate: (dateString?: string | null) => string;
   formatPrice: (value?: number | null) => string;
 }
 
-const SignalCard: React.FC<SignalCardProps> = ({
+function SignalRow({
   signal,
-  getDirectionColor,
+  getDirectionVariant,
   getDirectionText,
   formatConfidence,
   formatDate,
   formatPrice,
-}) => (
-  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-    <div className="flex items-start justify-between gap-3">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={`rounded-md border px-2 py-0.5 text-xs font-medium ${getDirectionColor(signal.direction)}`}
-          >
-            {getDirectionText(signal.direction)}
-          </span>
-          {signal.signal_horizon && (
-            <span className="rounded-md bg-white px-2 py-0.5 text-xs font-medium text-gray-600">
-              {signal.signal_horizon}
-            </span>
-          )}
+}: SignalRowProps) {
+  return (
+    <article className="px-4 py-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={getDirectionVariant(signal.direction)}>
+              {getDirectionText(signal.direction)}
+            </Badge>
+            {signal.signal_horizon && (
+              <Badge variant="outline">{signal.signal_horizon}</Badge>
+            )}
+          </div>
+          <p className="mt-2 truncate text-sm font-semibold text-foreground">
+            {signal.strategy_name || signal.strategy_type}
+          </p>
+          <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+            {formatDate(signal.signal_date)} 至 {formatDate(signal.valid_until)}
+          </p>
         </div>
-        <p className="mt-2 truncate text-sm font-semibold text-gray-950">
-          {signal.strategy_name || signal.strategy_type}
-        </p>
-        <p className="mt-1 text-xs text-gray-500">
-          {formatDate(signal.signal_date)} 至 {formatDate(signal.valid_until)}
-        </p>
+        <div className="shrink-0 text-right tabular-nums">
+          <p className="text-xs text-muted-foreground">信心度</p>
+          <p className="mt-0.5 text-sm font-semibold text-foreground">
+            {formatConfidence(signal.confidence)}
+          </p>
+        </div>
       </div>
-      <div className="shrink-0 text-right">
-        <p className="text-xs text-gray-500">強度</p>
-        <p className="font-semibold tabular-nums text-gray-950">
-          {formatConfidence(signal.confidence)}
-        </p>
-      </div>
-    </div>
 
-    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-      <div>
-        <p className="text-gray-500">進場</p>
-        <p className="font-medium text-gray-900">
-          {formatPrice(signal.entry_zone?.min ?? signal.entry_min)}
-        </p>
-      </div>
-      <div>
-        <p className="text-gray-500">停損</p>
-        <p className="font-medium text-red-600">
-          {formatPrice(signal.stop_loss)}
-        </p>
-      </div>
-    </div>
+      <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
+        <div>
+          <dt className="text-muted-foreground">進場</dt>
+          <dd className="mt-0.5 font-medium tabular-nums text-foreground">
+            {formatPrice(signal.entry_zone?.min ?? signal.entry_min)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">停損</dt>
+          <dd className="mt-0.5 font-medium tabular-nums text-destructive">
+            {formatPrice(signal.stop_loss)}
+          </dd>
+        </div>
+      </dl>
 
-    {signal.reason && (
-      <p className="mt-3 border-t border-gray-200 pt-2 text-xs leading-5 text-gray-600">
-        {signal.reason}
-      </p>
-    )}
-  </div>
-);
+      {signal.reason && (
+        <p className="mt-3 text-xs leading-5 text-muted-foreground">
+          {signal.reason}
+        </p>
+      )}
+    </article>
+  );
+}
 
 export default RealtimeSignals;
