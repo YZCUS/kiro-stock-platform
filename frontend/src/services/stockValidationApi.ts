@@ -2,7 +2,7 @@
  * 股號驗證 API 服務
  * 可重用的股票代號驗證模組
  */
-import { ApiService } from '../lib/api';
+import { ApiService } from "../lib/api";
 
 export interface StockValidationResult {
   valid: boolean;
@@ -44,18 +44,16 @@ export interface StockValidationError {
  */
 export async function validateStockSymbol(
   symbol: string,
-  market: 'TW' | 'US'
+  market: "TW" | "US",
 ): Promise<StockValidationResult> {
   try {
     const response = await ApiService.post<StockValidationResult>(
       `/api/v1/stocks/validate?symbol=${encodeURIComponent(symbol)}&market=${market}`,
-      {}
+      {},
     );
     return response;
   } catch (error: any) {
-    throw new Error(
-      error.response?.data?.detail || '驗證股票代號失敗'
-    );
+    throw new Error(error.response?.data?.detail || "驗證股票代號失敗");
   }
 }
 
@@ -65,12 +63,10 @@ export async function validateStockSymbol(
  * @returns 股票基本信息
  */
 export async function validateStockSymbolAuto(
-  symbol: string
+  symbol: string,
 ): Promise<StockValidationResult> {
   const trimmedSymbol = symbol.trim().toUpperCase();
-
-  // 自動判斷市場：數字為台股，英文為美股
-  const market: 'TW' | 'US' = /^\d+$/.test(trimmedSymbol) ? 'TW' : 'US';
+  const market = detectMarket(trimmedSymbol);
 
   return validateStockSymbol(trimmedSymbol, market);
 }
@@ -81,10 +77,14 @@ export async function validateStockSymbolAuto(
  * @param market 市場代碼
  * @returns 格式化後的股票代號
  */
-export function formatStockSymbol(symbol: string, market: 'TW' | 'US'): string {
+export function formatStockSymbol(symbol: string, market: "TW" | "US"): string {
   const trimmedSymbol = symbol.trim().toUpperCase();
 
-  if (market === 'TW' && !trimmedSymbol.endsWith('.TW')) {
+  if (
+    market === "TW" &&
+    !trimmedSymbol.endsWith(".TW") &&
+    !trimmedSymbol.endsWith(".TWO")
+  ) {
     return `${trimmedSymbol}.TW`;
   }
 
@@ -96,9 +96,13 @@ export function formatStockSymbol(symbol: string, market: 'TW' | 'US'): string {
  * @param symbol 股票代號
  * @returns 市場代碼
  */
-export function detectMarket(symbol: string): 'TW' | 'US' {
+export function detectMarket(symbol: string): "TW" | "US" {
   const trimmedSymbol = symbol.trim().toUpperCase();
-  return /^\d+$/.test(trimmedSymbol) ? 'TW' : 'US';
+  return trimmedSymbol.endsWith(".TW") ||
+    trimmedSymbol.endsWith(".TWO") ||
+    /^\d+$/.test(trimmedSymbol)
+    ? "TW"
+    : "US";
 }
 
 /**
@@ -109,19 +113,19 @@ export function detectMarket(symbol: string): 'TW' | 'US' {
  */
 export async function ensureStockExists(
   symbol: string,
-  market: 'TW' | 'US'
+  market: "TW" | "US",
 ): Promise<StockEnsureResult> {
   try {
     const response = await ApiService.post<StockEnsureResult>(
       `/api/v1/stocks/ensure?symbol=${encodeURIComponent(symbol)}&market=${market}`,
-      {}
+      {},
     );
     return response;
   } catch (error: any) {
     // 從後端錯誤響應中提取友善的錯誤訊息
     const detail = error.response?.data?.detail;
 
-    if (detail && typeof detail === 'string') {
+    if (detail && typeof detail === "string") {
       // 後端已經提供了友善的錯誤訊息，直接使用
       throw new Error(detail);
     } else {
@@ -137,7 +141,7 @@ export async function ensureStockExists(
  * @returns 股票完整信息
  */
 export async function ensureStockExistsAuto(
-  symbol: string
+  symbol: string,
 ): Promise<StockEnsureResult> {
   const trimmedSymbol = symbol.trim().toUpperCase();
   const market = detectMarket(trimmedSymbol);

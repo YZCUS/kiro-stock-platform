@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.models.market_data_bar import MarketDataBar
+from domain.market_data.daily_prices import has_valid_ohlc
 from domain.repositories.market_data_bar_repository_interface import (
     IMarketDataBarRepository,
 )
@@ -21,6 +22,7 @@ class MarketDataBarRepository(IMarketDataBarRepository):
     """PostgreSQL-backed repository for multi-timeframe bars."""
 
     async def upsert_batch(self, db: AsyncSession, bars: List[dict]):
+        bars = [bar for bar in bars if has_valid_ohlc(bar)]
         if not bars:
             return []
 
@@ -87,12 +89,11 @@ class MarketDataBarRepository(IMarketDataBarRepository):
         if source is not None:
             filters.append(MarketDataBar.source == source)
 
-        order_by = asc(MarketDataBar.timestamp) if ascending else desc(MarketDataBar.timestamp)
+        order_by = (
+            asc(MarketDataBar.timestamp) if ascending else desc(MarketDataBar.timestamp)
+        )
         result = await db.execute(
-            select(MarketDataBar)
-            .where(and_(*filters))
-            .order_by(order_by)
-            .limit(limit)
+            select(MarketDataBar).where(and_(*filters)).order_by(order_by).limit(limit)
         )
         return list(result.scalars().all())
 

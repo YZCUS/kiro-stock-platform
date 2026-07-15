@@ -1,10 +1,10 @@
 /**
  * 訂閱管理器 - 管理策略訂閱
  */
-'use client';
+"use client";
 
-import React, { useMemo, useState, useEffect } from 'react';
-import { useAppDispatch, useAppSelector } from '@/store';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useAppDispatch, useAppSelector } from "@/store";
 import {
   fetchAvailableStrategies,
   fetchSubscriptions,
@@ -15,20 +15,24 @@ import {
   selectAvailableStrategies,
   selectSubscriptions,
   selectSubscriptionsLoading,
-} from '@/store/slices/strategySlice';
-import { fetchStockLists } from '@/store/slices/stockListSlice';
-import { addToast } from '@/store/slices/uiSlice';
-import { Button } from '@/components/ui/button';
-import { Plus, RefreshCw, Search } from 'lucide-react';
-import SubscriptionCard from './SubscriptionCard';
-import SubscriptionModal from './SubscriptionModal';
+} from "@/store/slices/strategySlice";
+import { fetchStockLists } from "@/store/slices/stockListSlice";
+import { addToast } from "@/store/slices/uiSlice";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { AlertCircle, Plus, RefreshCw, Search } from "lucide-react";
+import SubscriptionCard from "./SubscriptionCard";
+import SubscriptionModal from "./SubscriptionModal";
 import {
   Subscription,
   SubscriptionCreateRequest,
   SubscriptionUpdateRequest,
-} from '@/types/strategy';
+} from "@/types/strategy";
 
-type SubscriptionStatusFilter = 'all' | 'active' | 'inactive';
+type SubscriptionStatusFilter = "all" | "active" | "inactive";
+
+const getErrorMessage = (error: unknown, fallback: string) =>
+  typeof error === "string" ? error : fallback;
 
 export default function SubscriptionManager() {
   const dispatch = useAppDispatch();
@@ -40,9 +44,10 @@ export default function SubscriptionManager() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSubscription, setEditingSubscription] =
     useState<Subscription | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] =
-    useState<SubscriptionStatusFilter>('all');
+    useState<SubscriptionStatusFilter>("all");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const strategyNameByType = useMemo(() => {
     return new Map(
@@ -57,16 +62,16 @@ export default function SubscriptionManager() {
     const query = searchTerm.trim().toLowerCase();
 
     return subscriptions.filter((subscription) => {
-      if (statusFilter === 'active' && !subscription.is_active) return false;
-      if (statusFilter === 'inactive' && subscription.is_active) return false;
+      if (statusFilter === "active" && !subscription.is_active) return false;
+      if (statusFilter === "inactive" && subscription.is_active) return false;
       if (!query) return true;
 
       const parameterText = Object.values(subscription.parameters || {})
         .map((value) => String(value))
-        .join(' ');
+        .join(" ");
       const listText = (subscription.stock_lists || [])
         .map((list) => list.name)
-        .join(' ');
+        .join(" ");
       const searchableText = [
         subscription.strategy_name,
         strategyNameByType.get(subscription.strategy_type),
@@ -75,23 +80,31 @@ export default function SubscriptionManager() {
         listText,
       ]
         .filter(Boolean)
-        .join(' ')
+        .join(" ")
         .toLowerCase();
 
       return searchableText.includes(query);
     });
   }, [searchTerm, statusFilter, strategyNameByType, subscriptions]);
 
-  // 載入數據
+  const loadSubscriptions = useCallback(async () => {
+    setLoadError(null);
+    try {
+      await dispatch(fetchSubscriptions(false)).unwrap();
+    } catch (error) {
+      setLoadError(getErrorMessage(error, "無法載入策略訂閱"));
+    }
+  }, [dispatch]);
+
   useEffect(() => {
     dispatch(fetchAvailableStrategies());
-    dispatch(fetchSubscriptions(false));
     dispatch(fetchStockLists());
-  }, [dispatch]);
+    void loadSubscriptions();
+  }, [dispatch, loadSubscriptions]);
 
   // 刷新訂閱列表
   const handleRefresh = () => {
-    dispatch(fetchSubscriptions(false));
+    void loadSubscriptions();
   };
 
   // 開啟新增 Modal
@@ -122,9 +135,9 @@ export default function SubscriptionManager() {
 
         dispatch(
           addToast({
-            type: 'success',
-            title: '成功',
-            message: '訂閱已更新',
+            type: "success",
+            title: "成功",
+            message: "訂閱已更新",
           }),
         );
       } else {
@@ -135,21 +148,21 @@ export default function SubscriptionManager() {
 
         dispatch(
           addToast({
-            type: 'success',
-            title: '成功',
-            message: '訂閱已建立',
+            type: "success",
+            title: "成功",
+            message: "訂閱已建立",
           }),
         );
       }
 
       // 刷新列表
-      dispatch(fetchSubscriptions(false));
-    } catch (error: any) {
+      await loadSubscriptions();
+    } catch (error: unknown) {
       dispatch(
         addToast({
-          type: 'error',
-          title: '錯誤',
-          message: error || '操作失敗',
+          type: "error",
+          title: "錯誤",
+          message: getErrorMessage(error, "操作失敗"),
         }),
       );
       throw error;
@@ -158,7 +171,7 @@ export default function SubscriptionManager() {
 
   // 刪除訂閱
   const handleDelete = async (subscriptionId: number) => {
-    if (!confirm('確定要刪除此訂閱嗎？')) {
+    if (!confirm("確定要刪除此訂閱嗎？")) {
       return;
     }
 
@@ -167,17 +180,17 @@ export default function SubscriptionManager() {
 
       dispatch(
         addToast({
-          type: 'success',
-          title: '成功',
-          message: '訂閱已刪除',
+          type: "success",
+          title: "成功",
+          message: "訂閱已刪除",
         }),
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       dispatch(
         addToast({
-          type: 'error',
-          title: '錯誤',
-          message: error || '刪除失敗',
+          type: "error",
+          title: "錯誤",
+          message: getErrorMessage(error, "刪除失敗"),
         }),
       );
     }
@@ -190,28 +203,33 @@ export default function SubscriptionManager() {
 
       dispatch(
         addToast({
-          type: 'success',
-          title: '成功',
-          message: '訂閱狀態已更新',
+          type: "success",
+          title: "成功",
+          message: "訂閱狀態已更新",
         }),
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       dispatch(
         addToast({
-          type: 'error',
-          title: '錯誤',
-          message: error || '切換失敗',
+          type: "error",
+          title: "錯誤",
+          message: getErrorMessage(error, "切換失敗"),
         }),
       );
     }
   };
 
   return (
-    <div className="space-y-4">
+    <section className="space-y-4" aria-labelledby="subscription-manager-title">
       {/* Header */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">策略訂閱管理</h2>
+          <h2
+            id="subscription-manager-title"
+            className="text-lg font-semibold text-gray-950"
+          >
+            策略訂閱
+          </h2>
           <p className="mt-1 text-sm text-gray-500">
             {subscriptions.length} 個訂閱，{activeCount} 個啟用
           </p>
@@ -224,7 +242,7 @@ export default function SubscriptionManager() {
             disabled={loading}
           >
             <RefreshCw
-              className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`}
+              className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`}
             />
             刷新
           </Button>
@@ -239,19 +257,19 @@ export default function SubscriptionManager() {
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
             <span>
-              全部{' '}
+              全部{" "}
               <span className="font-semibold text-gray-900">
                 {subscriptions.length}
               </span>
             </span>
             <span>
-              啟用{' '}
+              啟用{" "}
               <span className="font-semibold text-emerald-700">
                 {activeCount}
               </span>
             </span>
             <span>
-              停用{' '}
+              停用{" "}
               <span className="font-semibold text-gray-700">
                 {subscriptions.length - activeCount}
               </span>
@@ -262,6 +280,7 @@ export default function SubscriptionManager() {
             <div className="relative sm:w-64">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
+                aria-label="搜尋策略訂閱"
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder="搜尋策略、模型或清單"
@@ -270,9 +289,9 @@ export default function SubscriptionManager() {
             </div>
             <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-1">
               {[
-                ['all', '全部'],
-                ['active', '啟用'],
-                ['inactive', '停用'],
+                ["all", "全部"],
+                ["active", "啟用"],
+                ["inactive", "停用"],
               ].map(([value, label]) => (
                 <button
                   key={value}
@@ -280,10 +299,11 @@ export default function SubscriptionManager() {
                   onClick={() =>
                     setStatusFilter(value as SubscriptionStatusFilter)
                   }
+                  aria-pressed={statusFilter === value}
                   className={`rounded px-3 py-1.5 text-xs font-medium ${
                     statusFilter === value
-                      ? 'bg-white text-gray-900 shadow-sm'
-                      : 'text-gray-500 hover:text-gray-900'
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-900"
                   }`}
                 >
                   {label}
@@ -294,13 +314,27 @@ export default function SubscriptionManager() {
         </div>
       </div>
 
+      {loadError && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>{loadError}</span>
+            <Button variant="outline" size="sm" onClick={handleRefresh}>
+              <RefreshCw className="h-4 w-4" />
+              重試
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* 訂閱列表 */}
       {loading && subscriptions.length === 0 ? (
         <div className="text-center py-12">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
           <p className="mt-2 text-gray-600">載入中...</p>
         </div>
-      ) : subscriptions.length === 0 ? (
+      ) : loadError &&
+        subscriptions.length === 0 ? null : subscriptions.length === 0 ? (
         <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed">
           <p className="text-gray-600 mb-4">尚未訂閱任何策略</p>
           <Button onClick={handleOpenAdd}>
@@ -344,6 +378,6 @@ export default function SubscriptionManager() {
         subscription={editingSubscription}
         onSubmit={handleSubmit}
       />
-    </div>
+    </section>
   );
 }

@@ -3,7 +3,7 @@
  */
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useId } from 'react';
 import {
   StrategyInfo,
   StrategyParameterMap,
@@ -20,6 +20,7 @@ import { X } from 'lucide-react';
 import type { StockList } from '@/types';
 import { getQlibModels, type QlibModelOption } from '@/services/qlibApi';
 import { cn } from '@/lib/utils';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 interface SubscriptionModalProps {
   isOpen: boolean;
@@ -131,6 +132,8 @@ export default function SubscriptionModal({
   );
   const [mlModelLoading, setMlModelLoading] = useState(false);
   const [mlModelLoadError, setMlModelLoadError] = useState<string | null>(null);
+  const titleId = useId();
+  const dialogRef = useDialogA11y(isOpen, onClose);
 
   // 重置表單當 modal 開啟時
   useEffect(() => {
@@ -491,10 +494,17 @@ export default function SubscriptionModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b">
-          <h2 className="text-xl font-semibold">
+          <h2 id={titleId} className="text-xl font-semibold">
             {subscription ? '編輯訂閱' : '新增策略訂閱'}
           </h2>
           <Button

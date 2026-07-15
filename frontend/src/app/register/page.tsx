@@ -1,28 +1,46 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { useAppDispatch } from '@/store';
-import { loginSuccess, setAuthLoading, setAuthError } from '@/store/slices/authSlice';
-import { register } from '@/services/authApi';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useAppDispatch } from "@/store";
+import {
+  loginSuccess,
+  setAuthLoading,
+  setAuthError,
+} from "@/store/slices/authSlice";
+import { register } from "@/services/authApi";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { getSafeRedirectPath } from "@/lib/authRedirect";
+import { getApiErrorMessage } from "@/lib/apiError";
+
+const usernamePattern = /^[\p{L}\p{N}_-]+$/u;
 
 export default function RegisterPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const dispatch = useAppDispatch();
   const [formData, setFormData] = useState({
-    email: '',
-    username: '',
-    password: '',
-    confirmPassword: '',
+    email: "",
+    username: "",
+    password: "",
+    confirmPassword: "",
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const redirect = searchParams.get("redirect");
+  const redirectPath = getSafeRedirectPath(redirect, "/dashboard");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,13 +48,18 @@ export default function RegisterPage() {
 
     // Validate password match
     if (formData.password !== formData.confirmPassword) {
-      setError('密碼不一致');
+      setError("密碼不一致");
       return;
     }
 
     // Validate password length
     if (formData.password.length < 6) {
-      setError('密碼長度至少需要 6 個字元');
+      setError("密碼長度至少需要 6 個字元");
+      return;
+    }
+
+    if (!usernamePattern.test(formData.username)) {
+      setError("用戶名稱只能包含字母、數字、底線和連字號");
       return;
     }
 
@@ -49,14 +72,15 @@ export default function RegisterPage() {
         username: formData.username,
         password: formData.password,
       });
-      dispatch(loginSuccess({
-        user: response.user,
-        token: response.access_token,
-      }));
-      router.push('/dashboard');
+      dispatch(
+        loginSuccess({
+          user: response.user,
+          token: response.access_token,
+        }),
+      );
+      router.push(redirectPath);
     } catch (err: unknown) {
-      const apiError = err as { response?: { data?: { detail?: string } } };
-      const errorMsg = apiError.response?.data?.detail || '註冊失敗，請稍後再試';
+      const errorMsg = getApiErrorMessage(err, "註冊失敗，請稍後再試");
       setError(errorMsg);
       dispatch(setAuthError(errorMsg));
     } finally {
@@ -66,13 +90,13 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50/60 p-4">
-      <Card className="w-full max-w-md rounded-lg shadow-sm">
+    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-background p-4 sm:p-8">
+      <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">註冊</CardTitle>
-          <CardDescription>
-            建立您的股票分析平台帳號
-          </CardDescription>
+          <CardTitle className="text-2xl font-semibold tracking-tight">
+            建立工作台帳號
+          </CardTitle>
+          <CardDescription>建立您的股票分析平台帳號</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -88,9 +112,12 @@ export default function RegisterPage() {
                 type="email"
                 placeholder="you@example.com"
                 value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, email: e.target.value })
+                }
                 required
                 disabled={loading}
+                autoComplete="email"
               />
             </div>
             <div className="space-y-2">
@@ -100,12 +127,20 @@ export default function RegisterPage() {
                 type="text"
                 placeholder="username"
                 value={formData.username}
-                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, username: e.target.value })
+                }
                 required
                 disabled={loading}
                 minLength={3}
                 maxLength={50}
+                pattern="[\\p{L}\\p{N}_-]+"
+                aria-describedby="username-help"
+                autoComplete="username"
               />
+              <p id="username-help" className="text-xs text-muted-foreground">
+                可使用字母、數字、底線與連字號
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">密碼</Label>
@@ -114,10 +149,13 @@ export default function RegisterPage() {
                 type="password"
                 placeholder="••••••••"
                 value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, password: e.target.value })
+                }
                 required
                 disabled={loading}
                 minLength={6}
+                autoComplete="new-password"
               />
             </div>
             <div className="space-y-2">
@@ -127,21 +165,27 @@ export default function RegisterPage() {
                 type="password"
                 placeholder="••••••••"
                 value={formData.confirmPassword}
-                onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, confirmPassword: e.target.value })
+                }
                 required
                 disabled={loading}
                 minLength={6}
+                autoComplete="new-password"
               />
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? '註冊中...' : '註冊'}
+              {loading ? "註冊中..." : "註冊"}
             </Button>
           </form>
         </CardContent>
         <CardFooter className="flex flex-col space-y-2">
           <div className="text-sm text-muted-foreground text-center">
-            已經有帳號了？{' '}
-            <Link href="/login" className="text-primary hover:underline font-medium">
+            已經有帳號了？{" "}
+            <Link
+              href={`/login?redirect=${encodeURIComponent(redirectPath)}`}
+              className="font-medium text-primary hover:underline"
+            >
               立即登入
             </Link>
           </div>

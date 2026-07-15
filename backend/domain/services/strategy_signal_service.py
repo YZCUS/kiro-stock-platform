@@ -327,6 +327,47 @@ class StrategySignalService:
             return str(params["horizon"])
         return self.default_strategy_horizons.get(subscription.strategy_type, "20d")
 
+    def _build_user_signal_filters(
+        self,
+        user_id: uuid.UUID,
+        strategy_type: Optional[str] = None,
+        status: Optional[str] = None,
+        direction: Optional[str] = None,
+        stock_id: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+    ) -> List[Any]:
+        """Build the shared filters used by signal list and count queries."""
+        filters = [StrategySignal.user_id == user_id]
+
+        if strategy_type:
+            filters.append(StrategySignal.strategy_type == strategy_type)
+
+        if status:
+            filters.append(StrategySignal.status == status)
+            if status == "active":
+                today = date.today()
+                filters.append(
+                    or_(
+                        StrategySignal.valid_until.is_(None),
+                        StrategySignal.valid_until >= today,
+                    )
+                )
+
+        if direction:
+            filters.append(StrategySignal.direction == direction)
+
+        if stock_id:
+            filters.append(StrategySignal.stock_id == stock_id)
+
+        if date_from:
+            filters.append(StrategySignal.signal_date >= date_from)
+
+        if date_to:
+            filters.append(StrategySignal.signal_date <= date_to)
+
+        return filters
+
     async def get_user_signals(
         self,
         db: AsyncSession,
@@ -362,39 +403,22 @@ class StrategySignalService:
         Returns:
             List[StrategySignal]: 信號列表
         """
+        filters = self._build_user_signal_filters(
+            user_id=user_id,
+            strategy_type=strategy_type,
+            status=status,
+            direction=direction,
+            stock_id=stock_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
         # 建立基礎查詢
         query = (
             select(StrategySignal)
-            .filter(StrategySignal.user_id == user_id)
+            .filter(*filters)
             .options(joinedload(StrategySignal.stock))
         )
-
-        # 應用過濾條件
-        if strategy_type:
-            query = query.filter(StrategySignal.strategy_type == strategy_type)
-
-        if status:
-            query = query.filter(StrategySignal.status == status)
-            if status == "active":
-                today = date.today()
-                query = query.filter(
-                    or_(
-                        StrategySignal.valid_until.is_(None),
-                        StrategySignal.valid_until >= today,
-                    )
-                )
-
-        if direction:
-            query = query.filter(StrategySignal.direction == direction)
-
-        if stock_id:
-            query = query.filter(StrategySignal.stock_id == stock_id)
-
-        if date_from:
-            query = query.filter(StrategySignal.signal_date >= date_from)
-
-        if date_to:
-            query = query.filter(StrategySignal.signal_date <= date_to)
 
         # 應用排序
         sort_column = getattr(StrategySignal, sort_by, StrategySignal.signal_date)
@@ -414,6 +438,32 @@ class StrategySignalService:
         signals = result.scalars().unique().all()
 
         return list(signals)
+
+    async def count_user_signals(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        strategy_type: Optional[str] = None,
+        status: Optional[str] = None,
+        direction: Optional[str] = None,
+        stock_id: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+    ) -> int:
+        """Count all matching user signals without pagination."""
+        filters = self._build_user_signal_filters(
+            user_id=user_id,
+            strategy_type=strategy_type,
+            status=status,
+            direction=direction,
+            stock_id=stock_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        result = await db.execute(
+            select(func.count(StrategySignal.id)).filter(*filters)
+        )
+        return int(result.scalar() or 0)
 
     async def update_signal_status(
         self,

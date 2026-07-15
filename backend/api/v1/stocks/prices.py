@@ -23,7 +23,11 @@ from domain.services.data_collection_service import (
     DataCollectionService,
     DataCollectionStatus,
 )
-from domain.market_data.daily_prices import market_bar_date_expr
+from domain.market_data.daily_prices import (
+    has_valid_ohlc,
+    market_bar_date_expr,
+    valid_ohlc_filters,
+)
 from domain.models.market_data_bar import MarketDataBar
 from domain.models.stock import Stock
 from core.internal_auth import (
@@ -62,6 +66,7 @@ async def check_price_data_exists(
         bar_filters = [
             MarketDataBar.timeframe == "1d",
             market_bar_date_expr() == check_date,
+            *valid_ohlc_filters(),
         ]
         if market:
             stock_filters.append(Stock.market == market)
@@ -166,6 +171,7 @@ async def get_stock_prices(
                 .where(
                     MarketDataBar.stock_id == stock_id,
                     MarketDataBar.timeframe == timeframe,
+                    *valid_ohlc_filters(),
                 )
                 .order_by(MarketDataBar.timestamp.desc())
                 .limit(limit)
@@ -176,7 +182,9 @@ async def get_stock_prices(
                 query = query.where(MarketDataBar.timestamp < end_at)
 
             result = await db.execute(query)
-            bars = list(reversed(result.scalars().all()))
+            bars = [
+                bar for bar in reversed(result.scalars().all()) if has_valid_ohlc(bar)
+            ]
             return [
                 PriceDataResponse(
                     date=bar.timestamp,
@@ -460,7 +468,10 @@ async def backfill_missing_prices(
         # 查找所有沒有價格數據的活躍股票
         stocks_with_bars = (
             select(MarketDataBar.stock_id)
-            .where(MarketDataBar.timeframe == "1d")
+            .where(
+                MarketDataBar.timeframe == "1d",
+                *valid_ohlc_filters(),
+            )
             .distinct()
             .subquery()
         )

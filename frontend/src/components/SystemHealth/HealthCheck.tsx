@@ -1,42 +1,33 @@
 /**
  * System Health Check Component
  */
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
-import { CircularLoader } from '../ui/LoadingStates';
-import { Button } from '../ui/button';
+import React, { useState, useEffect } from "react";
+import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
+import { CircularLoader } from "../ui/LoadingStates";
+import { Button } from "../ui/button";
 
 interface HealthCheckStatus {
-  status: 'healthy' | 'unhealthy';
-  timestamp: string;
-  version: string;
-  environment: string;
-  uptime: number;
-  memory: {
-    rss: number;
-    heapTotal: number;
-    heapUsed: number;
-    external: number;
+  status: string;
+  timestamp?: string;
+  version?: string;
+  environment?: string;
+  uptime?: number;
+  memory?: {
+    rss?: number;
+    heapTotal?: number;
+    heapUsed?: number;
+    external?: number;
   };
-  checks: {
-    database: {
+  checks?: Record<
+    string,
+    {
       status: string;
       responseTime?: number;
       error?: string;
-    };
-    api: {
-      status: string;
-      responseTime?: number;
-      error?: string;
-    };
-    websocket: {
-      status: string;
-      responseTime?: number;
-      error?: string;
-    };
-  };
+    }
+  >;
 }
 
 interface HealthCheckProps {
@@ -50,7 +41,9 @@ export const HealthCheck: React.FC<HealthCheckProps> = ({
   refreshInterval = 30000, // 30 seconds
   compact = false,
 }) => {
-  const [healthStatus, setHealthStatus] = useState<HealthCheckStatus | null>(null);
+  const [healthStatus, setHealthStatus] = useState<HealthCheckStatus | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
@@ -58,19 +51,19 @@ export const HealthCheck: React.FC<HealthCheckProps> = ({
   const fetchHealthStatus = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/health');
-
-      if (!response.ok) {
+      const response = await fetch("/api/health");
+      const data = await response.json().catch(() => null);
+      if (!data || typeof data.status !== "string") {
         throw new Error(`Health check failed: ${response.status}`);
       }
-
-      const data = await response.json();
       setHealthStatus(data);
       setError(null);
       setLastChecked(new Date());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch health status');
-      console.error('Health check error:', err);
+      setError(
+        err instanceof Error ? err.message : "Failed to fetch health status",
+      );
+      console.error("Health check error:", err);
     } finally {
       setLoading(false);
     }
@@ -106,44 +99,53 @@ export const HealthCheck: React.FC<HealthCheckProps> = ({
 
   const getStatusColor = (status: string): string => {
     switch (status) {
-      case 'healthy':
-        return 'text-green-600';
-      case 'unhealthy':
-        return 'text-red-600';
+      case "healthy":
+        return "text-success";
+      case "unhealthy":
+        return "text-destructive";
       default:
-        return 'text-yellow-600';
+        return "text-warning";
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'healthy':
+      case "healthy":
         return CheckCircle2;
-      case 'unhealthy':
+      case "unhealthy":
         return XCircle;
       default:
         return AlertTriangle;
     }
   };
 
+  const getStatusLabel = (status: string, system = false) => {
+    if (status === "healthy") return system ? "系統正常" : "正常";
+    if (status === "degraded") return "服務降級";
+    return system ? "系統異常" : "異常";
+  };
+
   if (loading && !healthStatus) {
     return (
       <div className="flex items-center justify-center p-4">
         <CircularLoader size={32} />
-        <span className="ml-2 text-gray-600">檢查系統狀態...</span>
+        <span className="ml-2 text-muted-foreground">檢查系統狀態...</span>
       </div>
     );
   }
 
   if (error) {
-    const ErrorIcon = getStatusIcon('unhealthy');
+    const ErrorIcon = getStatusIcon("unhealthy");
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+      <div
+        className="rounded-lg border border-destructive/20 bg-destructive/5 p-4"
+        role="alert"
+      >
         <div className="flex items-center">
-          <ErrorIcon className="mr-2 h-5 w-5 text-red-600" />
+          <ErrorIcon className="mr-2 h-5 w-5 text-destructive" />
           <div>
-            <h3 className="font-medium text-red-800">健康檢查失敗</h3>
-            <p className="text-red-600 text-sm">{error}</p>
+            <h3 className="font-medium text-destructive">健康檢查失敗</h3>
+            <p className="text-sm text-destructive">{error}</p>
           </div>
         </div>
         <Button
@@ -166,13 +168,17 @@ export const HealthCheck: React.FC<HealthCheckProps> = ({
     const CompactIcon = getStatusIcon(healthStatus.status);
     return (
       <div className="inline-flex items-center space-x-2">
-        <CompactIcon className={`h-4 w-4 ${getStatusColor(healthStatus.status)}`} />
-        <span className={`text-sm font-medium ${getStatusColor(healthStatus.status)}`}>
-          {healthStatus.status === 'healthy' ? '系統正常' : '系統異常'}
+        <CompactIcon
+          className={`h-4 w-4 ${getStatusColor(healthStatus.status)}`}
+        />
+        <span
+          className={`text-sm font-medium ${getStatusColor(healthStatus.status)}`}
+        >
+          {getStatusLabel(healthStatus.status, true)}
         </span>
         {lastChecked && (
-          <span className="text-xs text-gray-500">
-            ({lastChecked.toLocaleTimeString('zh-TW')})
+          <span className="text-xs text-muted-foreground">
+            ({lastChecked.toLocaleTimeString("zh-TW")})
           </span>
         )}
       </div>
@@ -182,79 +188,96 @@ export const HealthCheck: React.FC<HealthCheckProps> = ({
   const StatusIcon = getStatusIcon(healthStatus.status);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="rounded-lg border border-border bg-card p-5 shadow-panel">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-xl font-semibold text-gray-900">系統健康狀態</h2>
+        <h2 className="text-xl font-semibold text-foreground">系統健康狀態</h2>
         <div className="flex flex-wrap items-center gap-3">
-          <div className={`flex items-center gap-2 ${getStatusColor(healthStatus.status)}`}>
+          <div
+            className={`flex items-center gap-2 ${getStatusColor(healthStatus.status)}`}
+          >
             <StatusIcon className="h-5 w-5" />
             <span className="font-medium">
-              {healthStatus.status === 'healthy' ? '系統正常' : '系統異常'}
+              {getStatusLabel(healthStatus.status, true)}
             </span>
           </div>
-          <Button
-            onClick={fetchHealthStatus}
-            disabled={loading}
-            size="sm"
-          >
-            {loading ? '檢查中...' : '重新檢查'}
+          <Button onClick={fetchHealthStatus} disabled={loading} size="sm">
+            {loading ? "檢查中..." : "重新檢查"}
           </Button>
         </div>
       </div>
 
       {/* System Info */}
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-          <div className="text-sm text-gray-600">版本</div>
-          <div className="text-lg font-medium">{healthStatus.version}</div>
-        </div>
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-          <div className="text-sm text-gray-600">環境</div>
-          <div className="text-lg font-medium">{healthStatus.environment}</div>
-        </div>
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-          <div className="text-sm text-gray-600">運行時間</div>
-          <div className="text-lg font-medium">{formatUptime(healthStatus.uptime)}</div>
-        </div>
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-          <div className="text-sm text-gray-600">記憶體使用</div>
+        <div className="rounded-lg border border-border bg-muted/45 p-4">
+          <div className="text-sm text-muted-foreground">版本</div>
           <div className="text-lg font-medium">
-            {formatMemory(healthStatus.memory.heapUsed)} / {formatMemory(healthStatus.memory.heapTotal)}
+            {healthStatus.version || "未提供"}
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-muted/45 p-4">
+          <div className="text-sm text-muted-foreground">環境</div>
+          <div className="text-lg font-medium">
+            {healthStatus.environment || "未提供"}
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-muted/45 p-4">
+          <div className="text-sm text-muted-foreground">前端運行時間</div>
+          <div className="text-lg font-medium">
+            {healthStatus.uptime == null
+              ? "未提供"
+              : formatUptime(healthStatus.uptime)}
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-muted/45 p-4">
+          <div className="text-sm text-muted-foreground">前端記憶體</div>
+          <div className="text-lg font-medium">
+            {healthStatus.memory?.heapUsed == null ||
+            healthStatus.memory?.heapTotal == null
+              ? "未提供"
+              : `${formatMemory(healthStatus.memory.heapUsed)} / ${formatMemory(healthStatus.memory.heapTotal)}`}
           </div>
         </div>
       </div>
 
       {/* Service Checks */}
       <div className="space-y-4">
-        <h3 className="text-lg font-medium text-gray-900">服務狀態</h3>
+        <h3 className="text-lg font-medium text-foreground">服務狀態</h3>
 
-        {Object.entries(healthStatus.checks).map(([service, check]) => {
+        {Object.entries(healthStatus.checks ?? {}).map(([service, check]) => {
           const ServiceIcon = getStatusIcon(check.status);
 
           return (
             <div
               key={service}
-              className="flex items-center justify-between rounded-lg border border-gray-200 p-4"
+              className="flex items-center justify-between rounded-lg border border-border p-4"
             >
               <div className="flex items-center space-x-3">
-                <ServiceIcon className={`h-5 w-5 ${getStatusColor(check.status)}`} />
+                <ServiceIcon
+                  className={`h-5 w-5 ${getStatusColor(check.status)}`}
+                />
                 <div>
-                  <div className="font-medium text-gray-900">
-                    {service === 'database' ? '資料庫' :
-                     service === 'api' ? 'API服務' :
-                     service === 'websocket' ? 'WebSocket' : service}
+                  <div className="font-medium text-foreground">
+                    {service === "database"
+                      ? "資料庫"
+                      : service === "api"
+                        ? "API服務"
+                        : service === "websocket"
+                          ? "WebSocket"
+                          : service}
                   </div>
                   {check.error && (
-                    <div className="text-sm text-red-600">{check.error}</div>
+                    <div className="text-sm text-destructive">
+                      {check.error}
+                    </div>
                   )}
                 </div>
               </div>
               <div className="text-right">
                 <div className={`font-medium ${getStatusColor(check.status)}`}>
-                  {check.status === 'healthy' ? '正常' : '異常'}
+                  {getStatusLabel(check.status)}
                 </div>
-                {check.responseTime && (
-                  <div className="text-sm text-gray-500">
+                {check.responseTime != null && (
+                  <div className="text-sm text-muted-foreground">
                     {check.responseTime}ms
                   </div>
                 )}
@@ -265,8 +288,8 @@ export const HealthCheck: React.FC<HealthCheckProps> = ({
       </div>
 
       {lastChecked && (
-        <div className="mt-6 text-sm text-gray-500 text-center">
-          最後檢查時間: {lastChecked.toLocaleString('zh-TW')}
+        <div className="mt-6 text-center text-sm text-muted-foreground">
+          最後檢查時間: {lastChecked.toLocaleString("zh-TW")}
         </div>
       )}
     </div>

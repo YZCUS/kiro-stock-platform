@@ -81,9 +81,7 @@ class MarketDataValidationService:
         )
         invalid_count = sum(1 for bar in bars if self._has_invalid_ohlcv(bar))
         partial_count = sum(
-            1
-            for bar in bars
-            if bar.quality_status in INCOMPLETE_BAR_STATUSES
+            1 for bar in bars if bar.quality_status in INCOMPLETE_BAR_STATUSES
         )
         partial_timestamps = [
             bar.timestamp
@@ -111,11 +109,18 @@ class MarketDataValidationService:
         )
 
     def _has_invalid_ohlcv(self, bar) -> bool:
-        open_price = Decimal(bar.open_price)
-        high_price = Decimal(bar.high_price)
-        low_price = Decimal(bar.low_price)
-        close_price = Decimal(bar.close_price)
-        volume = int(bar.volume or 0)
+        try:
+            open_price = Decimal(bar.open_price)
+            high_price = Decimal(bar.high_price)
+            low_price = Decimal(bar.low_price)
+            close_price = Decimal(bar.close_price)
+            volume = int(bar.volume or 0)
+        except (ArithmeticError, TypeError, ValueError):
+            return True
+
+        prices = (open_price, high_price, low_price, close_price)
+        if not all(price.is_finite() for price in prices):
+            return True
 
         return (
             open_price <= 0
