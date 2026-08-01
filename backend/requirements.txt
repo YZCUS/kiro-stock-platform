@@ -1,5 +1,5 @@
 # FastAPI 和相關套件
-fastapi>=0.104.1
+fastapi>=0.140.13
 uvicorn[standard]>=0.24.0
 pydantic  # 讓 pip 自動解析與 fastapi 兼容的版本
 pydantic-settings>=2.1.0
